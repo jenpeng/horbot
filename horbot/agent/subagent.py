@@ -126,7 +126,7 @@ class SubagentManager:
             # Update task info status
             if task_id in self._task_info:
                 current_status = self._task_info[task_id].status
-                if current_status not in {"cancelled", "error"}:
+                if current_status == "running":
                     self._task_info[task_id].status = "completed"
 
         bg_task.add_done_callback(_cleanup)
@@ -302,14 +302,18 @@ When you have completed the task, provide a clear summary of your findings or ac
     
     async def cancel_by_session(self, session_key: str) -> int:
         """Cancel all subagents for the given session. Returns count cancelled."""
-        tasks = [self._running_tasks[tid] for tid in self._session_tasks.get(session_key, [])
-                 if tid in self._running_tasks and not self._running_tasks[tid].done()]
-        for t in tasks:
-            t.cancel()
-            # Update task info status
-            for task_id in self._session_tasks.get(session_key, []):
-                if task_id in self._task_info:
-                    self._task_info[task_id].status = "cancelled"
+        task_ids = [
+            tid
+            for tid in self._session_tasks.get(session_key, [])
+            if tid in self._running_tasks and not self._running_tasks[tid].done()
+        ]
+        tasks = [self._running_tasks[tid] for tid in task_ids]
+
+        for task_id, task in zip(task_ids, tasks):
+            task.cancel()
+            if task_id in self._task_info:
+                self._task_info[task_id].status = "cancelled"
+
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         return len(tasks)
@@ -363,6 +367,7 @@ When you have completed the task, provide a clear summary of your findings or ac
     async def cancel_all(self) -> int:
         """Cancel all running subagents. Returns count cancelled."""
         cancelled = 0
+        tasks_to_wait: list[asyncio.Task[None]] = []
         for task_id, task in list(self._running_tasks.items()):
             if not task.done():
                 task.cancel()
@@ -370,10 +375,11 @@ When you have completed the task, provide a clear summary of your findings or ac
                 if task_id in self._task_info:
                     self._task_info[task_id].status = "cancelled"
                 cancelled += 1
+                tasks_to_wait.append(task)
         
         # Wait for all cancelled tasks
         if cancelled > 0:
-            await asyncio.gather(*[t for t in self._running_tasks.values() if t.cancelled()], return_exceptions=True)
+            await asyncio.gather(*tasks_to_wait, return_exceptions=True)
         
         return cancelled
 
