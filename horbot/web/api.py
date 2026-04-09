@@ -3323,28 +3323,33 @@ async def list_chat_sessions():
         # Only show web sessions in the web UI
         if not session_key.startswith("web:"):
             continue
-            
-        session = manager.get(session_key)
-        if session:
-            # Use session title if available, otherwise extract from messages
-            title = session.metadata.get("title", "未命名对话")
-            if title == "未命名对话" and session.messages:
-                # Try to extract title from first user message
-                for msg in session.messages:
-                    if msg.get("role") == "user":
-                        content = msg.get("content", "")
-                        if len(content) > 50:
-                            title = content[:50] + "..."
-                        else:
-                            title = content or "未命名对话"
-                        break
-            
-            enriched_sessions.append({
-                "key": session_key,
-                "title": title,
-                "created_at": session.metadata.get("created_at", session_info.get("created_at", "")),
-                "message_count": len(session.messages)
-            })
+
+        title = session_info.get("title", "未命名对话")
+        message_count = int(session_info.get("message_count", 0) or 0)
+        created_at = session_info.get("created_at", "")
+
+        if title == "未命名对话":
+            session = manager.get(session_key)
+            if session:
+                title = session.metadata.get("title", "未命名对话")
+                if title == "未命名对话" and session.messages:
+                    for msg in session.messages:
+                        if msg.get("role") == "user":
+                            content = msg.get("content", "")
+                            if len(content) > 50:
+                                title = content[:50] + "..."
+                            else:
+                                title = content or "未命名对话"
+                            break
+                created_at = session.metadata.get("created_at", created_at)
+                message_count = len(session.messages)
+
+        enriched_sessions.append({
+            "key": session_key,
+            "title": title,
+            "created_at": created_at,
+            "message_count": message_count,
+        })
     
     # Sort by creation time (newest first)
     enriched_sessions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
