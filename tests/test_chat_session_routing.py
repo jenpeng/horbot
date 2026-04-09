@@ -8,10 +8,29 @@ from fastapi import HTTPException
 
 from horbot.conversation import ConversationType
 from horbot.session.manager import SessionManager
-from horbot.web.api import delete_session, get_conversation_messages, update_session_title
+from horbot.web.api import delete_session, get_conversation_messages, get_session_manager, update_session_title
 
 
 class ChatSessionRoutingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_get_session_manager_refreshes_when_workspace_changes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace_a = Path(tmpdir) / "workspace-a"
+            workspace_b = Path(tmpdir) / "workspace-b"
+
+            config_a = SimpleNamespace(workspace_path=str(workspace_a))
+            config_b = SimpleNamespace(workspace_path=str(workspace_b))
+
+            with (
+                patch("horbot.web.api._session_manager", None),
+                patch("horbot.web.api.get_cached_config", side_effect=[config_a, config_b]),
+            ):
+                manager_a = get_session_manager()
+                manager_b = get_session_manager()
+
+            self.assertNotEqual(manager_a.sessions_dir, manager_b.sessions_dir)
+            self.assertEqual(manager_a.sessions_dir, workspace_a / "sessions")
+            self.assertEqual(manager_b.sessions_dir, workspace_b / "sessions")
+
     async def test_delete_dm_session_uses_agent_workspace_manager(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             agent_workspace = Path(tmpdir) / "writer-workspace"

@@ -1447,8 +1447,10 @@ class ConfirmRequest(BaseModel):
 def get_session_manager():
     """Get session manager instance."""
     global _session_manager
-    if _session_manager is None:
-        config = get_cached_config()
+    config = get_cached_config()
+    expected_sessions_dir = SessionManager(workspace=Path(config.workspace_path)).sessions_dir
+
+    if _session_manager is None or Path(_session_manager.sessions_dir) != Path(expected_sessions_dir):
         _session_manager = SessionManager(workspace=Path(config.workspace_path))
     return _session_manager
 
