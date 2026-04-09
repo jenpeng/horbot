@@ -26,7 +26,7 @@
 
 ### 报告 Bug
 
-如果您发现了 Bug，请通过 [GitHub Issues](https://github.com/HKUDS/horbot/issues) 提交报告。提交前请：
+如果您发现了 Bug，请通过 [GitHub Issues](https://github.com/jenpeng/horbot/issues) 提交报告。提交前请：
 
 1. 搜索现有 Issues，确认该 Bug 尚未被报告
 2. 使用 Bug 报告模板填写详细信息
@@ -36,7 +36,7 @@
 
 我们欢迎新功能建议！请：
 
-1. 通过 [GitHub Discussions](https://github.com/HKUDS/horbot/discussions) 发起讨论
+1. 通过 [GitHub Discussions](https://github.com/jenpeng/horbot/discussions) 发起讨论
 2. 详细描述功能需求和使用场景
 3. 等待维护者反馈后再开始实现
 
@@ -62,7 +62,7 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/HKUDS/horbot.git
+git clone https://github.com/jenpeng/horbot.git
 cd horbot
 
 # 2. 创建虚拟环境
@@ -366,6 +366,6 @@ Closes #123
 
 感谢所有贡献者的付出！您的贡献让 horbot 变得更好。
 
-<a href="https://github.com/HKUDS/horbot/graphs/contributors">
+<a href="https://github.com/jenpeng/horbot/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=HKUDS/horbot" />
 </a>

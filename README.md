@@ -29,7 +29,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/HKUDS/horbot.git
+git clone https://github.com/jenpeng/horbot.git
 cd horbot
 
 # 使用项目管理脚本安装所有依赖

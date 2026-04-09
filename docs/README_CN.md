@@ -80,7 +80,7 @@
 **使用虚拟环境安装**（推荐，便于隔离和迁移）
 
 ```bash
-git clone https://github.com/HKUDS/horbot.git
+git clone https://github.com/jenpeng/horbot.git
 cd horbot
 ./install.sh        # macOS/Linux
 # 或
@@ -112,7 +112,7 @@ cd horbot
 **从源码安装**（最新功能，推荐用于开发）
 
 ```bash
-git clone https://github.com/HKUDS/horbot.git
+git clone https://github.com/jenpeng/horbot.git
 cd horbot
 pip install -e .
 ```
@@ -741,7 +741,7 @@ no   # 取消
 
 PR 欢迎！代码库故意保持小巧和可读。🤗
 
-**路线图** — 选择一项并 [提交 PR](https://github.com/HKUDS/horbot/pulls)！
+**路线图** — 选择一项并 [提交 PR](https://github.com/jenpeng/horbot/pulls)！
 
 - [x] **自主执行** — 自主规划和执行，带安全控制
 - [ ] **多模态** — 看和听（图像、语音、视频）
