@@ -39,6 +39,10 @@ class ErrorBoundary extends Component<Props, State> {
 
   render(): ReactNode {
     if (this.state.hasError) {
+      const message = this.state.error?.message || '';
+      const isChunkReloadIssue =
+        /旧文件|dynamically imported module|ChunkLoadError|module script failed/i.test(message);
+
       return (
         <div className="flex items-center justify-center h-screen bg-secondary-900 text-white">
           <div className="max-w-md w-full mx-4 p-6 bg-secondary-800 rounded-lg border border-secondary-700 shadow-lg">
@@ -61,7 +65,9 @@ class ErrorBoundary extends Component<Props, State> {
             </div>
             
             <p className="text-gray-300 mb-4">
-              应用程序遇到了一个意外错误。请尝试刷新页面或点击下方按钮重试。
+              {isChunkReloadIssue
+                ? '前端资源刚刚更新，当前标签页还引用着旧文件。请刷新页面重新加载最新资源。'
+                : '应用程序遇到了一个意外错误。请尝试刷新页面或点击下方按钮重试。'}
             </p>
 
             {this.state.error && (

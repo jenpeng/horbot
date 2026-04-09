@@ -1,12 +1,13 @@
-import React, { Suspense, lazy, useState, useEffect, useMemo } from 'react';
+import React, { Suspense, useState, useEffect, useMemo } from 'react';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button, IconButton } from '../components/ui/Button';
 import Tabs from '../components/ui/Tabs';
 import skillsService from '../services/skills';
 import type { Skill, SkillDetail, MCPServerConfig, SkillInstallOption } from '../types';
+import { lazyWithReload } from '../utils/lazyWithReload';
 
-const MarkdownRenderer = lazy(() => import('../components/MarkdownRenderer'));
+const MarkdownRenderer = lazyWithReload('MarkdownRenderer', () => import('../components/MarkdownRenderer'));
 
 interface SkillEditorState {
   isOpen: boolean;

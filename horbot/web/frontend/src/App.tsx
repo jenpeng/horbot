@@ -1,21 +1,22 @@
 
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './contexts/ToastContext';
 import Toast from './components/Toast';
+import { lazyWithReload } from './utils/lazyWithReload';
 
-const DashboardPage = lazy(() => import('./pages/DashboardPage'));
-const ChatPage = lazy(() => import('./pages/ChatPage'));
-const ConfigPage = lazy(() => import('./pages/ConfigPage'));
-const ChannelsPage = lazy(() => import('./pages/ChannelsPage'));
-const TasksPage = lazy(() => import('./pages/TasksPage'));
-const StatusPage = lazy(() => import('./pages/StatusPage'));
-const SkillsPage = lazy(() => import('./pages/SkillsPage'));
-const TokenPage = lazy(() => import('./pages/TokenPage'));
-const TeamsPage = lazy(() => import('./pages/TeamsPage'));
-const WebMCPBootstrap = lazy(() => import('./components/WebMCPBootstrap'));
+const DashboardPage = lazyWithReload('DashboardPage', () => import('./pages/DashboardPage'));
+const ChatPage = lazyWithReload('ChatPage', () => import('./pages/ChatPage'));
+const ConfigPage = lazyWithReload('ConfigPage', () => import('./pages/ConfigPage'));
+const ChannelsPage = lazyWithReload('ChannelsPage', () => import('./pages/ChannelsPage'));
+const TasksPage = lazyWithReload('TasksPage', () => import('./pages/TasksPage'));
+const StatusPage = lazyWithReload('StatusPage', () => import('./pages/StatusPage'));
+const SkillsPage = lazyWithReload('SkillsPage', () => import('./pages/SkillsPage'));
+const TokenPage = lazyWithReload('TokenPage', () => import('./pages/TokenPage'));
+const TeamsPage = lazyWithReload('TeamsPage', () => import('./pages/TeamsPage'));
+const WebMCPBootstrap = lazyWithReload('WebMCPBootstrap', () => import('./components/WebMCPBootstrap'));
 
 function App() {
   return (
