@@ -18,6 +18,17 @@ class MessageProcessor:
     def __init__(self, agent_loop: "AgentLoop"):
         self.agent = agent_loop
 
+    @staticmethod
+    def _resolve_outbound_error_target(msg: InboundMessage) -> tuple[str, str]:
+        """Map synthetic system messages back to the original outbound target."""
+        if msg.channel != "system":
+            return msg.channel, msg.chat_id
+
+        if ":" in msg.chat_id:
+            return parse_session_key_with_known_routes(msg.chat_id)
+
+        return "cli", msg.chat_id
+
     async def dispatch(self, msg: InboundMessage) -> None:
         """Process a message under a per-session lock."""
         lock = self.agent._get_message_lock(msg.session_key)
@@ -36,8 +47,9 @@ class MessageProcessor:
                 raise
             except Exception:
                 logger.exception("Error processing message for session {}", msg.session_key)
+                channel, chat_id = self._resolve_outbound_error_target(msg)
                 await self.agent.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
+                    channel=channel, chat_id=chat_id,
                     content="Sorry, I encountered an error.",
                 ))
             finally:

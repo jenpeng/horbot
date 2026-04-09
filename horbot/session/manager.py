@@ -257,7 +257,8 @@ class SessionManager:
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated=last_consolidated,
+                title=metadata.get("title", "新对话"),
             )
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)

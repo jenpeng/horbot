@@ -125,7 +125,9 @@ class SubagentManager:
                     del self._session_tasks[session_key]
             # Update task info status
             if task_id in self._task_info:
-                self._task_info[task_id].status = "completed"
+                current_status = self._task_info[task_id].status
+                if current_status not in {"cancelled", "error"}:
+                    self._task_info[task_id].status = "completed"
 
         bg_task.add_done_callback(_cleanup)
         
@@ -224,6 +226,8 @@ class SubagentManager:
             
         except Exception as e:
             error_msg = f"Error: {str(e)}"
+            if task_id in self._task_info:
+                self._task_info[task_id].status = "error"
             logger.error("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
     

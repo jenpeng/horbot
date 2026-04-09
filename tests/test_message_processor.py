@@ -172,6 +172,25 @@ class TestMessageProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(outbound_msg, OutboundMessage)
         self.assertEqual(outbound_msg.content, "Sorry, I encountered an error.")
 
+    async def test_dispatch_system_exception_routes_back_to_source_channel(self):
+        self.mock_agent._run_agent_loop.side_effect = Exception("Test error")
+
+        msg = InboundMessage(
+            channel="system",
+            sender_id="sys",
+            chat_id="telegram:chat_123",
+            content="Background task completed"
+        )
+
+        await self.processor.dispatch(msg)
+
+        self.mock_agent.bus.publish_outbound.assert_called_once()
+        outbound_msg = self.mock_agent.bus.publish_outbound.call_args[0][0]
+        self.assertIsInstance(outbound_msg, OutboundMessage)
+        self.assertEqual(outbound_msg.channel, "telegram")
+        self.assertEqual(outbound_msg.chat_id, "chat_123")
+        self.assertEqual(outbound_msg.content, "Sorry, I encountered an error.")
+
     async def test_process_message_new_task(self):
         self.mock_agent._is_new_task = MagicMock(return_value=True)
         

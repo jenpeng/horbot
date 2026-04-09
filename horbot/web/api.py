@@ -1434,6 +1434,10 @@ class ChatRequest(BaseModel):
     agent_id: Optional[str] = None  # Target agent ID for multi-agent chat
 
 
+class CreateSessionRequest(BaseModel):
+    title: Optional[str] = None
+
+
 class ConfirmRequest(BaseModel):
     confirmation_id: str
     action: str  # "confirm" or "cancel"
@@ -3250,24 +3254,24 @@ async def get_chat_history(session_key: str = "default", agent_id: Optional[str]
 
 
 @router.post("/chat/sessions")
-async def create_new_session():
+async def create_new_session(request: Optional[CreateSessionRequest] = None):
     """Create a new chat session."""
     manager = get_session_manager()
-    
-    # Generate unique session key based on timestamp
-    import time
-    session_key = f"session_{int(time.time())}"
-    
+
+    session_key = f"session_{uuid.uuid4().hex}"
+
     # Full session key includes channel prefix
     full_session_key = f"web:{session_key}"
-    
+
     session = manager.get_or_create(full_session_key)
-    session.metadata["title"] = "新对话"  # Default title
-    session.metadata["created_at"] = session_key.split("_")[-1]
-    
+    title = ((request.title if request else None) or "").strip() or "新对话"
+    session.title = title
+    session.metadata["title"] = title
+    session.metadata["created_at"] = session.created_at.isoformat()
+
     manager.save(session)
-    
-    return {"session_key": session_key, "title": "新对话"}
+
+    return {"session_key": session_key, "title": title}
 
 
 @router.put("/chat/sessions/{session_key}")
@@ -3277,11 +3281,13 @@ async def update_session_title(session_key: str, title: str):
     session = manager.get(normalized_session_key)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    session.metadata["title"] = title
+
+    resolved_title = title.strip() or "新对话"
+    session.title = resolved_title
+    session.metadata["title"] = resolved_title
     manager.save(session)
-    
-    return {"status": "success", "title": title}
+
+    return {"status": "success", "title": resolved_title}
 
 
 @router.delete("/chat/sessions/{session_key}")
