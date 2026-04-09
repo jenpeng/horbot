@@ -1,0 +1,66 @@
+.assets
+.env
+*.pyc
+dist/
+build/
+*.egg-info/
+*.egg
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.pyzz
+.venv/
+venv/
+__pycache__/
+.pids/
+logs/
+poetry.lock
+.pytest_cache/
+botpy.log
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Project local config and data
+.horbot/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+*.js.map
+*.d.ts.map
+
+# Horbot runtime files (logs, pids)
+.horbot/runtime/
+
+# Local/runtime artifacts not for public repo
+/.audit/
+/.checkpoints/
+/.mailboxes/
+/.state/
+/.taskboard/
+/.playwright-browsers/
+/memory/
+/sessions/
+/token_usage/
+/Project/
+/SOUL.md
+/USER.md
+/snapshot.txt
+/snapshot2.txt
+/test_screenshot.png

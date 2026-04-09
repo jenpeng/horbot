@@ -1,0 +1,63 @@
+"""Agent tools module."""
+
+from horbot.agent.tools.base import (
+    Tool,
+    ToolCategory,
+    ToolError,
+    ValidationError,
+    ExecutionError,
+    PermissionError,
+    ToolMetadata,
+    register_tool,
+    get_registered_tools,
+    create_tool,
+)
+from horbot.agent.tools.registry import (
+    ToolRegistry,
+    ExecutionResult,
+    PermissionDeniedError,
+    ConfirmationRequiredError,
+    ConfigureMCPTool,
+)
+from horbot.agent.tools.permission import (
+    PermissionManager,
+    PermissionConfig,
+    PermissionLevel,
+    PermissionResult,
+    ToolGroup,
+    TOOL_GROUPS,
+    PROFILES,
+    is_protected_path,
+    is_sensitive_operation,
+    is_sensitive_operation_with_params,
+    clear_permission_cache,
+)
+
+__all__ = [
+    "Tool",
+    "ToolCategory",
+    "ToolError",
+    "ValidationError",
+    "ExecutionError",
+    "PermissionError",
+    "ToolMetadata",
+    "register_tool",
+    "get_registered_tools",
+    "create_tool",
+    "ToolRegistry",
+    "ExecutionResult",
+    "PermissionDeniedError",
+    "ConfirmationRequiredError",
+    "ConfigureMCPTool",
+    "PermissionManager",
+    "PermissionConfig",
+    "PermissionLevel",
+    "PermissionResult",
+    "ToolGroup",
+    "TOOL_GROUPS",
+    "PROFILES",
+    "is_protected_path",
+    "is_sensitive_operation",
+    "is_sensitive_operation_with_params",
+    "clear_permission_cache",
+]
