@@ -267,6 +267,9 @@ class SessionManager:
     def save(self, session: Session) -> None:
         """Save a session to disk (synchronous version for compatibility)."""
         path = self._get_session_path(session.key)
+        resolved_title = (session.title or session.metadata.get("title") or "新对话").strip() or "新对话"
+        session.title = resolved_title
+        session.metadata["title"] = resolved_title
 
         with open(path, "w", encoding="utf-8") as f:
             metadata_line = {
@@ -286,6 +289,9 @@ class SessionManager:
     async def async_save(self, session: Session) -> None:
         """Save a session to disk asynchronously."""
         path = self._get_session_path(session.key)
+        resolved_title = (session.title or session.metadata.get("title") or "新对话").strip() or "新对话"
+        session.title = resolved_title
+        session.metadata["title"] = resolved_title
 
         async with aiofiles.open(path, "w", encoding="utf-8") as f:
             metadata_line = {

@@ -1,10 +1,20 @@
-"""Task planner module for analyzing and decomposing complex tasks."""
+"""Legacy planner compatibility module.
+
+This file predates the package-based planner implementation under
+``horbot.agent.planner/``. The package is the production import target, but we
+keep this module working for direct-file imports and older references.
+"""
+
+from datetime import datetime
+from typing import Optional
 
 from horbot.agent.planner.storage import PlanStorage, get_plan_storage, ExecutionPlan, SubTask
 
 __all__ = [
+    "TaskPlanner",
+    "get_task_planner",
     "PlanStorage",
-    "get_plan_storage", 
+    "get_plan_storage",
     "ExecutionPlan",
     "SubTask",
 ]

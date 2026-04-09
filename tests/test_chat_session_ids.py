@@ -33,6 +33,20 @@ class ChatSessionIdTests(unittest.TestCase):
             self.assertEqual(second_id, "msg-1111")
             self.assertEqual(len(session.messages), 1)
 
+    def test_title_persists_across_save_and_reload(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SessionManager(workspace=Path(tmpdir))
+            session = manager.get_or_create("web:test")
+            session.add_message("user", "This title should persist")
+            manager.save(session)
+
+            manager.invalidate("web:test")
+            reloaded = manager.get("web:test")
+
+            self.assertIsNotNone(reloaded)
+            self.assertEqual(reloaded.title, "This title should persist")
+            self.assertEqual(reloaded.metadata.get("title"), "This title should persist")
+
 
 if __name__ == "__main__":
     unittest.main()
