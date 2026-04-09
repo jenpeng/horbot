@@ -3311,7 +3311,7 @@ async def delete_session(session_key: str):
 async def list_chat_sessions():
     """List all chat sessions with metadata."""
     manager = get_session_manager()
-    session_infos = manager.list_sessions()
+    session_infos = manager.list_sessions(key_prefix="web:")
     
     # Enrich with metadata, only show web sessions
     enriched_sessions = []
@@ -3320,10 +3320,6 @@ async def list_chat_sessions():
         if not session_key:
             continue
         
-        # Only show web sessions in the web UI
-        if not session_key.startswith("web:"):
-            continue
-
         title = session_info.get("title", "未命名对话")
         message_count = int(session_info.get("message_count", 0) or 0)
         created_at = session_info.get("created_at", "")

@@ -72,6 +72,35 @@ class ChatSessionsApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payload["sessions"][0]["title"], "Pinned Title")
             self.assertEqual(payload["sessions"][0]["message_count"], 2)
 
+    async def test_list_sessions_requests_web_prefix_filter(self):
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with TemporaryDirectory() as tmpdir:
+            manager = SessionManager(Path(tmpdir))
+
+            web_session = manager.get_or_create("web:session_a")
+            web_session.add_message("user", "hello")
+            manager.save(web_session)
+
+            agent_session = manager.get_or_create("agent:session_b")
+            agent_session.add_message("user", "hidden")
+            manager.save(agent_session)
+
+            original_list_sessions = manager.list_sessions
+            manager.list_sessions = MagicMock(side_effect=original_list_sessions)
+
+            with patch("horbot.web.api.get_session_manager", return_value=manager):
+                async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                    response = await client.get("/api/chat/sessions")
+
+            self.assertEqual(response.status_code, 200)
+            manager.list_sessions.assert_called_once_with(key_prefix="web:")
+            payload = response.json()
+            self.assertEqual(len(payload["sessions"]), 1)
+            self.assertEqual(payload["sessions"][0]["key"], "web:session_a")
+
 
 if __name__ == "__main__":
     unittest.main()

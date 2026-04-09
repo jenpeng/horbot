@@ -316,7 +316,7 @@ class SessionManager:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
     
-    def list_sessions(self) -> list[dict[str, Any]]:
+    def list_sessions(self, key_prefix: str | None = None) -> list[dict[str, Any]]:
         """
         List all sessions.
         
@@ -324,8 +324,12 @@ class SessionManager:
             List of session info dicts.
         """
         sessions = []
-        
-        for path in self.sessions_dir.glob("*.jsonl"):
+        file_pattern = "*.jsonl"
+        if key_prefix:
+            safe_prefix = safe_filename(key_prefix.replace(":", "_"))
+            file_pattern = f"{safe_prefix}*.jsonl"
+
+        for path in self.sessions_dir.glob(file_pattern):
             try:
                 with open(path, encoding="utf-8") as f:
                     first_line = f.readline().strip()
@@ -334,6 +338,8 @@ class SessionManager:
                         if data.get("_type") == "metadata":
                             metadata = data.get("metadata", {}) or {}
                             key = data.get("key") or path.stem.replace("_", ":", 1)
+                            if key_prefix and not key.startswith(key_prefix):
+                                continue
                             message_count = data.get("message_count")
                             if message_count is None:
                                 message_count = 0

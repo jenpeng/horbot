@@ -84,6 +84,22 @@ class ChatSessionIdTests(unittest.TestCase):
             self.assertEqual(session_info["title"], "Legacy Session")
             self.assertEqual(session_info["message_count"], 2)
 
+    def test_list_sessions_can_filter_by_key_prefix(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SessionManager(workspace=Path(tmpdir))
+            web_session = manager.get_or_create("web:test")
+            web_session.add_message("user", "web")
+            manager.save(web_session)
+
+            agent_session = manager.get_or_create("agent:test")
+            agent_session.add_message("user", "agent")
+            manager.save(agent_session)
+
+            session_infos = manager.list_sessions(key_prefix="web:")
+
+            self.assertEqual(len(session_infos), 1)
+            self.assertEqual(session_infos[0]["key"], "web:test")
+
 
 if __name__ == "__main__":
     unittest.main()
