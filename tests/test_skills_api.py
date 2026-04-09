@@ -1,7 +1,9 @@
 import unittest
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
 from fastapi import FastAPI
@@ -42,6 +44,80 @@ metadata: {"horbot":{"requires":{"bins":["definitely-missing-horbot-bin"]},"inst
         self.assertEqual(skill["missing_requirements"], ["CLI: definitely-missing-horbot-bin"])
         self.assertEqual(skill["install"][0]["kind"], "brew")
         self.assertEqual(skill["install"][0]["formula"], "demo-cli")
+        self.assertEqual(skill["compatibility"]["status"], "incompatible")
+
+    async def test_create_skill_rejects_invalid_skill_content(self):
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            with patch("horbot.web.api._resolve_agent_workspace_for_request", return_value=(None, workspace)):
+                async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                    response = await client.post(
+                        "/api/skills",
+                        json={"name": "broken-skill", "content": "# Missing frontmatter"},
+                    )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Skill validation failed", response.json()["detail"])
+
+    async def test_import_skill_package_accepts_valid_skill_archive(self):
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        archive_buffer = BytesIO()
+        with ZipFile(archive_buffer, "w", ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "demo-skill/SKILL.md",
+                """---
+name: demo-skill
+description: Demo packaged skill
+metadata: {"horbot":{"requires":{"bins":["definitely-missing-horbot-bin"]}}}
+---
+
+# Demo Skill
+""",
+            )
+
+        with TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            with patch("horbot.web.api._resolve_agent_workspace_for_request", return_value=(None, workspace)):
+                async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                    response = await client.post(
+                        "/api/skills/import",
+                        files={"file": ("demo-skill.skill", archive_buffer.getvalue(), "application/zip")},
+                    )
+
+            self.assertTrue((workspace / "skills" / "demo-skill" / "SKILL.md").exists())
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["name"], "demo-skill")
+        self.assertEqual(payload["compatibility"]["status"], "incompatible")
+
+    async def test_import_skill_package_rejects_invalid_archive(self):
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        archive_buffer = BytesIO()
+        with ZipFile(archive_buffer, "w", ZIP_DEFLATED) as archive:
+            archive.writestr("notes/readme.md", "# Not a skill\n")
+
+        with TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            with patch("horbot.web.api._resolve_agent_workspace_for_request", return_value=(None, workspace)):
+                async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                    response = await client.post(
+                        "/api/skills/import",
+                        files={"file": ("broken.skill", archive_buffer.getvalue(), "application/zip")},
+                    )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Skill import failed", response.json()["detail"])
 
 
 if __name__ == "__main__":

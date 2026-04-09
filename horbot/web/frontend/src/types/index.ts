@@ -39,6 +39,8 @@ export type {
   ExecutionStep,
   Skill,
   SkillDetail,
+  SkillCompatibility,
+  SkillImportResult,
   SkillInstallOption,
   ProviderConfig,
   ProvidersConfig,

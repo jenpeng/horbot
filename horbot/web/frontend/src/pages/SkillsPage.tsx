@@ -1,10 +1,10 @@
-import React, { Suspense, useState, useEffect, useMemo } from 'react';
+import React, { Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button, IconButton } from '../components/ui/Button';
 import Tabs from '../components/ui/Tabs';
 import skillsService from '../services/skills';
-import type { Skill, SkillDetail, MCPServerConfig, SkillInstallOption } from '../types';
+import type { Skill, SkillDetail, MCPServerConfig, SkillInstallOption, SkillCompatibility } from '../types';
 import { lazyWithReload } from '../utils/lazyWithReload';
 
 const MarkdownRenderer = lazyWithReload('MarkdownRenderer', () => import('../components/MarkdownRenderer'));
@@ -48,6 +48,16 @@ const formatInstallCommand = (option: SkillInstallOption): string | null => {
   return null;
 };
 
+const getCompatibilityBadge = (compatibility?: SkillCompatibility) => {
+  if (!compatibility || compatibility.status === 'compatible') {
+    return null;
+  }
+  if (compatibility.status === 'warning') {
+    return { label: 'Needs Setup', className: 'bg-accent-amber/15 text-accent-amber' };
+  }
+  return { label: 'Incompatible', className: 'bg-semantic-error-light text-semantic-error' };
+};
+
 const SkillsPage: React.FC = () => {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [mcpServers, setMcpServers] = useState<Record<string, MCPServerConfig>>({});
@@ -80,6 +90,7 @@ const SkillsPage: React.FC = () => {
     originalData: null,
   });
   const [mcpDeleteConfirm, setMcpDeleteConfirm] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -131,7 +142,7 @@ const SkillsPage: React.FC = () => {
       isOpen: true,
       mode: 'create',
       skillName: '',
-      content: '# My Skill\n\nDescription of what this skill does.\n\n## Instructions\n\n- Step 1\n- Step 2\n',
+      content: '---\nname: my-skill\ndescription: Describe when this skill should be used.\n---\n\n# My Skill\n\n## Instructions\n\n- Step 1\n- Step 2\n',
       originalContent: ''
     });
     setShowPreview(true);
@@ -220,6 +231,36 @@ const SkillsPage: React.FC = () => {
     } catch (err: any) {
       const message = err.response?.data?.detail || 'Failed to toggle skill';
       showNotification('error', message);
+    }
+  };
+
+  const handleImportClick = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportSkill = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const result = await skillsService.importSkill(file);
+      const statusLabel =
+        result.compatibility.status === 'compatible'
+          ? 'compatible'
+          : result.compatibility.status === 'warning'
+            ? 'imported with setup warnings'
+            : 'imported but incompatible';
+      showNotification('success', `${result.name} ${statusLabel}`);
+      await fetchData();
+    } catch (err: any) {
+      const message = err.message || err.response?.data?.detail || 'Failed to import skill package';
+      showNotification('error', message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -448,18 +489,40 @@ const SkillsPage: React.FC = () => {
                 Refresh
               </Button>
               {activeTab === 'skills' && (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={openCreateEditor}
-                  leftIcon={
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                  }
-                >
-                  New Skill
-                </Button>
+                <>
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept=".skill,.zip"
+                    className="hidden"
+                    onChange={handleImportSkill}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleImportClick}
+                    disabled={saving}
+                    leftIcon={
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M12 4v12m0-12l-4 4m4-4l4 4" />
+                      </svg>
+                    }
+                  >
+                    Import Skill
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={openCreateEditor}
+                    leftIcon={
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                    }
+                  >
+                    New Skill
+                  </Button>
+                </>
               )}
               {activeTab === 'mcp' && (
                 <Button
@@ -646,6 +709,11 @@ const SkillsPage: React.FC = () => {
                               Missing
                             </Badge>
                           )}
+                          {getCompatibilityBadge(skill.compatibility) && (
+                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getCompatibilityBadge(skill.compatibility)?.className}`}>
+                              {getCompatibilityBadge(skill.compatibility)?.label}
+                            </span>
+                          )}
                           {skill.always && (
                             <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-accent-purple/10 text-accent-purple">
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -728,6 +796,16 @@ const SkillsPage: React.FC = () => {
                               </div>
                             )}
                           </div>
+                        </div>
+                      )}
+                      {skill.compatibility && (skill.compatibility.issues.length > 0 || skill.compatibility.warnings.length > 0) && (
+                        <div className="mt-3 rounded-lg border border-surface-200 bg-surface-50 p-3 text-xs text-surface-700 space-y-2">
+                          {skill.compatibility.issues.length > 0 && (
+                            <p><strong>Compatibility issues:</strong> {skill.compatibility.issues.join('; ')}</p>
+                          )}
+                          {skill.compatibility.warnings.length > 0 && (
+                            <p><strong>Warnings:</strong> {skill.compatibility.warnings.join('; ')}</p>
+                          )}
                         </div>
                       )}
                     </div>

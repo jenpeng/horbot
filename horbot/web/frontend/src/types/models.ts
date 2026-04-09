@@ -310,11 +310,18 @@ export interface Skill {
   normalized_from_legacy: boolean;
   install?: SkillInstallOption[];
   missing_requirements?: string[];
+  compatibility?: SkillCompatibility;
 }
 
 export interface SkillDetail extends Skill {
   content: string;
   metadata: Record<string, unknown>;
+}
+
+export interface SkillCompatibility {
+  status: 'compatible' | 'warning' | 'incompatible';
+  issues: string[];
+  warnings: string[];
 }
 
 export interface SkillInstallOption {
@@ -325,6 +332,16 @@ export interface SkillInstallOption {
   bins?: string[];
   label?: string;
   command?: string;
+}
+
+export interface SkillImportResult {
+  name: string;
+  path: string;
+  message: string;
+  files: string[];
+  description: string;
+  warnings: string[];
+  compatibility: SkillCompatibility;
 }
 
 export interface ProviderConfig {

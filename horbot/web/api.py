@@ -5524,6 +5524,7 @@ async def run_task(
 async def get_skills(agent_id: Optional[str] = None):
     """Get all skills."""
     from horbot.agent.skills import SkillsLoader
+    from horbot.agent.skill_package import build_skill_compatibility
     
     _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
     loader = SkillsLoader(workspace=workspace_path)
@@ -5536,6 +5537,10 @@ async def get_skills(agent_id: Optional[str] = None):
         meta = loader._get_skill_meta(skill["name"])
         
         compat = meta.get("_compat", {}) if isinstance(meta, dict) else {}
+        compatibility = build_skill_compatibility(
+            meta=meta if isinstance(meta, dict) else {},
+            normalized_from_legacy=bool(compat.get("normalized_from_legacy", False)),
+        )
 
         result.append({
             "name": skill["name"],
@@ -5552,7 +5557,8 @@ async def get_skills(agent_id: Optional[str] = None):
             "source_schema_version": compat.get("source_schema_version", 1),
             "normalized_from_legacy": bool(compat.get("normalized_from_legacy", False)),
             "install": meta.get("install", []) if isinstance(meta.get("install"), list) else [],
-            "missing_requirements": loader._get_missing_requirements(meta) if not loader._check_requirements(meta) else None
+            "missing_requirements": loader._get_missing_requirements(meta) if not loader._check_requirements(meta) else None,
+            "compatibility": compatibility,
         })
     
     return {"skills": result}
@@ -5561,6 +5567,7 @@ async def get_skills(agent_id: Optional[str] = None):
 async def get_skill_detail(skill_name: str, agent_id: Optional[str] = None):
     """Get skill detail."""
     from horbot.agent.skills import SkillsLoader
+    from horbot.agent.skill_package import build_skill_compatibility
     
     _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
     loader = SkillsLoader(workspace=workspace_path)
@@ -5573,18 +5580,26 @@ async def get_skill_detail(skill_name: str, agent_id: Optional[str] = None):
     meta = loader._get_skill_meta(skill_name)
     
     compat = meta.get("_compat", {}) if isinstance(meta, dict) else {}
+    compatibility = build_skill_compatibility(
+        meta=meta if isinstance(meta, dict) else {},
+        normalized_from_legacy=bool(compat.get("normalized_from_legacy", False)),
+    )
 
     return {
         "name": skill_name,
         "content": content,
         "metadata": metadata,
+        "description": metadata.get("description", skill_name),
         "available": loader._check_requirements(meta),
         "always": meta.get("always", False) or metadata.get("always", False),
         "schema": compat.get("canonical_schema", "horbot"),
         "schema_version": compat.get("canonical_schema_version", 1),
         "source_schema": compat.get("source_schema", "horbot"),
         "source_schema_version": compat.get("source_schema_version", 1),
-        "normalized_from_legacy": bool(compat.get("normalized_from_legacy", False))
+        "normalized_from_legacy": bool(compat.get("normalized_from_legacy", False)),
+        "install": meta.get("install", []) if isinstance(meta.get("install"), list) else [],
+        "missing_requirements": loader._get_missing_requirements(meta) if not loader._check_requirements(meta) else None,
+        "compatibility": compatibility,
     }
 
 class SkillCreateRequest(BaseModel):
@@ -5598,6 +5613,7 @@ class SkillUpdateRequest(BaseModel):
 async def create_skill(request: SkillCreateRequest, agent_id: Optional[str] = None):
     """Create a new skill."""
     from horbot.agent.skills import SkillsLoader
+    from horbot.agent.skill_package import validate_skill_content
 
     _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
     loader = SkillsLoader(workspace=workspace_path)
@@ -5608,9 +5624,13 @@ async def create_skill(request: SkillCreateRequest, agent_id: Optional[str] = No
     
     if skill_file.exists():
         raise HTTPException(status_code=409, detail=f"Skill '{request.name}' already exists")
+
+    validation = validate_skill_content(request.content, expected_name=request.name.strip())
+    if not validation["valid"]:
+        raise HTTPException(status_code=400, detail="Skill validation failed: " + " ".join(validation["issues"]))
     
     skill_dir.mkdir(parents=True, exist_ok=True)
-    skill_file.write_text(request.content)
+    skill_file.write_text(request.content, encoding="utf-8")
     
     return {
         "name": request.name,
@@ -5623,6 +5643,7 @@ async def create_skill(request: SkillCreateRequest, agent_id: Optional[str] = No
 async def update_skill(skill_name: str, request: SkillUpdateRequest, agent_id: Optional[str] = None):
     """Update an existing skill."""
     from horbot.agent.skills import SkillsLoader
+    from horbot.agent.skill_package import validate_skill_content
     
     _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
     loader = SkillsLoader(workspace=workspace_path)
@@ -5637,12 +5658,60 @@ async def update_skill(skill_name: str, request: SkillUpdateRequest, agent_id: O
         raise HTTPException(status_code=403, detail="Cannot modify builtin skills")
     
     skill_path = Path(skill_info["path"])
-    skill_path.write_text(request.content)
+    validation = validate_skill_content(request.content, expected_name=skill_name)
+    if not validation["valid"]:
+        raise HTTPException(status_code=400, detail="Skill validation failed: " + " ".join(validation["issues"]))
+
+    skill_path.write_text(request.content, encoding="utf-8")
     
     return {
         "name": skill_name,
         "path": str(skill_path),
         "message": f"Skill '{skill_name}' updated successfully"
+    }
+
+@router.post("/skills/import")
+async def import_skill_package(
+    file: UploadFile = File(...),
+    replace_existing: bool = Form(False),
+    agent_id: Optional[str] = None,
+):
+    """Import a skill package from .skill or .zip."""
+    from horbot.agent.skill_package import import_skill_archive_bytes, build_skill_compatibility
+
+    _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
+    skills_dir = workspace_path / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Uploaded skill package is empty.")
+    if len(payload) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Skill package exceeds the 20MB size limit.")
+
+    result = import_skill_archive_bytes(
+        payload,
+        file.filename or "uploaded.skill",
+        skills_dir=skills_dir,
+        replace_existing=replace_existing,
+    )
+    if not result["valid"]:
+        raise HTTPException(status_code=400, detail="Skill import failed: " + " ".join(result["issues"]))
+
+    compat = result["meta"].get("_compat", {}) if isinstance(result.get("meta"), dict) else {}
+    compatibility = build_skill_compatibility(
+        meta=result.get("meta") if isinstance(result.get("meta"), dict) else {},
+        normalized_from_legacy=bool(compat.get("normalized_from_legacy", False)),
+    )
+
+    return {
+        "name": result["skill_name"],
+        "path": result["path"],
+        "message": f"Skill '{result['skill_name']}' imported successfully",
+        "files": result.get("files", []),
+        "description": result.get("description", ""),
+        "warnings": result.get("warnings", []),
+        "compatibility": compatibility,
     }
 
 @router.delete("/skills/{skill_name}")

@@ -1,5 +1,5 @@
 import api from './api';
-import type { Skill, SkillDetail, MCPServerConfig } from '../types';
+import type { Skill, SkillDetail, MCPServerConfig, SkillImportResult } from '../types';
 
 interface SkillsListResponse {
   skills: Skill[];
@@ -60,6 +60,18 @@ export const skillsService = {
   toggleSkill: async (name: string): Promise<boolean> => {
     const response = await api.patch<ToggleSkillResponse>(`/api/skills/${name}/toggle`);
     return response.data.enabled;
+  },
+
+  importSkill: async (file: File, replaceExisting = false): Promise<SkillImportResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('replace_existing', String(replaceExisting));
+    const response = await api.post<SkillImportResult>('/api/skills/import', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
   },
 
   getMcpServers: async (): Promise<Record<string, MCPServerConfig>> => {
