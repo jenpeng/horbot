@@ -753,6 +753,122 @@ print(response.json()['content'])
 
 ---
 
+## Skills API
+
+### 获取技能列表
+
+```http
+GET /api/skills
+```
+
+每个 skill 现在包含以下兼容性相关字段：
+
+- `missing_requirements`: 缺失的 CLI / ENV 依赖列表
+- `install`: 可选安装建议
+- `compatibility`: 兼容性报告
+
+`compatibility` 结构示例：
+
+```json
+{
+  "status": "incompatible",
+  "issues": ["Missing CLI dependency: gh"],
+  "warnings": ["This skill uses legacy metadata and was normalized to the horbot schema."]
+}
+```
+
+### 获取技能详情
+
+```http
+GET /api/skills/{skill_name}
+```
+
+详情接口同样返回 `missing_requirements`、`install` 和 `compatibility`。
+
+### 创建技能
+
+```http
+POST /api/skills
+Content-Type: application/json
+```
+
+请求体示例：
+
+```json
+{
+  "name": "my-skill",
+  "content": "---\nname: my-skill\ndescription: Describe when this skill should be used.\n---\n\n# My Skill"
+}
+```
+
+创建时会执行 skill 规范校验；若 `SKILL.md` 缺少 frontmatter、`name/description`、或命名不合规，会返回 `400`。
+
+### 更新技能
+
+```http
+PUT /api/skills/{skill_name}
+Content-Type: application/json
+```
+
+请求体示例：
+
+```json
+{
+  "content": "---\nname: my-skill\ndescription: Updated description.\n---\n\n# My Skill"
+}
+```
+
+更新同样会经过 skill 校验。
+
+### 导入技能包
+
+```http
+POST /api/skills/import
+Content-Type: multipart/form-data
+```
+
+表单字段：
+
+- `file`: 必填，`.skill` 或 `.zip`
+- `replace_existing`: 可选，`true/false`
+
+示例：
+
+```bash
+curl -X POST http://localhost:8000/api/skills/import \
+  -F "file=@demo-skill.skill" \
+  -F "replace_existing=false"
+```
+
+导入时会校验：
+
+- 压缩包结构是否合法
+- 是否存在唯一 skill 根目录
+- 是否存在 `SKILL.md`
+- frontmatter / 命名规范是否正确
+- 包内引用文件是否存在
+- 路径是否安全
+
+成功响应示例：
+
+```json
+{
+  "name": "demo-skill",
+  "path": "/abs/path/skills/demo-skill/SKILL.md",
+  "message": "Skill 'demo-skill' imported successfully",
+  "files": ["SKILL.md", "references/guide.md"],
+  "description": "Demo packaged skill",
+  "warnings": [],
+  "compatibility": {
+    "status": "incompatible",
+    "issues": ["Missing CLI dependency: demo-cli"],
+    "warnings": []
+  }
+}
+```
+
+---
+
 ## 🔐 安全注意事项
 
 1. **API Key 保护**: 不要在前端代码中暴露 API Key

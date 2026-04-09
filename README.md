@@ -141,6 +141,30 @@ PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers ./.venv/bin/python -m playwright i
 .horbot/data/uploads
 ```
 
+### Skills 导入与兼容性
+
+当前 Skills 页面支持：
+
+- 新建 / 编辑 `SKILL.md`
+- 导入 `.skill` 或 `.zip` 技能包
+
+导入技能包时，Horbot 会先做规范校验，再决定是否允许写入工作区。当前会检查：
+
+- 包内是否只有一个 skill 根目录
+- 是否存在 `SKILL.md`
+- `SKILL.md` frontmatter 是否包含合法的 `name` 与 `description`
+- 技能命名是否符合规范
+- 包内相对引用文件是否存在
+- 压缩包路径是否安全
+
+导入完成后，Skills 页面会显示兼容性状态：
+
+- `compatible`: 当前环境可直接使用
+- `Needs Setup`: 可导入，但存在 setup 警告
+- `Incompatible`: 当前环境缺少依赖，或操作系统不匹配
+
+这意味着即使 skill 来自 SkillHub / ClawHub，页面也会立即告诉你它与当前 Horbot 实例是否兼容，而不是等到运行时才暴露问题。
+
 ### 安全默认值
 
 从当前版本开始：
