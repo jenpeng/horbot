@@ -2,6 +2,8 @@
 
 Model Context Protocol (MCP) Server 集合，为 AI 提供各种工具能力。
 
+本项目核心代码借鉴自 [HKUDS/nanobot](https://github.com/HKUDS/nanobot) 仓库内容，并在此基础上扩展了 MCP 能力。
+
 ## 📦 可用 Servers
 
 | Server | 功能 | 状态 |

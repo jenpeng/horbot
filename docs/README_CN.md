@@ -16,6 +16,8 @@
 
 🐎 **horbot** 是一个受 [OpenClaw](https://github.com/openclaw/openclaw) 启发的**超轻量级**个人 AI 助手。
 
+项目核心代码借鉴自 [HKUDS/nanobot](https://github.com/HKUDS/nanobot) 仓库内容，并在此基础上持续演进。
+
 ⚡️ 仅用 **~4,000 行代码**实现核心 Agent 功能 — 相比重型代理框架更小、更容易理解和改造。
 
 📏 实时代码行数：**3,966 行**（运行 `bash core_agent_lines.sh` 随时验证）

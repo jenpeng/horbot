@@ -1,5 +1,7 @@
 # React + TypeScript + Vite
 
+This frontend belongs to a project whose core code borrows from the [HKUDS/nanobot](https://github.com/HKUDS/nanobot) repository and continues to evolve on top of that foundation.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

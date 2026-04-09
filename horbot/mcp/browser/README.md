@@ -2,6 +2,8 @@
 
 让 AI 可以通过 MCP 工具控制浏览器，实现可视化自动化操作。
 
+本项目核心代码借鉴自 [HKUDS/nanobot](https://github.com/HKUDS/nanobot) 仓库内容，并在此基础上扩展了浏览器 MCP 能力。
+
 ## 📦 安装依赖
 
 ```bash

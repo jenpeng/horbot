@@ -2,6 +2,8 @@
 
 This directory contains built-in skills that extend horbot's capabilities.
 
+The project's core code borrows from the [HKUDS/nanobot](https://github.com/HKUDS/nanobot) repository and continues to evolve on top of that foundation.
+
 ## Skill Format
 
 Each skill is a directory containing a `SKILL.md` file with:

@@ -2,6 +2,8 @@
 
 Excel 文件操作 MCP Server，支持创建、读取、写入 Excel 文件。
 
+本项目核心代码借鉴自 [HKUDS/nanobot](https://github.com/HKUDS/nanobot) 仓库内容，并在此基础上扩展了 Excel MCP 能力。
+
 ## 安装依赖
 
 ```bash
