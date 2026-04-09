@@ -155,16 +155,16 @@ class SkillsLoader:
             if not available:
                 missing = self._get_missing_requirements(skill_meta)
                 if missing:
-                    lines.append(f"    <requires>{escape_xml(missing)}</requires>")
+                    lines.append(f"    <requires>{escape_xml(', '.join(missing))}</requires>")
             
             lines.append(f"  </skill>")
         lines.append("</skills>")
         
         return "\n".join(lines)
     
-    def _get_missing_requirements(self, skill_meta: dict) -> str:
+    def _get_missing_requirements(self, skill_meta: dict) -> list[str]:
         """Get a description of missing requirements."""
-        missing = []
+        missing: list[str] = []
         requires = skill_meta.get("requires", {})
         for b in requires.get("bins", []):
             if not shutil.which(b):
@@ -172,7 +172,7 @@ class SkillsLoader:
         for env in requires.get("env", []):
             if not os.environ.get(env):
                 missing.append(f"ENV: {env}")
-        return ", ".join(missing)
+        return missing
     
     def _get_skill_description(self, name: str) -> str:
         """Get the description of a skill from its frontmatter."""

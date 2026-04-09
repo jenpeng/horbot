@@ -5551,6 +5551,7 @@ async def get_skills(agent_id: Optional[str] = None):
             "source_schema": compat.get("source_schema", "horbot"),
             "source_schema_version": compat.get("source_schema_version", 1),
             "normalized_from_legacy": bool(compat.get("normalized_from_legacy", False)),
+            "install": meta.get("install", []) if isinstance(meta.get("install"), list) else [],
             "missing_requirements": loader._get_missing_requirements(meta) if not loader._check_requirements(meta) else None
         })
     

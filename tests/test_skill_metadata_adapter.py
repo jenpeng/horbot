@@ -50,6 +50,14 @@ class SkillMetadataAdapterTests(unittest.TestCase):
         self.assertEqual(parse_skill_metadata('not-json'), {})
         self.assertEqual(parse_skill_metadata('[]'), {})
 
+    def test_parse_install_metadata_is_preserved(self):
+        metadata = parse_skill_metadata(
+            '{"horbot":{"requires":{"bins":["gh"]},"install":[{"id":"brew","kind":"brew","formula":"gh","label":"Install GitHub CLI"}]}}'
+        )
+
+        self.assertEqual(metadata["install"][0]["kind"], "brew")
+        self.assertEqual(metadata["install"][0]["formula"], "gh")
+
 
 class SkillsLoaderCompatibilityTests(unittest.TestCase):
     def test_openclaw_metadata_still_controls_enabled_and_always_flags(self):
@@ -97,6 +105,21 @@ metadata: {"openclaw":{"enabled":"false"}}
             skills_with_disabled = loader.list_skills(filter_unavailable=False, include_disabled=True)
             self.assertEqual(len(skills_with_disabled), 1)
             self.assertFalse(skills_with_disabled[0]['enabled'])
+
+    def test_missing_requirements_returns_a_list_for_ui_rendering(self):
+        loader = SkillsLoader(workspace=Path(tempfile.gettempdir()), builtin_skills_dir=Path(tempfile.gettempdir()) / 'missing-builtin')
+
+        missing = loader._get_missing_requirements({
+            "requires": {
+                "bins": ["definitely-missing-horbot-bin"],
+                "env": ["DEFINITELY_MISSING_HORBOT_ENV"],
+            }
+        })
+
+        self.assertEqual(
+            missing,
+            ["CLI: definitely-missing-horbot-bin", "ENV: DEFINITELY_MISSING_HORBOT_ENV"],
+        )
 
 
 if __name__ == '__main__':

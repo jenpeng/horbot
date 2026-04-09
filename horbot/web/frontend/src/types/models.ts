@@ -308,12 +308,23 @@ export interface Skill {
   source_schema: string;
   source_schema_version: number | null;
   normalized_from_legacy: boolean;
+  install?: SkillInstallOption[];
   missing_requirements?: string[];
 }
 
 export interface SkillDetail extends Skill {
   content: string;
   metadata: Record<string, unknown>;
+}
+
+export interface SkillInstallOption {
+  id?: string;
+  kind?: string;
+  formula?: string;
+  package?: string;
+  bins?: string[];
+  label?: string;
+  command?: string;
 }
 
 export interface ProviderConfig {

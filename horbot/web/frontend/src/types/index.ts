@@ -39,6 +39,7 @@ export type {
   ExecutionStep,
   Skill,
   SkillDetail,
+  SkillInstallOption,
   ProviderConfig,
   ProvidersConfig,
   AgentDefaults,

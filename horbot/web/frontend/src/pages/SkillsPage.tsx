@@ -4,7 +4,7 @@ import { Badge } from '../components/ui/Badge';
 import { Button, IconButton } from '../components/ui/Button';
 import Tabs from '../components/ui/Tabs';
 import skillsService from '../services/skills';
-import type { Skill, SkillDetail, MCPServerConfig } from '../types';
+import type { Skill, SkillDetail, MCPServerConfig, SkillInstallOption } from '../types';
 
 const MarkdownRenderer = lazy(() => import('../components/MarkdownRenderer'));
 
@@ -33,6 +33,19 @@ const markdownPreviewFallback = (
     正在加载 Markdown 预览...
   </div>
 );
+
+const formatInstallCommand = (option: SkillInstallOption): string | null => {
+  if (option.command) {
+    return option.command;
+  }
+  if (option.kind === 'brew' && option.formula) {
+    return `brew install ${option.formula}`;
+  }
+  if (option.kind === 'apt' && option.package) {
+    return `sudo apt-get install -y ${option.package}`;
+  }
+  return null;
+};
 
 const SkillsPage: React.FC = () => {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -683,14 +696,37 @@ const SkillsPage: React.FC = () => {
                         )}
                       </div>
 
-                      {skill.missing_requirements && Array.isArray(skill.missing_requirements) && skill.missing_requirements.length > 0 && (
+                      {((skill.missing_requirements && skill.missing_requirements.length > 0) || (skill.install && skill.install.length > 0 && !skill.available)) && (
                         <div className="mt-3 bg-semantic-error-light border border-semantic-error/20 rounded-lg p-3">
-                          <p className="text-xs text-semantic-error flex items-start gap-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <span><strong>Missing:</strong> {skill.missing_requirements.join(', ')}</span>
-                          </p>
+                          <div className="space-y-2 text-xs text-semantic-error">
+                            {skill.missing_requirements && skill.missing_requirements.length > 0 && (
+                              <p className="flex items-start gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span><strong>Missing:</strong> {skill.missing_requirements.join(', ')}</span>
+                              </p>
+                            )}
+                            {skill.install && skill.install.length > 0 && !skill.available && (
+                              <div className="pl-6 space-y-2">
+                                {skill.install.map((option, index) => {
+                                  const command = formatInstallCommand(option);
+                                  return (
+                                    <div key={`${option.id || option.kind || 'install'}-${index}`} className="space-y-1">
+                                      <p className="font-medium text-semantic-error">
+                                        {option.label || 'Install dependency'}
+                                      </p>
+                                      {command && (
+                                        <code className="block rounded bg-white/80 px-2 py-1 font-mono text-[11px] text-surface-700 break-all">
+                                          {command}
+                                        </code>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
