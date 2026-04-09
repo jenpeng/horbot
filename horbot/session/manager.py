@@ -270,6 +270,7 @@ class SessionManager:
         resolved_title = (session.title or session.metadata.get("title") or "新对话").strip() or "新对话"
         session.title = resolved_title
         session.metadata["title"] = resolved_title
+        message_count = len(session.messages)
 
         with open(path, "w", encoding="utf-8") as f:
             metadata_line = {
@@ -278,7 +279,8 @@ class SessionManager:
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated
+                "last_consolidated": session.last_consolidated,
+                "message_count": message_count,
             }
             f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
             for msg in session.messages:
@@ -292,6 +294,7 @@ class SessionManager:
         resolved_title = (session.title or session.metadata.get("title") or "新对话").strip() or "新对话"
         session.title = resolved_title
         session.metadata["title"] = resolved_title
+        message_count = len(session.messages)
 
         async with aiofiles.open(path, "w", encoding="utf-8") as f:
             metadata_line = {
@@ -300,7 +303,8 @@ class SessionManager:
                 "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated
+                "last_consolidated": session.last_consolidated,
+                "message_count": message_count,
             }
             await f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
             for msg in session.messages:
@@ -323,7 +327,6 @@ class SessionManager:
         
         for path in self.sessions_dir.glob("*.jsonl"):
             try:
-                message_count = 0
                 with open(path, encoding="utf-8") as f:
                     first_line = f.readline().strip()
                     if first_line:
@@ -331,15 +334,18 @@ class SessionManager:
                         if data.get("_type") == "metadata":
                             metadata = data.get("metadata", {}) or {}
                             key = data.get("key") or path.stem.replace("_", ":", 1)
-                            for line in f:
-                                if line.strip():
-                                    message_count += 1
+                            message_count = data.get("message_count")
+                            if message_count is None:
+                                message_count = 0
+                                for line in f:
+                                    if line.strip():
+                                        message_count += 1
                             sessions.append({
                                 "key": key,
                                 "created_at": data.get("created_at"),
                                 "updated_at": data.get("updated_at"),
                                 "title": metadata.get("title", "未命名对话"),
-                                "message_count": message_count,
+                                "message_count": int(message_count),
                                 "path": str(path)
                             })
             except Exception:

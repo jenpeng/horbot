@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 from horbot.session.manager import SessionManager
@@ -46,6 +47,42 @@ class ChatSessionIdTests(unittest.TestCase):
             self.assertIsNotNone(reloaded)
             self.assertEqual(reloaded.title, "This title should persist")
             self.assertEqual(reloaded.metadata.get("title"), "This title should persist")
+
+    def test_list_sessions_uses_persisted_message_count_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SessionManager(workspace=Path(tmpdir))
+            session = manager.get_or_create("web:test")
+            session.add_message("user", "one")
+            session.add_message("assistant", "two")
+            manager.save(session)
+
+            session_path = manager._get_session_path("web:test")
+            with open(session_path, encoding="utf-8") as f:
+                metadata = json.loads(f.readline())
+
+            self.assertEqual(metadata["message_count"], 2)
+            self.assertEqual(manager.list_sessions()[0]["message_count"], 2)
+
+    def test_list_sessions_falls_back_for_legacy_metadata_without_message_count(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = SessionManager(workspace=Path(tmpdir))
+            session_path = manager._get_session_path("web:test")
+
+            with open(session_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "_type": "metadata",
+                    "key": "web:test",
+                    "created_at": "2026-04-09T10:00:00",
+                    "updated_at": "2026-04-09T10:00:00",
+                    "metadata": {"title": "Legacy Session"},
+                    "last_consolidated": 0,
+                }, ensure_ascii=False) + "\n")
+                f.write(json.dumps({"role": "user", "content": "one"}, ensure_ascii=False) + "\n")
+                f.write(json.dumps({"role": "assistant", "content": "two"}, ensure_ascii=False) + "\n")
+
+            session_info = manager.list_sessions()[0]
+            self.assertEqual(session_info["title"], "Legacy Session")
+            self.assertEqual(session_info["message_count"], 2)
 
 
 if __name__ == "__main__":
