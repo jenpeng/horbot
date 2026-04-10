@@ -8,15 +8,15 @@ const DashboardSkillGrid = ({ onSkillClick }: DashboardSkillGridProps) => (
   <div>
     <div className="mb-5 flex items-center justify-between">
       <div>
-        <h2 className="text-xl font-semibold text-surface-900 tracking-tight">AI Assistant Skills</h2>
-        <p className="text-sm text-surface-500 mt-1.5 font-light">Quick access to common features</p>
+        <h2 className="text-xl font-semibold text-surface-900 tracking-tight">System Tools</h2>
+        <p className="mt-1.5 text-sm font-light text-surface-500">Diagnostics, logs, and configuration shortcuts</p>
       </div>
       <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-surface-100 rounded-full">
         <span className="w-2 h-2 rounded-full bg-primary-500 animate-pulse" />
-        <span className="text-xs font-medium text-surface-600">{AI_SKILLS.length} 项可用</span>
+        <span className="text-xs font-medium text-surface-600">{AI_SKILLS.length} tools</span>
       </div>
     </div>
-    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
       {AI_SKILLS.map((skill, index) => (
         <div
           key={skill.id}

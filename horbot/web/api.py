@@ -70,6 +70,7 @@ from horbot.utils.bootstrap import (
     upsert_markdown_section,
 )
 from pydantic import BaseModel, Field
+from pydantic.alias_generators import to_camel
 from pathlib import Path
 
 router = APIRouter()
@@ -2020,6 +2021,8 @@ def _is_channel_configured(channel_name: str, channel_config: dict[str, Any]) ->
 
     for field in required_fields:
         value = channel_config.get(field)
+        if field not in channel_config:
+            value = channel_config.get(to_camel(field))
         if isinstance(value, bool):
             if not value:
                 missing_fields.append(field)

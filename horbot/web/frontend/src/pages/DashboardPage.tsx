@@ -21,7 +21,6 @@ const DashboardPage: React.FC = () => {
     error,
     refreshSummary,
     systemStatus,
-    channelStatusList,
     channelCounts,
     recentActivities,
     dashboardAlerts,
@@ -96,10 +95,7 @@ const DashboardPage: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 items-start gap-6 mt-6 lg:grid-cols-2 xl:grid-cols-2">
-          <DashboardChannelsCard
-            channels={channelStatusList}
-            counts={channelCounts}
-          />
+          <DashboardChannelsCard counts={channelCounts} />
           <DashboardSystemInfoCard
             copiedVersion={copiedVersion}
             onCopyVersion={() => { void handleCopyVersion(); }}
