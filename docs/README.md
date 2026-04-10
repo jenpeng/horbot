@@ -24,6 +24,7 @@ Horbot is a lightweight multi-agent assistant stack with:
 - [Skills](./SKILLS.md)
 - [Security](./SECURITY.md)
 - [Contributing](./CONTRIBUTING.md)
+- [Changelog](../CHANGELOG.md)
 
 ## Runtime Notes
 

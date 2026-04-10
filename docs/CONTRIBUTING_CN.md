@@ -368,5 +368,5 @@ Closes #123
 感谢所有贡献者的付出！您的贡献让 horbot 变得更好。
 
 <a href="https://github.com/jenpeng/horbot/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=HKUDS/horbot" />
+  <img src="https://contrib.rocks/image?repo=jenpeng/horbot" />
 </a>

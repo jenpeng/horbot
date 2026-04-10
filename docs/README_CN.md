@@ -20,7 +20,7 @@
 
 - 核心轻量 Agent 结构参考 [HKUDS/nanobot](https://github.com/HKUDS/nanobot)
 - 自主代理与自我改进能力参考 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
-- 多 Agent 协作和执行编排参考 [volcengine/OpenViking](https://github.com/volcengine/OpenViking)
+- 三层记忆机制思路参考 [volcengine/OpenViking](https://github.com/volcengine/OpenViking)
 - 早期技能体系设计参考 [OpenClaw](https://github.com/openclaw/openclaw)
 
 当前版本更强调：
@@ -43,6 +43,7 @@
 - [安全指南](./SECURITY_CN.md)
 - [用户手册](./USER_MANUAL_CN.md)
 - [多 Agent 操作手册](./MULTI_AGENT_GUIDE_CN.md)
+- [变更记录](./CHANGELOG_CN.md)
 
 ## 核心特性
 
@@ -66,22 +67,28 @@
 
 <table align="center">
   <tr align="center">
-    <th><p align="center">📈 24/7 实时市场分析</p></th>
-    <th><p align="center">🚀 全栈软件工程师</p></th>
-    <th><p align="center">📅 智能日程管理</p></th>
-    <th><p align="center">📚 个人知识助手</p></th>
+    <th><p align="center">📊 Dashboard</p></th>
+    <th><p align="center">💬 Chat</p></th>
   </tr>
   <tr>
-    <td align="center"><p align="center"><img src="./assets/search.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="./assets/code.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="./assets/scedule.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="./assets/memory.gif" width="180" height="400"></p></td>
+    <td align="center"><p align="center"><img src="./assets/preview-dashboard.png" width="420"></p></td>
+    <td align="center"><p align="center"><img src="./assets/preview-chat.png" width="420"></p></td>
   </tr>
   <tr>
-    <td align="center">发现 • 洞察 • 趋势</td>
-    <td align="center">开发 • 部署 • 扩展</td>
-    <td align="center">计划 • 自动化 • 组织</td>
-    <td align="center">学习 • 记忆 • 推理</td>
+    <td align="center">运行总览 • 告警 • 渠道状态</td>
+    <td align="center">单聊 • 团队接力 • 附件</td>
+  </tr>
+  <tr align="center">
+    <th><p align="center">🧩 Skills</p></th>
+    <th><p align="center">👥 Teams</p></th>
+  </tr>
+  <tr>
+    <td align="center"><p align="center"><img src="./assets/preview-skills.png" width="420"></p></td>
+    <td align="center"><p align="center"><img src="./assets/preview-teams.png" width="420"></p></td>
+  </tr>
+  <tr>
+    <td align="center">导入校验 • 兼容性 • MCP</td>
+    <td align="center">Agent 管理 • 团队编排 • 记忆画像</td>
   </tr>
 </table>
 
@@ -778,18 +785,18 @@ PR 欢迎！代码库故意保持小巧和可读。🤗
 ## ⭐ Star 历史
 
 <div align="center">
-  <a href="https://star-history.com/#HKUDS/horbot&Date">
+  <a href="https://star-history.com/#jenpeng/horbot&Date">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=HKUDS/horbot&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=HKUDS/horbot&type=Date" />
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=HKUDS/horbot&type=Date" style="border-radius: 15px; box-shadow: 0 0 30px rgba(0, 217, 255, 0.3);" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=jenpeng/horbot&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=jenpeng/horbot&type=Date" />
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=jenpeng/horbot&type=Date" style="border-radius: 15px; box-shadow: 0 0 30px rgba(0, 217, 255, 0.3);" />
     </picture>
   </a>
 </div>
 
 <p align="center">
   <em>感谢访问 ✨ horbot！</em><br><br>
-  <img src="https://visitor-badge.laobi.icu/badge?page_id=HKUDS.horbot&style=for-the-badge&color=00d4ff" alt="Views">
+  <img src="https://visitor-badge.laobi.icu/badge?page_id=jenpeng.horbot&style=for-the-badge&color=00d4ff" alt="Views">
 </p>
 
 <p align="center">

@@ -18,7 +18,7 @@ The project borrows and adapts ideas from several excellent open-source systems:
 
 - Core lightweight agent patterns and implementation structure from [HKUDS/nanobot](https://github.com/HKUDS/nanobot)
 - Autonomous agent and self-improvement ideas from [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
-- Multi-agent workflow and execution concepts from [volcengine/OpenViking](https://github.com/volcengine/OpenViking)
+- Three-layer memory ideas inspired by [volcengine/OpenViking](https://github.com/volcengine/OpenViking)
 - Earlier skill-system inspiration from [OpenClaw](https://github.com/openclaw/openclaw)
 
 Horbot does not attempt to be a giant framework. The emphasis is:
@@ -32,16 +32,20 @@ Horbot does not attempt to be a giant framework. The emphasis is:
 
 <table align="center">
   <tr align="center">
-    <th>Research</th>
-    <th>Engineering</th>
-    <th>Scheduling</th>
-    <th>Memory</th>
+    <th>Dashboard</th>
+    <th>Chat</th>
   </tr>
   <tr>
-    <td align="center"><img src="./docs/assets/search.gif" width="180" height="400" alt="Research workflow"></td>
-    <td align="center"><img src="./docs/assets/code.gif" width="180" height="400" alt="Engineering workflow"></td>
-    <td align="center"><img src="./docs/assets/scedule.gif" width="180" height="400" alt="Scheduling workflow"></td>
-    <td align="center"><img src="./docs/assets/memory.gif" width="180" height="400" alt="Memory workflow"></td>
+    <td align="center"><img src="./docs/assets/preview-dashboard.png" width="420" alt="Horbot dashboard"></td>
+    <td align="center"><img src="./docs/assets/preview-chat.png" width="420" alt="Horbot chat page"></td>
+  </tr>
+  <tr align="center">
+    <th>Skills</th>
+    <th>Teams</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="./docs/assets/preview-skills.png" width="420" alt="Horbot skills page"></td>
+    <td align="center"><img src="./docs/assets/preview-teams.png" width="420" alt="Horbot teams page"></td>
   </tr>
 </table>
 
@@ -116,6 +120,7 @@ Common commands:
 - [Skills](./docs/SKILLS.md)
 - [Security](./docs/SECURITY.md)
 - [Contributing](./docs/CONTRIBUTING.md)
+- [Changelog](./CHANGELOG.md)
 
 ### Chinese
 
@@ -127,6 +132,7 @@ Common commands:
 - [技能系统](./docs/SKILLS_CN.md)
 - [安全指南](./docs/SECURITY_CN.md)
 - [贡献指南](./docs/CONTRIBUTING_CN.md)
+- [变更记录](./docs/CHANGELOG_CN.md)
 
 ## Current Runtime Layout
 
@@ -156,6 +162,10 @@ The current runtime model is agent-scoped:
 ```
 
 Legacy `.horbot/context` and `.horbot/memory` directories are no longer part of the active memory model and can be removed from existing local environments.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=jenpeng/horbot&type=Date)](https://star-history.com/#jenpeng/horbot&Date)
 
 ## Notes
 
