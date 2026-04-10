@@ -7,9 +7,31 @@ import shutil
 from pathlib import Path
 
 from horbot.agent.skill_metadata_adapter import parse_skill_metadata
+from horbot.workspace.manager import AGENT_METADATA_DIRNAME
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
+
+
+def resolve_skills_dir(workspace: Path, agent_id: str | None = None) -> Path:
+    """Resolve the user skills directory for a workspace/agent combination."""
+    workspace = Path(workspace)
+
+    override_metadata_root = workspace / AGENT_METADATA_DIRNAME
+    if override_metadata_root.exists():
+        return override_metadata_root / "skills"
+
+    if agent_id:
+        try:
+            from horbot.agent.manager import get_agent_manager
+
+            agent = get_agent_manager().get_agent(agent_id)
+            if agent is not None:
+                return agent.get_skills_dir()
+        except Exception:
+            pass
+
+    return workspace / "skills"
 
 
 class SkillsLoader:
@@ -20,12 +42,18 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
     
-    def __init__(self, workspace: Path | None = None, builtin_skills_dir: Path | None = None):
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        builtin_skills_dir: Path | None = None,
+        agent_id: str | None = None,
+        skills_dir: Path | None = None,
+    ):
         if workspace is None:
             from horbot.utils.paths import get_workspace_dir
             workspace = get_workspace_dir()
         self.workspace = workspace
-        self.workspace_skills = workspace / "skills"
+        self.workspace_skills = Path(skills_dir) if skills_dir is not None else resolve_skills_dir(workspace, agent_id=agent_id)
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
     
     def list_skills(self, filter_unavailable: bool = True, include_disabled: bool = False) -> list[dict[str, str]]:

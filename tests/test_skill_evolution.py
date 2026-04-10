@@ -11,6 +11,19 @@ from horbot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from horbot.session.manager import SessionManager
 
 
+class FakeMemoryStore:
+    def __init__(self) -> None:
+        self.reflection_calls: list[dict[str, list[str]]] = []
+        self.history_entries: list[str] = []
+
+    def merge_reflection_entries(self, **kwargs) -> bool:
+        self.reflection_calls.append(kwargs)
+        return True
+
+    def append_history(self, entry: str) -> None:
+        self.history_entries.append(entry)
+
+
 class CreateSkillProvider(LLMProvider):
     def __init__(self) -> None:
         super().__init__(api_key="stub", api_base="stub://skill-evolution")
@@ -137,11 +150,13 @@ class SkillEvolutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_skill_evolution_creates_skill_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir)
+            memory_store = FakeMemoryStore()
             engine = SkillEvolutionEngine(
                 workspace=workspace,
                 provider=CreateSkillProvider(),
                 model="stub-model",
                 agent_id="writer",
+                memory_store=memory_store,
             )
 
             result = await engine.review_execution(
@@ -163,6 +178,10 @@ class SkillEvolutionTests(unittest.IsolatedAsyncioTestCase):
             content = skill_path.read_text(encoding="utf-8")
             self.assertIn("generated_by: skill-evolution", content)
             self.assertIn("# Shell Retry Checklist", content)
+            self.assertEqual(len(memory_store.reflection_calls), 1)
+            self.assertIn("auto-shell-retry-checklist", memory_store.reflection_calls[0]["reusable_strategies"][0])
+            self.assertEqual(len(memory_store.history_entries), 1)
+            self.assertIn("Skill evolution created", memory_store.history_entries[0])
 
     async def test_skill_evolution_skips_one_off_work(self):
         with tempfile.TemporaryDirectory() as tmpdir:

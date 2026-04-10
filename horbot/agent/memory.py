@@ -647,6 +647,47 @@ class MemoryStore:
 
     def write_reflection(self, content: str) -> None:
         self.reflection_file.write_text(content, encoding="utf-8")
+        if self._hierarchical_enabled and self._context_manager and content.strip():
+            self._context_manager.add_memory(
+                content=content,
+                level="L1",
+                metadata={"source": "reflection", "type": "reflection"},
+            )
+
+    def merge_reflection_entries(
+        self,
+        *,
+        stable_observations: list[str] | None = None,
+        reusable_strategies: list[str] | None = None,
+        invalidated_observations: list[str] | None = None,
+    ) -> bool:
+        """Merge new reflection entries into REFLECTION.md without losing prior notes."""
+        existing = self._parse_reflection(self.read_reflection(use_cache=False))
+        merged = {
+            "stable_observations": self._dedupe_memory_items([
+                *self._normalize_memory_items(existing.get("stable_observations")),
+                *self._normalize_memory_items(stable_observations),
+            ]),
+            "reusable_strategies": self._dedupe_memory_items([
+                *self._normalize_memory_items(existing.get("reusable_strategies")),
+                *self._normalize_memory_items(reusable_strategies),
+            ]),
+            "invalidated_observations": self._dedupe_memory_items([
+                *self._normalize_memory_items(existing.get("invalidated_observations")),
+                *self._normalize_memory_items(invalidated_observations),
+            ]),
+        }
+
+        content = self._render_reflection(merged)
+        if content.strip() == "# Reflection":
+            return False
+
+        previous = self.read_reflection(use_cache=False).strip()
+        if previous == content.strip():
+            return False
+
+        self.write_reflection(content)
+        return True
 
     def build_reflection_context(
         self,

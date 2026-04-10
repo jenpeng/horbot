@@ -1,98 +1,100 @@
 ---
 name: memory
-description: Two-layer memory system with grep-based recall and hierarchical context management.
+description: Agent-scoped memory system with long-term memory, grep-friendly history, reflection notes, and hierarchical recall. Use when you need to save durable facts, search past work, or record reusable strategies.
 always: true
 enabled: true
 ---
 
 # Memory
 
-## Structure
+## What Exists
 
-- `memory/MEMORY.md` — Long-term facts (preferences, project context, relationships). Always loaded into your context.
-- `memory/HISTORY.md` — Append-only event log. NOT loaded into context. Search it with grep.
+Horbot's memory is agent-scoped, not conversation-scoped. The important files are usually under:
 
-## Hierarchical Memory System
+- `.horbot/agents/<agent-id>/memory/L2/MEMORY.md` for durable facts and stable context
+- `.horbot/agents/<agent-id>/memory/L1/HISTORY.md` for append-only recent events
+- `.horbot/agents/<agent-id>/memory/L1/REFLECTION.md` for reusable strategies, stable observations, and corrected assumptions
 
-This skill is integrated with the hierarchical context management system:
+When team shared memory is enabled, additional shared context may live under:
 
-- **L0 (Current Session)**: Active session memory, always loaded. Contains task progress, immediate decisions, and current context.
-- **L1 (Recent)**: Recent session memories, loaded on demand. Contains important events and decisions from recent sessions.
-- **L2 (Long-term)**: Consolidated long-term memories, search-based retrieval. Contains persistent knowledge and important patterns.
+- `.horbot/teams/<team-id>/shared_memory/`
 
-### Usage Scenarios
+## How To Use Each Layer
 
-When saving memories, choose the appropriate level:
+### `MEMORY.md`
 
-| Level | Use Case | Examples |
-|-------|----------|----------|
-| **L0** | Current session context | Task progress, active decisions, temporary state |
-| **L1** | Recent important events | Recent bugs fixed, decisions made, lessons learned |
-| **L2** | Long-term facts | User preferences, project architecture, persistent knowledge |
+Store information that should remain true across future sessions:
 
-### Integration Details
+- durable user preferences
+- stable project architecture facts
+- long-lived decisions and boundaries
+- identities, roles, and persistent collaboration rules
 
-The MemoryStore automatically syncs with hierarchical storage:
+Do not dump transient task chatter here.
 
-```python
-# Long-term memory (MEMORY.md) syncs to L2
-write_long_term(content)  # → L2 storage
+### `HISTORY.md`
 
-# History entries sync to L1
-append_history(entry)  # → L1 storage
+Use for grep-friendly session summaries:
 
-# Session memory goes to L0
-add_session_memory(content, session_key)  # → L0 storage
-```
+- what changed
+- what was decided
+- what was tested
+- what failed and how it was fixed
 
-### Retrieving Hierarchical Context
+Prefer concrete nouns, file names, feature names, and dates so future search works well.
 
-Use `get_hierarchical_context()` to load layered context:
+### `REFLECTION.md`
 
-```python
-# Load L0 and L1 context (default)
-context = memory_store.get_hierarchical_context(session_key)
+Use for lessons that improve future behavior:
 
-# Load specific levels
-context = memory_store.get_hierarchical_context(
-    session_key,
-    levels=["L0", "L1", "L2"],
-    max_tokens=8000
-)
-```
+- reusable debugging strategies
+- stable observations about the repo or workflow
+- previously-held assumptions that are now invalid
 
-### Searching Across Layers
+This is the best place for compact operational learnings.
 
-Search memories across all hierarchical levels:
+## Hierarchical Recall Model
 
-```python
-results = memory_store.search_memories(
-    query="authentication",
-    levels=["L1", "L2"],
-    max_results=10
-)
-```
+Horbot's runtime recall uses layered memory:
 
-## Search Past Events
+- `L0`: session-specific working memory
+- `L1`: recent history and reflection
+- `L2`: durable long-term memory
+
+In practice:
+
+- save durable facts into `MEMORY.md`
+- save recent progress into `HISTORY.md`
+- save reusable tactics into `REFLECTION.md`
+
+The system will pull from these layers when building later context.
+
+## Search Strategy
+
+When you need past context, search `HISTORY.md` first:
 
 ```bash
-grep -i "keyword" memory/HISTORY.md
+grep -i "keyword" /abs/path/to/HISTORY.md
+grep -iE "meeting|deadline|auth" /abs/path/to/HISTORY.md
 ```
 
-Use the `exec` tool to run grep. Combine patterns: `grep -iE "meeting|deadline" memory/HISTORY.md`
+If you need durable facts or reusable tactics, read `MEMORY.md` or `REFLECTION.md`.
 
-## When to Update MEMORY.md
+## What To Save
 
-Write important facts immediately using `edit_file` or `write_file`:
-- User preferences ("I prefer dark mode")
-- Project context ("The API uses OAuth2")
-- Relationships ("Alice is the project lead")
+Save immediately when the information is likely to matter later:
 
-## Auto-consolidation
+- user says a stable preference
+- project establishes a durable rule
+- a bug fix reveals a reusable checklist
+- an old assumption is invalidated
+- a team handoff needs to survive the current turn
 
-Old conversations are automatically summarized and appended to HISTORY.md when the session grows large. Long-term facts are extracted to MEMORY.md. You don't need to manage this.
+## What Not To Save
 
-The consolidation process also respects the hierarchical levels:
-- Session-specific context → L0
-- Recent events and decisions → L1
-- Persistent facts → L2
+Do not store:
+
+- secrets or raw tokens unless explicitly required and safely handled
+- one-off chatter
+- duplicate paragraphs already present in memory
+- temporary guesses that are not yet verified

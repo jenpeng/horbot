@@ -112,6 +112,55 @@ const AgentFormModal = ({
               <p className="mt-1 text-xs text-red-600">{createNameError}</p>
             )}
           </div>
+          <div className="border-t border-surface-200 pt-4">
+            <h4 className="text-sm font-medium text-surface-700 mb-3">模型配置</h4>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="agent-form-provider" className="block text-xs font-medium text-surface-600 mb-1">供应商</label>
+                <select
+                  id="agent-form-provider"
+                  value={form.provider}
+                  onChange={(e) => setForm({ ...form, provider: e.target.value })}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm ${
+                    isCreateMode && createProviderError ? 'border-red-300 bg-red-50/40' : 'border-surface-300'
+                  }`}
+                  aria-invalid={Boolean(createProviderError)}
+                >
+                  {isCreateMode && <option value="">请选择供应商</option>}
+                  <option value="auto" disabled={isCreateMode}>自动选择</option>
+                  {providers.map((provider) => (
+                    <option key={provider.id} value={provider.id} disabled={!provider.configured}>
+                      {provider.name} {!provider.configured && '(未配置)'}
+                    </option>
+                  ))}
+                </select>
+                {createProviderError && (
+                  <p className="mt-1 text-xs text-red-600">{createProviderError}</p>
+                )}
+              </div>
+              <div>
+                <label htmlFor="agent-form-model" className="block text-xs font-medium text-surface-600 mb-1">模型名称</label>
+                <input
+                  id="agent-form-model"
+                  type="text"
+                  value={form.model}
+                  onChange={(e) => setForm({ ...form, model: e.target.value })}
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm ${
+                    isCreateMode && createModelError ? 'border-red-300 bg-red-50/40' : 'border-surface-300'
+                  }`}
+                  placeholder="如: gpt-4o, claude-sonnet-4-5"
+                  aria-invalid={Boolean(createModelError)}
+                />
+                {createModelError ? (
+                  <p className="mt-1 text-xs text-red-600">{createModelError}</p>
+                ) : (
+                  <p className="mt-1 text-xs text-surface-500">
+                    创建阶段需要明确 provider 和 model，创建完成后即可直接开始首次私聊。
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
           <div>
             <label className="block text-sm font-medium text-surface-700 mb-1">描述</label>
             <input
@@ -226,56 +275,6 @@ const AgentFormModal = ({
               })}
             </div>
           </div>
-          <div className="border-t border-surface-200 pt-4">
-            <h4 className="text-sm font-medium text-surface-700 mb-3">模型配置</h4>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="agent-form-provider" className="block text-xs font-medium text-surface-600 mb-1">供应商</label>
-                <select
-                  id="agent-form-provider"
-                  value={form.provider}
-                  onChange={(e) => setForm({ ...form, provider: e.target.value })}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm ${
-                    isCreateMode && createProviderError ? 'border-red-300 bg-red-50/40' : 'border-surface-300'
-                  }`}
-                  aria-invalid={Boolean(createProviderError)}
-                >
-                  {isCreateMode && <option value="">请选择供应商</option>}
-                  <option value="auto" disabled={isCreateMode}>自动选择</option>
-                  {providers.map((provider) => (
-                    <option key={provider.id} value={provider.id} disabled={!provider.configured}>
-                      {provider.name} {!provider.configured && '(未配置)'}
-                    </option>
-                  ))}
-                </select>
-                {createProviderError && (
-                  <p className="mt-1 text-xs text-red-600">{createProviderError}</p>
-                )}
-              </div>
-              <div>
-                <label htmlFor="agent-form-model" className="block text-xs font-medium text-surface-600 mb-1">模型名称</label>
-                <input
-                  id="agent-form-model"
-                  type="text"
-                  value={form.model}
-                  onChange={(e) => setForm({ ...form, model: e.target.value })}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm ${
-                    isCreateMode && createModelError ? 'border-red-300 bg-red-50/40' : 'border-surface-300'
-                  }`}
-                  placeholder="如: gpt-4o, claude-sonnet-4-5"
-                  aria-invalid={Boolean(createModelError)}
-                />
-                {createModelError ? (
-                  <p className="mt-1 text-xs text-red-600">{createModelError}</p>
-                ) : (
-                  <p className="mt-1 text-xs text-surface-500">
-                    创建阶段需要明确 provider 和 model，创建完成后即可直接开始首次私聊。
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
           {isCreateMode ? (
             <>
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-4 text-sm text-surface-700">

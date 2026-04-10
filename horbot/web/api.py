@@ -1789,6 +1789,15 @@ def _resolve_agent_workspace_for_request(agent_id: Optional[str] = None) -> tupl
     return None, Path(get_cached_config().workspace_path)
 
 
+def _resolve_skill_dir_for_request(agent_id: Optional[str] = None) -> tuple[Optional[Any], Path, Path]:
+    from horbot.agent.skills import resolve_skills_dir
+
+    agent, workspace_path = _resolve_agent_workspace_for_request(agent_id)
+    if agent is not None:
+        return agent, workspace_path, agent.get_skills_dir()
+    return agent, workspace_path, resolve_skills_dir(workspace_path, agent_id=agent_id)
+
+
 def _build_memory_store(agent_id: Optional[str] = None):
     from horbot.agent.memory import MemoryStore
 
@@ -5542,8 +5551,8 @@ async def get_skills(agent_id: Optional[str] = None):
     from horbot.agent.skills import SkillsLoader
     from horbot.agent.skill_package import build_skill_compatibility
     
-    _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
-    loader = SkillsLoader(workspace=workspace_path)
+    _, workspace_path, skills_dir = _resolve_skill_dir_for_request(agent_id)
+    loader = SkillsLoader(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
     
     skills = loader.list_skills(filter_unavailable=False, include_disabled=True)
     
@@ -5585,8 +5594,8 @@ async def get_skill_detail(skill_name: str, agent_id: Optional[str] = None):
     from horbot.agent.skills import SkillsLoader
     from horbot.agent.skill_package import build_skill_compatibility
     
-    _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
-    loader = SkillsLoader(workspace=workspace_path)
+    _, workspace_path, skills_dir = _resolve_skill_dir_for_request(agent_id)
+    loader = SkillsLoader(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
     
     content = loader.load_skill(skill_name)
     if not content:
@@ -5631,10 +5640,9 @@ async def create_skill(request: SkillCreateRequest, agent_id: Optional[str] = No
     from horbot.agent.skills import SkillsLoader
     from horbot.agent.skill_package import validate_skill_content
 
-    _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
-    loader = SkillsLoader(workspace=workspace_path)
+    _, workspace_path, skills_dir = _resolve_skill_dir_for_request(agent_id)
+    loader = SkillsLoader(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
 
-    skills_dir = workspace_path / "skills"
     skill_dir = skills_dir / request.name
     skill_file = skill_dir / "SKILL.md"
     
@@ -5661,8 +5669,8 @@ async def update_skill(skill_name: str, request: SkillUpdateRequest, agent_id: O
     from horbot.agent.skills import SkillsLoader
     from horbot.agent.skill_package import validate_skill_content
     
-    _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
-    loader = SkillsLoader(workspace=workspace_path)
+    _, workspace_path, skills_dir = _resolve_skill_dir_for_request(agent_id)
+    loader = SkillsLoader(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
     
     skills = loader.list_skills(filter_unavailable=False)
     skill_info = next((s for s in skills if s["name"] == skill_name), None)
@@ -5695,8 +5703,7 @@ async def import_skill_package(
     """Import a skill package from .skill or .zip."""
     from horbot.agent.skill_package import import_skill_archive_bytes, build_skill_compatibility
 
-    _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
-    skills_dir = workspace_path / "skills"
+    _, workspace_path, skills_dir = _resolve_skill_dir_for_request(agent_id)
     skills_dir.mkdir(parents=True, exist_ok=True)
 
     payload = await file.read()
@@ -5736,8 +5743,8 @@ async def delete_skill(skill_name: str, agent_id: Optional[str] = None):
     import shutil
     from horbot.agent.skills import SkillsLoader
     
-    _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
-    loader = SkillsLoader(workspace=workspace_path)
+    _, workspace_path, skills_dir = _resolve_skill_dir_for_request(agent_id)
+    loader = SkillsLoader(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
     
     skills = loader.list_skills(filter_unavailable=False)
     skill_info = next((s for s in skills if s["name"] == skill_name), None)
@@ -5769,8 +5776,8 @@ async def toggle_skill(skill_name: str, agent_id: Optional[str] = None):
     import re
     from horbot.agent.skills import SkillsLoader
     
-    _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
-    loader = SkillsLoader(workspace=workspace_path)
+    _, workspace_path, skills_dir = _resolve_skill_dir_for_request(agent_id)
+    loader = SkillsLoader(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
     
     content = loader.load_skill(skill_name)
     if not content:

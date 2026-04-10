@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { tokensService } from '../services';
 import { Card, CardHeader, CardContent } from '../components/ui';
 import { Button, IconButton } from '../components/ui/Button';
-import { formatNumber, formatCost } from '../utils/format';
+import { formatNumber } from '../utils/format';
 import type { TokenUsageStats } from '../types';
 
 type TimeRange = '7d' | '30d' | 'all';
@@ -52,6 +52,13 @@ const TokenPage: React.FC = () => {
     { value: '30d', label: '近 30 天' },
     { value: 'all', label: '全部' },
   ];
+  const averageTokensPerRequest = stats && stats.total_requests > 0
+    ? Math.round(stats.total_tokens / stats.total_requests)
+    : 0;
+  const activeDays = stats?.by_day.filter((day) => day.total > 0).length ?? 0;
+  const outputShare = stats && stats.total_tokens > 0
+    ? Math.round((stats.total_output_tokens / stats.total_tokens) * 100)
+    : 0;
 
   if (isLoading && !stats) {
     return (
@@ -74,7 +81,7 @@ const TokenPage: React.FC = () => {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-bold text-surface-900">Token 使用统计</h2>
-            <p className="text-sm text-surface-600 mt-1">监控 API Token 消耗和成本</p>
+            <p className="text-sm text-surface-600 mt-1">观察请求量、输入输出规模与近期开销趋势</p>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex bg-surface-100 border border-surface-200 rounded-lg p-1">
@@ -120,20 +127,30 @@ const TokenPage: React.FC = () => {
 
         {stats && (
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <Card hover className="group">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-primary-600 font-medium">总 Token</span>
-                  <div className="p-2 bg-primary-100 rounded-lg group-hover:bg-primary-200 transition-colors">
-                    <svg className="w-5 h-5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 mb-6">
+              <Card hover className="group xl:col-span-2">
+                <div className="flex items-start justify-between gap-4 mb-5">
+                  <div>
+                    <span className="text-sm text-primary-600 font-medium">总 Token</span>
+                    <p className="text-4xl font-bold text-surface-900 mt-2">{formatNumber(stats.total_tokens)}</p>
+                    <p className="text-sm text-surface-600 mt-2">当前时间范围内累计的输入与输出总量</p>
+                  </div>
+                  <div className="p-3 bg-primary-100 rounded-2xl group-hover:bg-primary-200 transition-colors">
+                    <svg className="w-6 h-6 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
                     </svg>
                   </div>
                 </div>
-                <p className="text-3xl font-bold text-surface-900 mb-1">{formatNumber(stats.total_tokens)}</p>
-                <p className="text-xs text-surface-600">
-                  {formatNumber(stats.total_input_tokens)} 输入 + {formatNumber(stats.total_output_tokens)} 输出
-                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="rounded-2xl bg-surface-50 border border-surface-200 px-4 py-3">
+                    <div className="text-xs font-medium text-surface-500">输入 Token</div>
+                    <div className="mt-1 text-2xl font-semibold text-surface-900">{formatNumber(stats.total_input_tokens)}</div>
+                  </div>
+                  <div className="rounded-2xl bg-surface-50 border border-surface-200 px-4 py-3">
+                    <div className="text-xs font-medium text-surface-500">输出 Token</div>
+                    <div className="mt-1 text-2xl font-semibold text-surface-900">{formatNumber(stats.total_output_tokens)}</div>
+                  </div>
+                </div>
               </Card>
 
               <Card hover className="group">
@@ -151,19 +168,6 @@ const TokenPage: React.FC = () => {
 
               <Card hover className="group">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-primary-600 font-medium">预估成本</span>
-                  <div className="p-2 bg-primary-100 rounded-lg group-hover:bg-primary-200 transition-colors">
-                    <svg className="w-5 h-5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                </div>
-                <p className="text-3xl font-bold text-surface-900 mb-1">{formatCost(stats.total_cost)}</p>
-                <p className="text-xs text-surface-600">基于标准定价</p>
-              </Card>
-
-              <Card hover className="group">
-                <div className="flex items-center justify-between mb-3">
                   <span className="text-sm text-primary-600 font-medium">平均 Token</span>
                   <div className="p-2 bg-primary-100 rounded-lg group-hover:bg-primary-200 transition-colors">
                     <svg className="w-5 h-5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -171,10 +175,36 @@ const TokenPage: React.FC = () => {
                     </svg>
                   </div>
                 </div>
-                <p className="text-3xl font-bold text-surface-900 mb-1">
-                  {stats.total_requests > 0 ? Math.round(stats.total_tokens / stats.total_requests).toLocaleString() : 0}
-                </p>
+                <p className="text-3xl font-bold text-surface-900 mb-1">{averageTokensPerRequest.toLocaleString()}</p>
                 <p className="text-xs text-surface-600">每次请求平均</p>
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <Card>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm text-primary-600 font-medium">活跃天数</div>
+                    <div className="mt-1 text-2xl font-semibold text-surface-900">{activeDays}</div>
+                    <div className="mt-1 text-xs text-surface-500">所选范围内至少产生过一次 token 的日期数</div>
+                  </div>
+                  <div className="rounded-2xl bg-surface-50 border border-surface-200 px-3 py-2 text-right">
+                    <div className="text-xs text-surface-500">趋势样本</div>
+                    <div className="text-sm font-semibold text-surface-800">{stats.by_day.length} 天</div>
+                  </div>
+                </div>
+              </Card>
+              <Card>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm text-primary-600 font-medium">输出占比</div>
+                    <div className="mt-1 text-2xl font-semibold text-surface-900">{outputShare}%</div>
+                    <div className="mt-1 text-xs text-surface-500">输出 token 在总 token 中的占比</div>
+                  </div>
+                  <div className="w-24 h-24 rounded-full border-8 border-surface-100 flex items-center justify-center text-sm font-semibold text-primary-700">
+                    {outputShare}%
+                  </div>
+                </div>
               </Card>
             </div>
 

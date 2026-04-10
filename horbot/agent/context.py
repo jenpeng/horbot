@@ -112,7 +112,7 @@ class ContextBuilder:
             workspace = get_workspace_dir()
         self.workspace = workspace
         self.memory = MemoryStore(workspace, agent_id=agent_id, team_ids=team_ids)
-        self.skills = SkillsLoader(workspace)
+        self.skills = SkillsLoader(workspace, agent_id=agent_id)
         self.use_hierarchical = use_hierarchical
         self._is_first_time = None
         self._agent_id = agent_id
@@ -848,6 +848,11 @@ This is your first conversation! You should guide the user through a friendly se
             soul_name = self._extract_soul_name()
             identity_name = soul_name if soul_name else "horbot"
 
+        memory_file = str(self.memory.memory_file.expanduser().resolve())
+        history_file = str(self.memory.history_file.expanduser().resolve())
+        reflection_file = str(self.memory.reflection_file.expanduser().resolve())
+        skills_dir = str(self.skills.workspace_skills.expanduser().resolve())
+
         return f"""# horbot 🐎
 
 You are {identity_name}, a helpful AI assistant.
@@ -857,9 +862,10 @@ You are {identity_name}, a helpful AI assistant.
 
 ## Workspace
 Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable)
-- Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md{context_info}
+- Long-term memory: {memory_file} (write durable facts here)
+- History log: {history_file} (append grep-friendly progress and events)
+- Reflection log: {reflection_file} (store reusable strategies and corrected assumptions)
+- Custom skills: {skills_dir}/{{skill-name}}/SKILL.md{context_info}
 {team_members_info}
 {first_time_hint}
 

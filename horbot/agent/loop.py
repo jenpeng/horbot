@@ -1985,6 +1985,7 @@ class AgentLoop:
                     provider=self.provider,
                     model=self.model,
                     agent_id=self._agent_id,
+                    memory_store=self._memory_store(),
                 )
                 await engine.review_execution(
                     execution_log,

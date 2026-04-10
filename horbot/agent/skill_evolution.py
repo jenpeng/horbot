@@ -11,8 +11,9 @@ from typing import Any
 
 from loguru import logger
 
+from horbot.agent.memory import MemoryStore
 from horbot.agent.skill_package import validate_skill_content
-from horbot.agent.skills import SkillsLoader
+from horbot.agent.skills import SkillsLoader, resolve_skills_dir
 from horbot.providers.base import LLMProvider
 
 _SAVE_SKILL_REVIEW_TOOL = [
@@ -78,13 +79,16 @@ class SkillEvolutionEngine:
         provider: LLMProvider,
         model: str,
         agent_id: str | None = None,
+        skills_dir: Path | None = None,
+        memory_store: MemoryStore | None = None,
     ) -> None:
         self.workspace = workspace
         self.provider = provider
         self.model = model
         self.agent_id = agent_id or "main"
-        self.skills_dir = workspace / "skills"
+        self.skills_dir = Path(skills_dir) if skills_dir is not None else resolve_skills_dir(workspace, agent_id=self.agent_id)
         self.review_log = workspace / ".skill_evolution" / "reviews.jsonl"
+        self.memory_store = memory_store
 
     async def review_execution(
         self,
@@ -105,7 +109,11 @@ class SkillEvolutionEngine:
             })
             return None
 
-        skills_summary = SkillsLoader(workspace=self.workspace).build_skills_summary()
+        skills_summary = SkillsLoader(
+            workspace=self.workspace,
+            agent_id=self.agent_id,
+            skills_dir=self.skills_dir,
+        ).build_skills_summary()
         conversation_excerpt = self._format_recent_messages(recent_messages or [])
         prompt = self._build_review_prompt(
             execution_log=execution_log,
@@ -226,12 +234,47 @@ class SkillEvolutionEngine:
             "path": str(skill_path),
             "reason": reason,
         })
+        self._record_memory_feedback(
+            action=action,
+            skill_name=skill_name,
+            description=description,
+            reason=reason,
+            changed=changed,
+        )
         return SkillEvolutionResult(
             action=action,
             skill_name=skill_name,
             path=skill_path,
             reason=reason,
             changed=changed,
+        )
+
+    def _record_memory_feedback(
+        self,
+        *,
+        action: str,
+        skill_name: str,
+        description: str,
+        reason: str,
+        changed: bool,
+    ) -> None:
+        if self.memory_store is None:
+            return
+
+        status_text = "updated" if action == "update" else "created"
+        strategy = f"Skill `{skill_name}` now captures this reusable workflow: {description}"
+        observation = (
+            f"Background skill review {status_text} `{skill_name}` after a tool-backed task because the result was reusable."
+            if changed else
+            f"Background skill review confirmed `{skill_name}` is still the right reusable workflow."
+        )
+
+        self.memory_store.merge_reflection_entries(
+            stable_observations=[observation],
+            reusable_strategies=[strategy],
+        )
+        self.memory_store.append_history(
+            f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] Skill evolution {status_text} `{skill_name}`. Reason: {reason}"
         )
 
     def _build_review_prompt(

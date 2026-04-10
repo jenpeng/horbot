@@ -1,239 +1,90 @@
 ---
 name: self-improvement
-description: Enable AI to autonomously improve its capabilities, optimize code, analyze errors, and enhance performance. Use when AI needs to review its own work, learn from mistakes, or optimize its responses.
+description: Review completed work, analyze mistakes, identify repeatable improvements, and turn validated lessons into memory or reusable skills. Use after substantial tasks, failures, or review-heavy work.
 always: false
+enabled: true
 ---
 
-# Self-Improvement Skill
+# Self-Improvement
 
-Enable the AI to autonomously improve its capabilities, learn from experience, and optimize its performance.
+Use this skill after meaningful work, not after trivial replies.
 
-## Capabilities
+## Primary Goals
 
-When this skill is active, the AI can:
+1. Review what was just done
+2. Identify concrete weaknesses or risks
+3. Extract reusable tactics
+4. Persist only the learnings that deserve to survive
 
-1. **Code Review & Optimization** - Review and improve its own generated code
-2. **Capability Assessment** - Evaluate its strengths and limitations
-3. **Error Analysis** - Learn from mistakes and avoid repetition
-4. **Performance Optimization** - Enhance response quality and speed
-5. **Learning Suggestions** - Identify areas for improvement
+## When To Use
 
-## Usage
+- after completing a non-trivial coding or debugging task
+- after a failure, retry loop, or wrong assumption
+- after a review that uncovered repeatable issues
+- when a workflow feels reusable enough to become a skill
 
-The AI can invoke this skill in the following scenarios:
+Skip it for one-off small answers with no reusable pattern.
 
-### 1. Code Review
+## How It Fits The Current Memory Framework
 
-When the AI completes a coding task, it can:
+Use the current Horbot memory layout, not ad-hoc logs:
 
-- Review the code for best practices
-- Identify potential improvements
-- Check for security vulnerabilities
-- Optimize performance
+- durable facts and lasting rules go to `L2/MEMORY.md`
+- recent outcomes and concise summaries go to `L1/HISTORY.md`
+- reusable tactics and corrected assumptions go to `L1/REFLECTION.md`
 
-### 2. Error Analysis
+If the completed work forms a repeatable workflow, Horbot may also distill it into a user skill under the current agent's skills directory.
 
-When errors occur, the AI can:
+## Recommended Workflow
 
-- Analyze the root cause
-- Document the error pattern
-- Create prevention strategies
-- Update its knowledge base
+### 1. Review
 
-### 3. Capability Assessment
+Use the templates in `templates/` when helpful:
 
-Periodically, the AI can:
+- `templates/code-review.md`
+- `templates/capability-assessment.md`
+- `templates/learning-plan.md`
 
-- Evaluate its current capabilities
-- Identify knowledge gaps
-- Create learning plans
-- Track improvement progress
+Focus on concrete evidence from the work that just happened.
 
-### 4. Performance Optimization
+### 2. Classify The Learning
 
-The AI can optimize its:
+- durable project truth -> `MEMORY.md`
+- recent progress or outcome -> `HISTORY.md`
+- reusable tactic / lesson learned -> `REFLECTION.md`
+- repeatable operating procedure -> candidate skill
 
-- Response accuracy
-- Task completion rate
-- Error reduction
-- User satisfaction
+### 3. Validate Before Persisting
 
-## Templates
+Only persist learnings that are:
 
-This skill provides the following templates:
+- specific
+- evidence-backed
+- reusable
+- safe to keep
 
-### Code Review Template
+Do not preserve vague self-praise, unverified guesses, or secrets.
 
-Location: `templates/code-review.md`
+## Relation To Automatic Skill Distillation
 
-Use this template to systematically review generated code.
+Horbot can run a background skill review after successful tool-backed work.
 
-### Capability Assessment Template
+That mechanism works best when:
 
-Location: `templates/capability-assessment.md`
+- the task used real tools
+- the result contains a concrete procedure or checklist
+- the final output clearly describes the steps that worked
 
-Use this template to assess current capabilities and identify improvement areas.
+When the workflow is reusable, the system may:
 
-### Learning Plan Template
+1. create or update a skill
+2. record the reusable tactic in reflection/history
+3. make that workflow available for later sessions
 
-Location: `templates/learning-plan.md`
+## Guardrails
 
-Use this template to create structured learning plans.
-
-## Best Practices
-
-1. **Regular Self-Review** - Review work after completing significant tasks
-2. **Error Documentation** - Document errors and solutions for future reference
-3. **Incremental Improvement** - Focus on small, measurable improvements
-4. **User Feedback Integration** - Incorporate user feedback into improvement plans
-5. **Knowledge Sharing** - Share learnings through documentation
-
-## Improvement Process
-
-The self-improvement process follows these steps:
-
-1. **Identify** - Recognize areas that need improvement
-2. **Analyze** - Understand the root cause and impact
-3. **Plan** - Create a structured improvement plan
-4. **Implement** - Execute the improvement plan
-5. **Verify** - Measure the effectiveness of improvements
-6. **Document** - Record learnings for future reference
-
-## Safety Considerations
-
-- Always verify improvements before applying them
-- Maintain backward compatibility
-- Document all changes
-- Test thoroughly before deployment
-- Keep backup of previous versions
-
-## Integration with Other Skills
-
-This skill works well with:
-
-- **autonomous** - For automated improvement cycles
-- **memory** - To store improvement history in hierarchical context
-- **github** - To track improvements via version control
-
-## Integration with Hierarchical Context
-
-This skill is integrated with the hierarchical context management system for persistent improvement tracking:
-
-### Improvement History Storage
-
-Improvement logs are automatically stored in the hierarchical context system:
-
-- **L0 (Current Session)**: Active improvement tasks and ongoing reviews
-- **L1 (Recent)**: Recent improvements and lessons learned (default storage)
-- **L2 (Long-term)**: Consolidated improvement patterns and best practices
-
-### Retrieving Past Improvements
-
-You can search past improvements from the hierarchical context:
-
-```python
-# Search for past improvements
-results = memory_store.search_memories(
-    query="code review authentication",
-    levels=["L1", "L2"],
-    max_results=10
-)
-```
-
-### Benefits of Hierarchical Storage
-
-1. **Persistent Learning** - Improvements are preserved across sessions
-2. **Contextual Retrieval** - Find relevant past improvements when needed
-3. **Pattern Recognition** - Identify recurring issues and solutions
-4. **Knowledge Building** - Build a knowledge base of best practices
-
-## Example Scenarios
-
-### Scenario 1: Code Review After Feature Implementation
-
-```
-AI: I've completed the authentication feature. Let me review it using the self-improvement skill.
-
-[Uses code-review template]
-- Checked for security vulnerabilities ✓
-- Verified error handling ✓
-- Optimized database queries ✓
-- Improved code readability ✓
-
-Result: 3 improvements identified and applied.
-```
-
-### Scenario 2: Error Pattern Analysis
-
-```
-AI: I've encountered similar errors in the last 3 tasks. Let me analyze the pattern.
-
-[Uses capability-assessment template]
-- Identified common error source: incorrect API usage
-- Created prevention strategy: API validation checklist
-- Updated knowledge base with correct usage patterns
-
-Result: Error prevention strategy implemented.
-```
-
-### Scenario 3: Performance Optimization
-
-```
-AI: My response time has increased. Let me optimize my performance.
-
-[Uses learning-plan template]
-- Analyzed response patterns
-- Identified bottlenecks
-- Created optimization plan
-- Implemented improvements
-
-Result: Response time reduced by 30%.
-```
-
-## Metrics
-
-Track improvement progress with these metrics:
-
-- **Code Quality Score** - Based on review findings
-- **Error Rate** - Number of errors per task
-- **Task Completion Rate** - Successful completions vs attempts
-- **User Satisfaction** - Based on feedback
-- **Response Accuracy** - Correctness of responses
-
-## Limitations
-
-- Cannot modify core system files
-- Requires user confirmation for significant changes
-- Limited to available tools and resources
-- Must maintain system stability
-- Cannot access external resources without permission
-
-## Configuration
-
-Enable in your `config.json`:
-
-```json
-{
-  "self_improvement": {
-    "enabled": true,
-    "auto_review": true,
-    "review_frequency": "after_task",
-    "metrics_tracking": true,
-    "improvement_log": "workspace/.improvements/log.jsonl"
-  }
-}
-```
-
-## Improvement Log
-
-All improvements are logged to `workspace/.improvements/log.jsonl`:
-
-```json
-{
-  "timestamp": "2024-01-15T10:30:00Z",
-  "type": "code_review",
-  "area": "authentication",
-  "improvements": ["added input validation", "improved error handling"],
-  "impact": "reduced errors by 40%"
-}
-```
+- prefer small, high-signal learnings over long reports
+- do not create a new skill for project-specific or one-off work
+- avoid duplicating existing skills when an update is enough
+- verify important improvements before treating them as durable knowledge
+- keep backward compatibility and user intent in mind

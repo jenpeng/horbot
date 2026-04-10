@@ -63,6 +63,35 @@ metadata: {"horbot":{"requires":{"bins":["definitely-missing-horbot-bin"]},"inst
         self.assertEqual(response.status_code, 400)
         self.assertIn("Skill validation failed", response.json()["detail"])
 
+    async def test_create_skill_uses_resolved_skill_directory(self):
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            skills_dir = Path(tmpdir) / "agent-skills"
+            skills_dir.mkdir(parents=True, exist_ok=True)
+
+            with patch(
+                "horbot.web.api._resolve_skill_dir_for_request",
+                return_value=(None, workspace, skills_dir),
+            ):
+                async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                    response = await client.post(
+                        "/api/skills",
+                        json={
+                            "name": "demo-skill",
+                            "content": "---\nname: demo-skill\ndescription: Demo skill\n---\n\n# Demo Skill\n",
+                        },
+                    )
+
+            self.assertTrue((skills_dir / "demo-skill" / "SKILL.md").exists())
+            self.assertFalse((workspace / "skills" / "demo-skill" / "SKILL.md").exists())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["name"], "demo-skill")
+
     async def test_import_skill_package_accepts_valid_skill_archive(self):
         app = FastAPI()
         app.include_router(api_router, prefix="/api")
