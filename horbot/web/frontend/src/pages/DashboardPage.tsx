@@ -34,13 +34,8 @@ const DashboardPage: React.FC = () => {
     gatewayDiagnosticsData,
     environmentData,
     memoryData,
-    fixLoading,
-    showFixConfirm,
-    fixResult,
     openSkillDiagnostic,
     closeModal,
-    confirmFix,
-    cancelFix,
   } = useDashboardDiagnostics();
 
   const [copiedVersion, setCopiedVersion] = useState(false);
@@ -121,12 +116,7 @@ const DashboardPage: React.FC = () => {
         gatewayDiagnosticsData={gatewayDiagnosticsData}
         environmentData={environmentData}
         memoryData={memoryData}
-        showFixConfirm={showFixConfirm}
-        fixLoading={fixLoading}
-        fixResult={fixResult}
         onClose={closeModal}
-        onConfirmFix={() => { void confirmFix(); }}
-        onCancelFix={cancelFix}
       />
     </div>
   );

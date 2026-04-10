@@ -35,13 +35,8 @@ describe('DashboardPage', () => {
       gatewayDiagnosticsData: null,
       environmentData: null,
       memoryData: null,
-      fixLoading: false,
-      showFixConfirm: false,
-      fixResult: null,
       openSkillDiagnostic: vi.fn().mockResolvedValue(false),
       closeModal: vi.fn(),
-      confirmFix: vi.fn(),
-      cancelFix: vi.fn(),
     });
     vi.mocked(useDashboardSummary).mockReturnValue({
       dashboardSummary: null,
@@ -120,13 +115,8 @@ describe('DashboardPage', () => {
       gatewayDiagnosticsData: null,
       environmentData: null,
       memoryData: null,
-      fixLoading: false,
-      showFixConfirm: false,
-      fixResult: null,
       openSkillDiagnostic,
       closeModal: vi.fn(),
-      confirmFix: vi.fn(),
-      cancelFix: vi.fn(),
     });
 
     render(

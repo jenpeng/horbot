@@ -3,7 +3,6 @@ export { default as DashboardAlerts } from './DashboardAlerts';
 export { default as DashboardChannelsCard } from './DashboardChannelsCard';
 export { default as DashboardDiagnosticsModals } from './DashboardDiagnosticsModals';
 export { default as DashboardErrorState } from './DashboardErrorState';
-export { default as DashboardFixResult } from './DashboardFixResult';
 export { default as DashboardHero } from './DashboardHero';
 export { default as DashboardLoadingState } from './DashboardLoadingState';
 export { default as DashboardMemoryPanel } from './DashboardMemoryPanel';

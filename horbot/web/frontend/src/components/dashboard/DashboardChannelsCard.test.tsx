@@ -35,9 +35,11 @@ describe('DashboardChannelsCard', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('3 Total')).toBeInTheDocument();
-    expect(screen.getByText('1 Missing Config')).toBeInTheDocument();
-    expect(screen.getByText('缺少配置: token, signing_secret')).toBeInTheDocument();
+    expect(screen.getByText('Total')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('Missing Config')).toBeInTheDocument();
+    expect(screen.getByText('token')).toBeInTheDocument();
+    expect(screen.getByText('signing_secret')).toBeInTheDocument();
     expect(screen.getAllByText('View')).toHaveLength(2);
   });
 });

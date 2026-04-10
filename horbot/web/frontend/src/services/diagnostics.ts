@@ -11,12 +11,6 @@ export interface MemoryData {
   details: Record<string, unknown>;
 }
 
-export interface FixResult {
-  fixed: Array<{ issue: string; message: string }>;
-  failed: Array<{ issue: string; error: string }>;
-  suggestions: Array<{ issue: string; message: string; action: string }>;
-}
-
 const diagnosticsService = {
   validateConfig: async (): Promise<ConfigCheckResultData> => {
     const response = await api.get<{
@@ -82,11 +76,6 @@ const diagnosticsService = {
 
   getMemory: async (): Promise<MemoryData> => {
     const response = await api.get<MemoryData>('/api/memory');
-    return response.data;
-  },
-
-  runFix: async (): Promise<FixResult> => {
-    const response = await api.post<FixResult>('/api/system/fix');
     return response.data;
   },
 };

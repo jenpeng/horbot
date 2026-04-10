@@ -3,14 +3,13 @@ import type { ConfigCheckResultData } from '../components/ConfigCheckResult';
 import type { GatewayDiagnosticsData } from '../components/GatewayDiagnosticsResult';
 import type { EnvironmentDetectionData } from '../components/EnvironmentDetectionResult';
 import { diagnosticsService } from '../services';
-import type { FixResult, MemoryData } from '../services/diagnostics';
+import type { MemoryData } from '../services/diagnostics';
 
 export type DashboardModal =
   | 'config-check'
   | 'gateway-diagnosis'
   | 'env-detection'
   | 'memory-manager'
-  | 'fix-result'
   | null;
 
 export const useDashboardDiagnostics = () => {
@@ -21,12 +20,9 @@ export const useDashboardDiagnostics = () => {
   const [gatewayDiagnosticsData, setGatewayDiagnosticsData] = useState<GatewayDiagnosticsData | null>(null);
   const [environmentData, setEnvironmentData] = useState<EnvironmentDetectionData | null>(null);
   const [memoryData, setMemoryData] = useState<MemoryData | null>(null);
-  const [fixLoading, setFixLoading] = useState(false);
-  const [showFixConfirm, setShowFixConfirm] = useState(false);
-  const [fixResult, setFixResult] = useState<FixResult | null>(null);
 
   const loadDiagnosticModal = async <T,>(
-    modalId: Exclude<DashboardModal, 'fix-result' | null>,
+    modalId: Exclude<DashboardModal, null>,
     reset: () => void,
     loader: () => Promise<T>,
     applyData: (data: T) => void,
@@ -85,9 +81,6 @@ export const useDashboardDiagnostics = () => {
           '获取内存信息失败',
         );
         return true;
-      case 'one-click-fix':
-        setShowFixConfirm(true);
-        return true;
       default:
         return false;
     }
@@ -98,26 +91,6 @@ export const useDashboardDiagnostics = () => {
     setModalError(null);
   };
 
-  const confirmFix = async () => {
-    setFixLoading(true);
-    setFixResult(null);
-
-    try {
-      const result = await diagnosticsService.runFix();
-      setFixResult(result);
-      setShowFixConfirm(false);
-      setActiveModal('fix-result');
-    } catch (err) {
-      alert(err instanceof Error ? err.message : '一键修复失败');
-    } finally {
-      setFixLoading(false);
-    }
-  };
-
-  const cancelFix = () => {
-    setShowFixConfirm(false);
-  };
-
   return {
     activeModal,
     modalLoading,
@@ -126,12 +99,7 @@ export const useDashboardDiagnostics = () => {
     gatewayDiagnosticsData,
     environmentData,
     memoryData,
-    fixLoading,
-    showFixConfirm,
-    fixResult,
     openSkillDiagnostic,
     closeModal,
-    confirmFix,
-    cancelFix,
   };
 };
