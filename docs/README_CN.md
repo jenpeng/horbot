@@ -8,19 +8,27 @@
     <a href="https://discord.gg/MnCvHqpUGB"><img src="https://img.shields.io/badge/Discord-Community-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
   </p>
   <p>
-    <a href="./README_CN.md">简体中文</a> | <a href="../README.md">项目首页</a>
+    <a href="./README_CN.md">简体中文</a> | <a href="./README.md">English Docs</a> | <a href="../README.md">项目首页</a>
   </p>
 </div>
 
 ---
 
-🐎 **horbot** 是一个受 [OpenClaw](https://github.com/openclaw/openclaw) 启发的**超轻量级**个人 AI 助手。
+🐎 **horbot** 是一个面向个人与小团队的轻量级多 Agent 助手栈。
 
-项目核心代码借鉴自 [HKUDS/nanobot](https://github.com/HKUDS/nanobot) 仓库内容，并在此基础上持续演进。
+项目持续借鉴并融合了多个优秀开源项目的思路：
 
-⚡️ 仅用 **~4,000 行代码**实现核心 Agent 功能 — 相比重型代理框架更小、更容易理解和改造。
+- 核心轻量 Agent 结构参考 [HKUDS/nanobot](https://github.com/HKUDS/nanobot)
+- 自主代理与自我改进能力参考 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
+- 多 Agent 协作和执行编排参考 [volcengine/OpenViking](https://github.com/volcengine/OpenViking)
+- 早期技能体系设计参考 [OpenClaw](https://github.com/openclaw/openclaw)
 
-📏 实时代码行数：**3,966 行**（运行 `bash core_agent_lines.sh` 随时验证）
+当前版本更强调：
+
+- 可读、可改的 Agent 主循环
+- 面向真实工作流的 Web UI 与渠道集成
+- Agent 级别隔离的 workspace、memory、sessions 与 skills
+- 支持把重复完成的工作沉淀成可复用技能
 
 ## 📢 最新动态
 
@@ -620,9 +628,9 @@ horbot/
 | **Provider 降级** | 自动重试并降级到备用提供商 |
 | **渠道监控** | 渠道健康检查和自动重启 |
 
-## 📂 工作区目录结构
+## 📂 当前运行时目录结构
 
-工作区是 horbot 存储所有运行时数据的地方。通过配置中的 `agents.defaults.workspace` 设置：
+当前运行时以 Agent 为粒度组织，不再使用早期全局 `.horbot/context` / `.horbot/memory` 目录。
 
 ```json
 {
@@ -634,23 +642,29 @@ horbot/
 }
 ```
 
-### 目录布局
+### 推荐目录布局
 
 ```
-workspace/
-├── .audit/              # 📋 审计日志（工具执行跟踪）
-├── .checkpoints/        # 💾 执行检查点（用于恢复）
-├── .state/              # 📊 执行状态持久化
-├── memory/              # 🧠 长期记忆
-│   ├── MEMORY.md        #    关于用户的持久化事实
-│   └── HISTORY.md       #    可搜索的事件日志
-├── sessions/            # 💬 会话历史
-├── skills/              # 🎯 自定义用户技能
-├── cron/                # ⏰ 定时任务存储
-├── logs/                # 📝 运行日志
-├── AGENTS.md            # 📖 Agent 系统提示词
-├── SOUL.md              # 🎭 Agent 人格
-└── USER.md              # 👤 用户档案
+.horbot/
+├── agents/
+│   └── <agent-id>/
+│       ├── workspace/   # 📁 Agent 私有工作区
+│       ├── memory/      # 🧠 Agent 私有记忆
+│       ├── sessions/    # 💬 Agent 会话历史
+│       └── skills/      # 🎯 Agent 私有技能
+├── teams/
+│   └── <team-id>/
+│       ├── workspace/
+│       ├── shared_memory/
+│       └── taskboard/
+├── data/
+│   ├── uploads/
+│   ├── sessions/
+│   ├── plans/
+│   └── cron/
+└── runtime/
+    ├── logs/
+    └── pids/
 ```
 
 ### 路径解析
@@ -663,7 +677,7 @@ workspace/
 
 > **注意**：相对路径相对于项目根目录解析（通过 `.git`、`pyproject.toml` 或 `.horbot` 标记文件检测）。
 >
-> `/.horbot/workspace` 属于早期兼容路径，当前项目默认不再使用；如果你的环境里仍残留该目录，通常只剩旧的运行时缓存或历史产物。
+> `/.horbot/workspace`、`.horbot/context` 与 `.horbot/memory` 都属于早期兼容路径，当前项目默认不再使用；如果你的环境里仍残留这些目录，通常只剩旧缓存或历史产物。
 
 ---
 

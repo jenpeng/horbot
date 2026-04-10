@@ -694,7 +694,8 @@ Skills with available="false" need dependencies installed first - you can try in
             context_info = f"""
 ## Context Management
 - Hierarchical context: L0 (current session) → L1 (recent) → L2 (long-term)
-- Context directory: {workspace_path}/.horbot/context/"""
+- Agent workspace: {workspace_path}
+- Runtime memory is agent-scoped and stored alongside the workspace under the current agent root"""
         
         # Get team members list
         team_members_info = ""

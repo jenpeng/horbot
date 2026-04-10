@@ -942,40 +942,32 @@ flowchart TD
 
 ## 📂 存储架构
 
-### 工作区目录结构
+### 当前运行时目录结构
 
 ```
-workspace/
-├── .audit/              # 审计日志
-│   └── audit.jsonl      # 操作记录
-├── .checkpoints/        # 执行检查点
-│   └── {plan_id}.json   # 计划状态
-├── .state/              # 运行时状态
-│   └── state.json       # 全局状态
-├── memory/              # 长期记忆
-│   ├── MEMORY.md        # 用户事实
-│   └── HISTORY.md       # 事件日志
-├── sessions/            # 会话历史
-│   └── {session_key}.jsonl
-├── skills/              # 自定义技能
-│   └── {skill_name}/
-│       └── SKILL.md
-├── cron/                # 定时任务
-│   └── store.json       # 任务存储
-├── plans/               # 执行计划
-│   ├── index.json       # 计划索引
-│   └── {plan_id}/       # 计划详情
-│       ├── spec.md
-│       ├── tasks.md
-│       └── checklist.md
-├── logs/                # 日志文件
-│   ├── gateway.log
-│   └── web.log
-├── AGENTS.md            # Agent 系统提示词
-├── SOUL.md              # Agent 人格
-├── USER.md              # 用户档案
-└── TOOLS.md             # 工具说明
+.horbot/
+├── agents/
+│   └── <agent-id>/
+│       ├── workspace/   # Agent 私有工作区
+│       ├── memory/      # Agent 私有记忆
+│       ├── sessions/    # Agent 会话历史
+│       └── skills/      # Agent 私有技能
+├── teams/
+│   └── <team-id>/
+│       ├── workspace/
+│       ├── shared_memory/
+│       └── taskboard/
+├── data/
+│   ├── uploads/
+│   ├── sessions/
+│   ├── plans/
+│   └── cron/
+└── runtime/
+    ├── logs/
+    └── pids/
 ```
+
+旧 `.horbot/context` 与 `.horbot/memory` 目录仅保留给历史环境迁移，当前运行态不再依赖。
 
 ***
 

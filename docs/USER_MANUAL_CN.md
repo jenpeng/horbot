@@ -254,7 +254,7 @@ localStorage.setItem('horbotAdminToken', 'replace-with-a-long-random-token')
 如果某个 Agent 历史曾同时写入旧路径和新路径，页面现在会自动合并读取：
 
 - 旧路径：`workspace/sessions`
-- 新路径：`.horbot-agent/sessions`
+- 新路径：`.horbot/agents/<agent-id>/sessions`
 
 如果你刷新后仍发现历史缺失，建议先执行：
 

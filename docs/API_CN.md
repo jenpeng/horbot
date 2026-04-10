@@ -156,7 +156,7 @@ GET /api/chat/history?session_key=default
 
 说明：
 
-- 当某个 Agent 的会话历史同时存在于旧 `workspace/sessions` 与新 `.horbot-agent/sessions` 路径时，接口会自动合并、去重并按时间排序返回
+- 当某个 Agent 的会话历史同时存在于旧 `workspace/sessions` 与当前 `.horbot/agents/<agent-id>/sessions` 路径时，接口会自动合并、去重并按时间排序返回
 - 返回结果中的附件与执行过程字段会尽量保留较完整的一份
 
 **响应示例**:
