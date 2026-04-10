@@ -152,6 +152,40 @@
 }
 ```
 
+如果你需要为复杂任务单独指定内部规划模型，也可以继续配置：
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "models": {
+        "main": {
+          "provider": "openrouter",
+          "model": "anthropic/claude-sonnet-4-20250514"
+        },
+        "planning": {
+          "provider": "openrouter",
+          "model": "anthropic/claude-sonnet-4-20250514"
+        }
+      }
+    }
+  }
+}
+```
+
+这里的 `planning` 表示内部规划场景模型，不对应 Web Chat 中的 `/plan` 命令。当前前端已经移除该命令入口，复杂任务会自动触发规划检测。
+
+## 2.1 创建 Agent 时的模型配置
+
+当前“团队管理 / 多 Agent 管理”里的“创建 Agent”弹窗已经支持直接填写：
+
+- provider
+- model
+- 权限档位
+- 协作画像
+
+因此不再需要先创建、再进入编辑页补模型。若暂时不确定，也可以留空，稍后再编辑。
+
 ## 3. Web UI 中密钥为什么看不到原文
 
 这是新版本的安全改动。

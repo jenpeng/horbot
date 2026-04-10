@@ -26,9 +26,17 @@ GET /api/config
 {
   "agents": {
     "defaults": {
-      "model": "anthropic/claude-opus-4-5",
-      "provider": "auto",
-      "workspace": ".horbot/workspace"
+      "workspace": ".horbot/workspace",
+      "models": {
+        "main": {
+          "provider": "openrouter",
+          "model": "anthropic/claude-sonnet-4-20250514"
+        },
+        "planning": {
+          "provider": "openrouter",
+          "model": "anthropic/claude-sonnet-4-20250514"
+        }
+      }
     }
   },
   "providers": {
@@ -39,6 +47,12 @@ GET /api/config
 }
 ```
 
+说明：
+
+- `agents.defaults.models.main` 是默认主对话模型
+- `agents.defaults.models.planning` 是内部规划场景模型
+- 当前 Web Chat 已移除 `/plan` 命令，复杂任务会自动触发规划检测
+
 #### 更新配置
 
 ```http
@@ -48,7 +62,13 @@ Content-Type: application/json
 {
   "agents": {
     "defaults": {
-      "model": "anthropic/claude-opus-4-5"
+      "workspace": ".horbot/workspace",
+      "models": {
+        "main": {
+          "provider": "openrouter",
+          "model": "anthropic/claude-sonnet-4-20250514"
+        }
+      }
     }
   }
 }

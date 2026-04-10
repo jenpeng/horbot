@@ -26,6 +26,7 @@
 - 🌳 **工作树隔离**: 任务级别目录隔离，支持并行任务执行
 - 🤝 **团队协议**: 规范化的代理间通信协议
 - 🤖 **自主代理**: 支持代理自主扫描和认领任务
+- 🧠 **后台技能沉淀**: Agent 可在完成任务后静默复盘，将可复用流程沉淀为工作区 Skills
 
 ## 📦 安装
 
@@ -206,18 +207,13 @@ PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers ./.venv/bin/python -m playwright i
 
 前端所需的 `react-markdown`、`remark-gfm`、`highlight.js` 已经存在于项目中。
 
-### Web UI 命令
+### Web UI 规划行为
 
-在 Web 界面输入框中，可以使用以下命令：
+当前 Web Chat 已移除 `/plan` 这类显式 slash command 入口。
 
-| 命令 | 说明 |
-|------|------|
-| `/plan` | 开启规划模式，用于复杂任务的规划和执行 |
-
-**使用方式：**
-1. 输入 `/` 显示命令列表
-2. 按 `Tab` 或 `Space` 确认选择
-3. 输入任务内容后发送
+- 复杂任务会由系统自动判断是否进入规划流程
+- 如果触发规划，前端会直接展示计划与确认步骤
+- `agents.defaults.models.planning` 仍然有效，但它代表内部规划场景使用的模型，而不是一个需要手动输入的命令
 
 ### 初始化配置
 
@@ -229,7 +225,7 @@ source .venv/bin/activate
 horbot onboard
 ```
 
-### 配置 API Key
+### 配置 API Key 与默认模型
 
 编辑 `.horbot/config.json`：
 
@@ -259,6 +255,12 @@ horbot onboard
 }
 ```
 
+说明：
+
+- `main` 是默认主对话模型
+- `planning` 是内部规划场景使用的模型，复杂任务触发自动规划时会优先使用它
+- 如果不单独配置 `planning`，系统会回退到 `main`
+
 建议同时确认：
 
 ```json
@@ -270,6 +272,17 @@ horbot onboard
 ```
 
 > **注意**: 如果未配置模型，系统将使用默认模型 `openrouter/anthropic/claude-sonnet-4-20250514`。
+
+### 创建 Agent
+
+当前“团队管理 / 多 Agent 管理”中的创建 Agent 弹窗，已经支持直接填写：
+
+- Agent 名称与描述
+- provider / model
+- 权限档位
+- 协作画像
+
+这意味着你不再需要“先创建，再编辑一次”才能补模型。创建完成后即可直接进入私聊继续完成初始化。
 
 ### 开始使用
 

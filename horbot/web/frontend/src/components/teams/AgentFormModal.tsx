@@ -220,6 +220,39 @@ const AgentFormModal = ({
               })}
             </div>
           </div>
+          <div className="border-t border-surface-200 pt-4">
+            <h4 className="text-sm font-medium text-surface-700 mb-3">模型配置</h4>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-surface-600 mb-1">供应商</label>
+                <select
+                  value={form.provider}
+                  onChange={(e) => setForm({ ...form, provider: e.target.value })}
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
+                >
+                  <option value="auto">自动选择</option>
+                  {providers.map((provider) => (
+                    <option key={provider.id} value={provider.id} disabled={!provider.configured}>
+                      {provider.name} {!provider.configured && '(未配置)'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-surface-600 mb-1">模型名称</label>
+                <input
+                  type="text"
+                  value={form.model}
+                  onChange={(e) => setForm({ ...form, model: e.target.value })}
+                  className="w-full px-3 py-2 border border-surface-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
+                  placeholder="如: gpt-4o, claude-sonnet-4-5"
+                />
+                <p className="mt-1 text-xs text-surface-500">
+                  创建时即可配置 provider 和 model；留空则仍可稍后在编辑页或配置页补齐。
+                </p>
+              </div>
+            </div>
+          </div>
 
           {isCreateMode ? (
             <>
@@ -230,48 +263,14 @@ const AgentFormModal = ({
                 </div>
               </div>
               <div className="rounded-2xl border border-primary-200 bg-primary-50/70 px-4 py-4 text-sm text-surface-700">
-                <div className="font-semibold text-surface-900">创建阶段只保留最小信息。</div>
+                <div className="font-semibold text-surface-900">建议创建时就把模型配置一起补齐。</div>
                 <div className="mt-1">
-                  创建完成后，请在 Agent 详情里选择 provider 和 model；随后进入该 Agent 的第一次私聊，继续引导它完善职责、风格与协作边界。
+                  这样创建完成后就可以直接进入首次私聊，引导它完善职责、风格与协作边界；如果暂时不确定，也可以留空，后续再编辑。
                 </div>
               </div>
             </>
           ) : (
             <>
-              <div className="border-t border-surface-200 pt-4">
-                <h4 className="text-sm font-medium text-surface-700 mb-3">模型配置</h4>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-surface-600 mb-1">供应商</label>
-                    <select
-                      value={form.provider}
-                      onChange={(e) => setForm({ ...form, provider: e.target.value })}
-                      className="w-full px-3 py-2 border border-surface-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
-                    >
-                      <option value="auto">自动选择</option>
-                      {providers.map((provider) => (
-                        <option key={provider.id} value={provider.id} disabled={!provider.configured}>
-                          {provider.name} {!provider.configured && '(未配置)'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-surface-600 mb-1">模型名称</label>
-                    <input
-                      type="text"
-                      value={form.model}
-                      onChange={(e) => setForm({ ...form, model: e.target.value })}
-                      className="w-full px-3 py-2 border border-surface-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
-                      placeholder="如: gpt-4o, claude-3-5-sonnet"
-                    />
-                    <p className="mt-1 text-xs text-surface-500">
-                      provider 和 model 只在这里配置；未设置时该 Agent 会被视为待完成首次配置。
-                    </p>
-                  </div>
-                </div>
-              </div>
-
               <div className="rounded-2xl border border-surface-200 bg-surface-50/80 px-4 py-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>

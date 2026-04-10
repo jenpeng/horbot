@@ -836,6 +836,8 @@ class Session:
 
 ### 8. 规划模块 (`horbot/agent/planner/`)
 
+> 当前规划链路由系统自动触发。`agents.defaults.models.planning` 仍表示内部规划场景模型，但 Web Chat 中不再提供 `/plan` 这类显式命令入口。
+
 #### 规划流程
 
 ```mermaid

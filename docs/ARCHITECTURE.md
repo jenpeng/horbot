@@ -248,6 +248,12 @@ horbot/agent/
 - 按需添加功能
 - 每个模块独立可测试
 
+## 当前运行时说明
+
+- 复杂任务的规划链路由系统自动判断并触发，不依赖 Web Chat 中的 `/plan` 命令
+- `agents.defaults.models.planning` 代表内部规划场景模型，如果未单独配置则回退到 `main`
+- Agent 在完成任务后可异步复盘，并将可复用流程沉淀为工作区 Skills
+
 ## 使用示例
 
 ### 基础 Agent Loop

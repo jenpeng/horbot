@@ -128,6 +128,8 @@ describe('TeamsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '创建 Agent' }));
 
     expect(screen.getByRole('heading', { name: '创建新 Agent' })).toBeInTheDocument();
+    expect(screen.getByText('供应商')).toBeInTheDocument();
+    expect(screen.getByText('模型名称')).toBeInTheDocument();
   });
 
   it('opens the extracted edit team modal from the team detail panel', () => {
