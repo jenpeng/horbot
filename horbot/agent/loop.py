@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from horbot.agent.errors import AgentException
+from horbot.agent.skill_evolution import SkillEvolutionEngine
 from horbot.agent.tool_executor import ToolExecutor
 from horbot.agent.message_processor import MessageProcessor
 from horbot.agent.context import ContextBuilder
@@ -278,6 +279,7 @@ class AgentLoop:
         self._consolidating: set[str] = set()
         self._consolidation_tasks: set[asyncio.Task] = set()
         self._consolidation_locks: dict[str, asyncio.Lock] = {}
+        self._skill_review_tasks: set[asyncio.Task] = set()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}
         self._processing_lock = asyncio.Lock()
         self._message_locks: dict[str, asyncio.Lock] = {}
@@ -1305,6 +1307,10 @@ class AgentLoop:
     async def cleanup(self) -> None:
         """Cleanup resources before shutdown."""
         logger.info("Cleaning up AgentLoop resources...")
+
+        for task in list(self._skill_review_tasks):
+            task.cancel()
+        self._skill_review_tasks.clear()
         
         if self.enable_hot_reload:
             await self._stop_config_watcher()
@@ -1873,43 +1879,127 @@ class AgentLoop:
             session.messages.append(entry)
         session.updated_at = datetime.now()
         
+        execution_log = None
         if tools_used_in_turn and self.use_hierarchical_context:
-            self._save_execution_log(session, messages, tools_used_in_turn)
-    
+            execution_log = self._save_execution_log(session, messages, tools_used_in_turn)
+        elif tools_used_in_turn:
+            execution_log = self._build_execution_log(session, messages, tools_used_in_turn)
+
+        self._schedule_skill_evolution_review(
+            session=session,
+            execution_log=execution_log or self._build_execution_log(session, messages, tools_used_in_turn),
+            recent_messages=messages[-8:],
+            tools_used=tools_used_in_turn,
+        )
+
     def _save_execution_log(
         self,
         session: Session,
         messages: list[dict],
         tools_used: list[str],
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """Save execution log to hierarchical context."""
         try:
-            user_message = None
-            assistant_response = None
-            
-            for m in reversed(messages):
-                if m.get("role") == "user" and not user_message:
-                    content = m.get("content", "")
-                    if isinstance(content, str):
-                        user_message = content[:500]
-                elif m.get("role") == "assistant" and not assistant_response:
-                    assistant_response = m.get("content", "")[:500] if m.get("content") else None
-            
-            execution_log = {
-                "task": user_message,
-                "result": assistant_response,
-                "tools_used": list(set(tools_used)),
-                "timestamp": datetime.now().isoformat(),
-                "message_count": len(messages),
-                **self._build_execution_source_metadata(session.key),
-                **self._build_execution_outbound_metadata(),
-            }
-            
+            execution_log = self._build_execution_log(session, messages, tools_used)
             memory = self._memory_store()
             memory.add_execution_memory(execution_log, session.key)
-            
+            return execution_log
         except Exception as e:
             logger.warning("Failed to save execution log: {}", e)
+            return None
+
+    def _build_execution_log(
+        self,
+        session: Session,
+        messages: list[dict],
+        tools_used: list[str],
+    ) -> dict[str, Any]:
+        user_message = None
+        assistant_response = None
+
+        for m in reversed(messages):
+            if m.get("role") == "user" and not user_message:
+                content = m.get("content", "")
+                if isinstance(content, str):
+                    user_message = content[:500]
+            elif m.get("role") == "assistant" and not assistant_response:
+                assistant_response = m.get("content", "")[:500] if m.get("content") else None
+
+        return {
+            "task": user_message,
+            "result": assistant_response,
+            "tools_used": list(set(tools_used)),
+            "timestamp": datetime.now().isoformat(),
+            "message_count": len(messages),
+            **self._build_execution_source_metadata(session.key),
+            **self._build_execution_outbound_metadata(),
+        }
+
+    def _skill_evolution_settings(self) -> dict[str, Any]:
+        config = self._get_config()
+        if not config or not self._agent_id:
+            return {}
+        agent_config = getattr(getattr(config, "agents", None), "instances", {}).get(self._agent_id)
+        if agent_config is None:
+            return {}
+        return dict(getattr(agent_config, "skill_evolution", {}) or {})
+
+    def _skill_learning_enabled(self) -> bool:
+        config = self._get_config()
+        if not config or not self._agent_id:
+            return True
+        agent_config = getattr(getattr(config, "agents", None), "instances", {}).get(self._agent_id)
+        if agent_config is None:
+            return True
+        if not getattr(agent_config, "learning_enabled", True):
+            return False
+        settings = dict(getattr(agent_config, "skill_evolution", {}) or {})
+        return bool(settings.get("enabled", True))
+
+    def _schedule_skill_evolution_review(
+        self,
+        *,
+        session: Session,
+        execution_log: dict[str, Any] | None,
+        recent_messages: list[dict[str, Any]],
+        tools_used: list[str],
+    ) -> None:
+        if not self._skill_learning_enabled():
+            return
+        if execution_log is None:
+            return
+
+        settings = self._skill_evolution_settings()
+        if not tools_used and not settings.get("review_without_tools", False):
+            return
+
+        min_result_chars = int(settings.get("min_result_chars", 80) or 80)
+        result_text = str(execution_log.get("result") or "").strip()
+        if len(result_text) < min_result_chars:
+            return
+
+        async def _run_review() -> None:
+            try:
+                engine = SkillEvolutionEngine(
+                    workspace=self.workspace,
+                    provider=self.provider,
+                    model=self.model,
+                    agent_id=self._agent_id,
+                )
+                await engine.review_execution(
+                    execution_log,
+                    recent_messages=recent_messages,
+                    trigger=f"session:{session.key}",
+                )
+            except Exception:
+                logger.exception("Skill evolution review failed for session {}", session.key)
+            finally:
+                task = asyncio.current_task()
+                if task is not None:
+                    self._skill_review_tasks.discard(task)
+
+        task = asyncio.create_task(_run_review())
+        self._skill_review_tasks.add(task)
 
     async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""

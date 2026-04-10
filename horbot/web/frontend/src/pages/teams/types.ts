@@ -27,11 +27,47 @@ export interface AgentInfo {
   };
 }
 
+export interface MemoryBankProfileDraft {
+  mission: string;
+  directives: string[];
+  reasoning_style: string;
+}
+
+export interface AgentFormState {
+  id: string;
+  name: string;
+  description: string;
+  profile: string;
+  permission_profile: string;
+  model: string;
+  provider: string;
+  system_prompt: string;
+  capabilities: string[];
+  tools: string[];
+  skills: string[];
+  workspace: string;
+  teams: string[];
+  personality: string;
+  avatar: string;
+  evolution_enabled: boolean;
+  learning_enabled: boolean;
+  memory_bank_profile: MemoryBankProfileDraft;
+}
+
 export interface TeamMemberProfile {
   role?: string;
   responsibility?: string;
   priority?: number;
   isLead?: boolean;
+}
+
+export interface TeamFormState {
+  id: string;
+  name: string;
+  description: string;
+  members: string[];
+  member_profiles: Record<string, TeamMemberProfile>;
+  workspace: string;
 }
 
 export interface TeamInfo {
