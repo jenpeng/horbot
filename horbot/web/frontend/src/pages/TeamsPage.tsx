@@ -1,12 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import CollaborationFlow from '../components/CollaborationFlow';
+import { PageLoadingState } from '../components/state';
 import {
   AGENT_PERMISSION_PRESETS,
   AGENT_PROFILE_PRESETS,
   getAgentPermissionPreset,
   getAgentProfilePreset,
 } from '../constants';
+import { useTeamAgentAssets } from '../hooks';
 import { getStorageItem, removeStorageItem, setStorageItem } from '../utils/storage';
+import type {
+  SummarySectionKey,
+} from './teams/types';
 
 interface AgentInfo {
   id: string;
@@ -59,53 +64,6 @@ interface TeamInfo {
   member_profiles?: Record<string, TeamMemberProfile>;
   workspace?: string;
   effective_workspace?: string;
-}
-
-interface AgentBootstrapFile {
-  path: string;
-  exists: boolean;
-  content: string;
-}
-
-interface AgentAssetBundle {
-  workspace_path: string;
-  summary?: {
-    identity?: string[];
-    role_focus?: string[];
-    communication_style?: string[];
-    boundaries?: string[];
-    user_preferences?: string[];
-    is_structured?: boolean;
-    source_titles?: {
-      soul?: string;
-      user?: string;
-    };
-  };
-  files: {
-    soul: AgentBootstrapFile;
-    user: AgentBootstrapFile;
-  };
-}
-
-type SummarySectionKey =
-  | 'identity'
-  | 'role_focus'
-  | 'communication_style'
-  | 'boundaries'
-  | 'user_preferences';
-
-type SummaryDrafts = Record<SummarySectionKey, string>;
-
-interface AgentMemoryStats {
-  total_entries: number;
-  total_size_kb: number;
-}
-
-interface AgentSkillInfo {
-  name: string;
-  source: string;
-  enabled: boolean;
-  always?: boolean;
 }
 
 interface AgentFormState {
@@ -702,22 +660,6 @@ const writeSelectionToUrl = (selection: TeamsPageSelection | null): void => {
 };
 
 const TeamsPage: React.FC = () => {
-  const emptySummaryDrafts = (): SummaryDrafts => ({
-    identity: '',
-    role_focus: '',
-    communication_style: '',
-    boundaries: '',
-    user_preferences: '',
-  });
-
-  const summaryToDrafts = (summary?: AgentAssetBundle['summary']): SummaryDrafts => ({
-    identity: (summary?.identity || []).join('\n'),
-    role_focus: (summary?.role_focus || []).join('\n'),
-    communication_style: (summary?.communication_style || []).join('\n'),
-    boundaries: (summary?.boundaries || []).join('\n'),
-    user_preferences: (summary?.user_preferences || []).join('\n'),
-  });
-
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [teams, setTeams] = useState<TeamInfo[]>([]);
   const [selectedTeam, setSelectedTeam] = useState<TeamInfo | null>(null);
@@ -733,23 +675,10 @@ const TeamsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [modalType, setModalType] = useState<ModalType>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [agentAssets, setAgentAssets] = useState<AgentAssetBundle | null>(null);
-  const [agentMemoryStats, setAgentMemoryStats] = useState<AgentMemoryStats | null>(null);
-  const [agentSkills, setAgentSkills] = useState<AgentSkillInfo[]>([]);
   const [editAgentAdvancedOpen, setEditAgentAdvancedOpen] = useState(false);
   const [teamAdvancedOpen, setTeamAdvancedOpen] = useState(false);
   const [selectedTeamTemplateId, setSelectedTeamTemplateId] = useState<TeamTemplateId>('delivery');
   const [teamRecommendationAutoApply, setTeamRecommendationAutoApply] = useState(true);
-  const [assetDrafts, setAssetDrafts] = useState({ soul: '', user: '' });
-  const [assetLoading, setAssetLoading] = useState(false);
-  const [assetLoadedAgentId, setAssetLoadedAgentId] = useState<string | null>(null);
-  const [assetSaving, setAssetSaving] = useState<'soul' | 'user' | null>(null);
-  const [assetError, setAssetError] = useState('');
-  const [assetSuccess, setAssetSuccess] = useState('');
-  const [summaryDrafts, setSummaryDrafts] = useState<SummaryDrafts>(emptySummaryDrafts);
-  const [summarySaving, setSummarySaving] = useState(false);
-  const assetDraftsRef = useRef({ soul: '', user: '' });
-  const summaryDraftsRef = useRef<SummaryDrafts>(emptySummaryDrafts());
   
   const [agentForm, setAgentForm] = useState<AgentFormState>(createEmptyAgentForm);
   
@@ -911,7 +840,7 @@ const TeamsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
   }, []);
 
   const getAgentById = (agentId: string): AgentInfo | undefined => {
@@ -937,30 +866,6 @@ const TeamsPage: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, [focusTarget, selectedAgentId, selectedTeam?.id]);
 
-  const replaceAssetDrafts = (nextDrafts: { soul: string; user: string }) => {
-    assetDraftsRef.current = nextDrafts;
-    setAssetDrafts(nextDrafts);
-  };
-
-  const replaceSummaryDrafts = (nextDrafts: SummaryDrafts) => {
-    summaryDraftsRef.current = nextDrafts;
-    setSummaryDrafts(nextDrafts);
-  };
-
-  const handleAssetDraftChange = (fileKind: 'soul' | 'user', value: string) => {
-    replaceAssetDrafts({
-      ...assetDraftsRef.current,
-      [fileKind]: value,
-    });
-  };
-
-  const handleSummaryDraftChange = (key: SummarySectionKey, value: string) => {
-    replaceSummaryDrafts({
-      ...summaryDraftsRef.current,
-      [key]: value,
-    });
-  };
-
   const getAgentsByTeam = (teamId: string): AgentInfo[] => {
     const team = teams.find(t => t.id === teamId);
     if (!team) return [];
@@ -982,7 +887,6 @@ const TeamsPage: React.FC = () => {
 
   const selectedAgent = selectedAgentId ? getAgentById(selectedAgentId) : undefined;
   const selectedTeamAgents = selectedTeam ? getAgentsByTeam(selectedTeam.id) : [];
-  const assetReady = Boolean(selectedAgentId) && assetLoadedAgentId === selectedAgentId && !assetLoading;
   const selectedAgentProfilePreset = getAgentProfilePreset(selectedAgent?.profile);
   const selectedAgentPermissionPreset = getAgentPermissionPreset(selectedAgent?.permission_profile || selectedAgent?.tool_permission_profile || 'inherit');
   const selectedTeamLead = selectedTeam
@@ -1070,15 +974,11 @@ const TeamsPage: React.FC = () => {
   const handleSelectTeam = (team: TeamInfo) => {
     setSelectedAgentId(null);
     setSelectedTeam(team);
-    setAssetError('');
-    setAssetSuccess('');
   };
 
   const handleSelectAgent = (agentId: string) => {
     setSelectedTeam(null);
     setSelectedAgentId(agentId);
-    setAssetError('');
-    setAssetSuccess('');
   };
 
   useEffect(() => {
@@ -1105,169 +1005,27 @@ const TeamsPage: React.FC = () => {
     removeStorageItem(TEAMS_PAGE_SELECTION_STORAGE_KEY);
     writeSelectionToUrl(null);
   }, [selectedAgentId, selectedTeam]);
-
-  useEffect(() => {
-    let disposed = false;
-
-    const loadAgentAssets = async () => {
-      if (!selectedAgentId) {
-        setAgentAssets(null);
-        setAgentMemoryStats(null);
-        setAgentSkills([]);
-        replaceAssetDrafts({ soul: '', user: '' });
-        replaceSummaryDrafts(emptySummaryDrafts());
-        setAssetLoadedAgentId(null);
-        setAssetLoading(false);
-        return;
-      }
-
-      const currentAgentId = selectedAgentId;
-      setAssetLoading(true);
-      setAssetError('');
-      setAssetLoadedAgentId(null);
-      setAgentAssets(null);
-      setAgentMemoryStats(null);
-      setAgentSkills([]);
-      replaceAssetDrafts({ soul: '', user: '' });
-      replaceSummaryDrafts(emptySummaryDrafts());
-      try {
-        const [bootstrapRes, memoryRes, skillsRes] = await Promise.all([
-          fetch(`/api/agents/${currentAgentId}/bootstrap-files`),
-          fetch(`/api/memory?agent_id=${encodeURIComponent(currentAgentId)}`),
-          fetch(`/api/skills?agent_id=${encodeURIComponent(currentAgentId)}`),
-        ]);
-
-        if (!bootstrapRes.ok) {
-          const error = await bootstrapRes.json();
-          throw new Error(error.detail || 'Failed to load agent bootstrap files');
-        }
-
-        const bootstrapData = await bootstrapRes.json();
-        const memoryData = memoryRes.ok ? await memoryRes.json() : null;
-        const skillsData = skillsRes.ok ? await skillsRes.json() : { skills: [] };
-
-        if (disposed) {
-          return;
-        }
-
-        setAgentAssets(bootstrapData);
-        replaceAssetDrafts({
-          soul: bootstrapData.files?.soul?.content || '',
-          user: bootstrapData.files?.user?.content || '',
-        });
-        replaceSummaryDrafts(summaryToDrafts(bootstrapData.summary));
-        setAgentMemoryStats(memoryData ? {
-          total_entries: memoryData.total_entries || 0,
-          total_size_kb: memoryData.total_size_kb || 0,
-        } : null);
-        setAgentSkills(skillsData.skills || []);
-        setAssetLoadedAgentId(currentAgentId);
-      } catch (error: any) {
-        if (disposed) {
-          return;
-        }
-        setAssetError(error.message || '加载 Agent 资产失败');
-      } finally {
-        if (!disposed) {
-          setAssetLoading(false);
-        }
-      }
-    };
-
-    loadAgentAssets();
-
-    return () => {
-      disposed = true;
-    };
-  }, [selectedAgentId, agents]);
-
-  const handleSaveAssetFile = async (fileKind: 'soul' | 'user') => {
-    if (!selectedAgentId) return;
-
-    try {
-      setAssetSaving(fileKind);
-      setAssetError('');
-      setAssetSuccess('');
-
-      const response = await fetch(`/api/agents/${selectedAgentId}/bootstrap-files/${fileKind}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: assetDraftsRef.current[fileKind] }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Failed to save bootstrap file');
-      }
-
-      const updated = await fetch(`/api/agents/${selectedAgentId}/bootstrap-files`);
-      if (updated.ok) {
-        const updatedData = await updated.json();
-        setAgentAssets(updatedData);
-        replaceAssetDrafts({
-          soul: updatedData.files?.soul?.content || '',
-          user: updatedData.files?.user?.content || '',
-        });
-        replaceSummaryDrafts(summaryToDrafts(updatedData.summary));
-      }
-
-      fetchData();
-
-      setAssetSuccess(fileKind === 'soul' ? 'SOUL.md 已保存' : 'USER.md 已保存');
-    } catch (error: any) {
-      setAssetError(error.message || '保存失败');
-    } finally {
-      setAssetSaving(null);
-    }
-  };
-
-  const handleSaveSummary = async () => {
-    if (!selectedAgentId) return;
-
-    const toItems = (value: string) =>
-      value
-        .split('\n')
-        .map((item) => item.trim())
-        .filter(Boolean);
-
-    try {
-      setSummarySaving(true);
-      setAssetError('');
-      setAssetSuccess('');
-
-      const response = await fetch(`/api/agents/${selectedAgentId}/bootstrap-summary`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          identity: toItems(summaryDraftsRef.current.identity),
-          role_focus: toItems(summaryDraftsRef.current.role_focus),
-          communication_style: toItems(summaryDraftsRef.current.communication_style),
-          boundaries: toItems(summaryDraftsRef.current.boundaries),
-          user_preferences: toItems(summaryDraftsRef.current.user_preferences),
-        }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Failed to save summary');
-      }
-
-      const updatedData = await response.json();
-      setAgentAssets(updatedData);
-      replaceAssetDrafts({
-        soul: updatedData.files?.soul?.content || '',
-        user: updatedData.files?.user?.content || '',
-      });
-      replaceSummaryDrafts(summaryToDrafts(updatedData.summary));
-
-      fetchData();
-      setAssetSuccess('配置摘要已保存，并已同步写回 SOUL.md / USER.md');
-    } catch (error: any) {
-      setAssetError(error.message || '保存配置摘要失败');
-    } finally {
-      setSummarySaving(false);
-    }
-  };
+  const {
+    agentAssets,
+    agentMemoryStats,
+    agentSkills,
+    assetDrafts,
+    assetLoading,
+    assetLoadedAgentId,
+    assetSaving,
+    assetError,
+    assetSuccess,
+    summaryDrafts,
+    summarySaving,
+    handleAssetDraftChange,
+    handleSummaryDraftChange,
+    handleSaveAssetFile,
+    handleSaveSummary,
+  } = useTeamAgentAssets({
+    selectedAgentId,
+    onSaved: fetchData,
+  });
+  const assetReady = Boolean(selectedAgentId) && assetLoadedAgentId === selectedAgentId && !assetLoading;
 
   const handleCreateAgent = async () => {
     if (!agentForm.id.trim()) {
@@ -1524,19 +1282,7 @@ const TeamsPage: React.FC = () => {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="flex gap-2">
-          {[0, 1, 2].map((i) => (
-            <div 
-              key={i} 
-              className="w-2.5 h-2.5 bg-primary-500 rounded-full animate-bounce" 
-              style={{ animationDelay: `${i * 150}ms` }}
-            />
-          ))}
-        </div>
-      </div>
-    );
+    return <PageLoadingState metricCount={3} showTabs={false} />;
   }
 
   return (

@@ -3,6 +3,7 @@ import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button, IconButton } from '../components/ui/Button';
 import Tabs from '../components/ui/Tabs';
+import { PageErrorState, PageLoadingState } from '../components/state';
 import skillsService from '../services/skills';
 import type { Skill, SkillDetail, MCPServerConfig, SkillInstallOption, SkillCompatibility } from '../types';
 import { lazyWithReload } from '../utils/lazyWithReload';
@@ -111,7 +112,7 @@ const SkillsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
   }, []);
 
   const showNotification = (type: 'success' | 'error', message: string) => {
@@ -411,17 +412,16 @@ const SkillsPage: React.FC = () => {
   };
 
   if (isLoading) {
+    return <PageLoadingState metricCount={2} showTabs />;
+  }
+
+  if (error && skills.length === 0 && Object.keys(mcpServers).length === 0) {
     return (
-      <div className="flex items-center justify-center h-full bg-surface-100">
-        <div className="flex flex-col items-center gap-4">
-          <div className="flex space-x-2">
-            <div className="w-3 h-3 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-            <div className="w-3 h-3 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-            <div className="w-3 h-3 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-          </div>
-          <p className="text-surface-600 text-sm">Loading skills...</p>
-        </div>
-      </div>
+      <PageErrorState
+        error={error}
+        onRetry={() => { void fetchData(); }}
+        title="技能加载失败"
+      />
     );
   }
 
@@ -472,7 +472,7 @@ const SkillsPage: React.FC = () => {
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={fetchData}
+                onClick={() => { void fetchData(); }}
                 disabled={isLoading}
                 leftIcon={
                   <svg 
