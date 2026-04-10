@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import CollaborationFlow from '../components/CollaborationFlow';
+import TeamsSidebar from '../components/teams/TeamsSidebar';
 import { PageLoadingState } from '../components/state';
 import {
   AGENT_PERMISSION_PRESETS,
@@ -7,47 +8,16 @@ import {
   getAgentPermissionPreset,
   getAgentProfilePreset,
 } from '../constants';
-import { useTeamAgentAssets } from '../hooks';
+import { useTeamAgentAssets, useTeamsDirectoryData } from '../hooks';
 import { getStorageItem, removeStorageItem, setStorageItem } from '../utils/storage';
+import { readSelectionFromUrl, writeSelectionToUrl } from './teams/selection';
 import type {
+  AgentInfo,
+  TeamInfo,
+  TeamMemberProfile,
+  TeamsPageSelection,
   SummarySectionKey,
 } from './teams/types';
-
-interface AgentInfo {
-  id: string;
-  name: string;
-  description: string;
-  profile?: string;
-  permission_profile?: string;
-  tool_permission_profile?: string;
-  model: string;
-  provider: string;
-  capabilities: string[];
-  tools: string[];
-  skills: string[];
-  teams: string[];
-  setup_required?: boolean;
-  bootstrap_setup_pending?: boolean;
-  workspace?: string;
-  effective_workspace?: string;
-  system_prompt?: string;
-  personality?: string;
-  avatar?: string;
-  evolution_enabled?: boolean;
-  learning_enabled?: boolean;
-  memory_bank_profile?: {
-    mission?: string;
-    directives?: string[];
-    reasoning_style?: string;
-  };
-}
-
-interface TeamMemberProfile {
-  role?: string;
-  responsibility?: string;
-  priority?: number;
-  isLead?: boolean;
-}
 
 type TeamTemplateId = 'delivery' | 'research' | 'support' | 'custom';
 type MemoryBankProfileDraft = {
@@ -55,16 +25,6 @@ type MemoryBankProfileDraft = {
   directives: string[];
   reasoning_style: string;
 };
-
-interface TeamInfo {
-  id: string;
-  name: string;
-  description: string;
-  members: string[];
-  member_profiles?: Record<string, TeamMemberProfile>;
-  workspace?: string;
-  effective_workspace?: string;
-}
 
 interface AgentFormState {
   id: string;
@@ -92,18 +52,6 @@ interface AgentFormState {
 }
 
 type ModalType = 'create-agent' | 'create-team' | 'edit-agent' | 'edit-team' | 'group-chat' | null;
-
-interface ProviderInfo {
-  id: string;
-  name: string;
-  configured: boolean;
-  models: { id: string; name: string; description: string }[];
-}
-
-interface TeamsPageSelection {
-  kind: 'agent' | 'team';
-  id: string | null;
-}
 
 type TeamsPageFocusTarget =
   | 'agent-overview'
@@ -594,25 +542,6 @@ const createEmptyTeamForm = () => ({
 
 const normalizeTeamId = (value: string): string => value.trim().toLowerCase();
 
-const readSelectionFromUrl = (): TeamsPageSelection | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const params = new URLSearchParams(window.location.search);
-  const agentId = params.get('agent')?.trim();
-  if (agentId) {
-    return { kind: 'agent', id: agentId };
-  }
-
-  const teamId = params.get('team')?.trim();
-  if (teamId) {
-    return { kind: 'team', id: teamId };
-  }
-
-  return null;
-};
-
 const readFocusFromUrl = (): TeamsPageFocusTarget | null => {
   if (typeof window === 'undefined') {
     return null;
@@ -639,29 +568,8 @@ const readFocusFromUrl = (): TeamsPageFocusTarget | null => {
   return allowed.includes(focus as TeamsPageFocusTarget) ? (focus as TeamsPageFocusTarget) : null;
 };
 
-const writeSelectionToUrl = (selection: TeamsPageSelection | null): void => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const url = new URL(window.location.href);
-  url.searchParams.delete('agent');
-  url.searchParams.delete('team');
-  url.searchParams.delete('focus');
-
-  if (selection?.kind === 'agent' && selection.id) {
-    url.searchParams.set('agent', selection.id);
-  } else if (selection?.kind === 'team' && selection.id) {
-    url.searchParams.set('team', selection.id);
-  }
-
-  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
-  window.history.replaceState(null, '', nextUrl);
-};
 
 const TeamsPage: React.FC = () => {
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [teams, setTeams] = useState<TeamInfo[]>([]);
   const [selectedTeam, setSelectedTeam] = useState<TeamInfo | null>(null);
   const [focusTarget] = useState<TeamsPageFocusTarget | null>(() => readFocusFromUrl());
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(() => {
@@ -672,9 +580,7 @@ const TeamsPage: React.FC = () => {
     const persistedSelection = getStorageItem<TeamsPageSelection | null>(TEAMS_PAGE_SELECTION_STORAGE_KEY, null);
     return persistedSelection?.kind === 'agent' ? persistedSelection.id : null;
   });
-  const [loading, setLoading] = useState(true);
   const [modalType, setModalType] = useState<ModalType>(null);
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [editAgentAdvancedOpen, setEditAgentAdvancedOpen] = useState(false);
   const [teamAdvancedOpen, setTeamAdvancedOpen] = useState(false);
   const [selectedTeamTemplateId, setSelectedTeamTemplateId] = useState<TeamTemplateId>('delivery');
@@ -683,6 +589,27 @@ const TeamsPage: React.FC = () => {
   const [agentForm, setAgentForm] = useState<AgentFormState>(createEmptyAgentForm);
   
   const [teamForm, setTeamForm] = useState(createEmptyTeamForm);
+
+  const handleDirectorySelectionResolved = useCallback((selection: {
+    selectedAgentId: string | null;
+    selectedTeam: TeamInfo | null;
+  }) => {
+    setSelectedAgentId(selection.selectedAgentId);
+    setSelectedTeam(selection.selectedTeam);
+  }, []);
+
+  const {
+    agents,
+    teams,
+    providers,
+    loading,
+    refreshDirectory: fetchData,
+  } = useTeamsDirectoryData({
+    currentSelectedAgentId: selectedAgentId,
+    currentSelectedTeamId: selectedTeam?.id || null,
+    selectionStorageKey: TEAMS_PAGE_SELECTION_STORAGE_KEY,
+    onSelectionResolved: handleDirectorySelectionResolved,
+  });
 
   const resetAgentForm = () => {
     setAgentForm(createEmptyAgentForm());
@@ -789,59 +716,6 @@ const TeamsPage: React.FC = () => {
     label: id,
     description: '历史标签',
   });
-
-  const fetchData = async () => {
-    try {
-      const [agentsRes, teamsRes, providersRes] = await Promise.all([
-        fetch('/api/agents'),
-        fetch('/api/teams'),
-        fetch('/api/providers')
-      ]);
-      
-      const agentsData = await agentsRes.json();
-      const teamsData = await teamsRes.json();
-      const providersData = await providersRes.json();
-      
-      const nextAgents = agentsData.agents || [];
-      const nextTeams = teamsData.teams || [];
-      const urlSelection = readSelectionFromUrl();
-      const persistedSelection = getStorageItem<TeamsPageSelection | null>(TEAMS_PAGE_SELECTION_STORAGE_KEY, null);
-      const preferredAgentId =
-        (urlSelection?.kind === 'agent' ? urlSelection.id : null)
-        || selectedAgentId
-        || (persistedSelection?.kind === 'agent' ? persistedSelection.id : null);
-      const resolvedAgentId = preferredAgentId && nextAgents.some((agent: AgentInfo) => agent.id === preferredAgentId)
-        ? preferredAgentId
-        : null;
-      const preferredTeamId =
-        (urlSelection?.kind === 'team' ? urlSelection.id : null)
-        || selectedTeam?.id
-        || (persistedSelection?.kind === 'team' ? persistedSelection.id : null);
-      const resolvedTeam = !resolvedAgentId
-        ? (
-            (preferredTeamId
-              ? nextTeams.find((team: TeamInfo) => team.id === preferredTeamId)
-              : undefined)
-            || nextTeams[0]
-            || null
-          )
-        : null;
-
-      setAgents(nextAgents);
-      setTeams(nextTeams);
-      setProviders(providersData.providers || []);
-      setSelectedAgentId(resolvedAgentId);
-      setSelectedTeam(resolvedTeam);
-    } catch (error) {
-      console.error('Failed to fetch data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void fetchData();
-  }, []);
 
   const getAgentById = (agentId: string): AgentInfo | undefined => {
     return agents.find(a => a.id === agentId);
@@ -1324,159 +1198,34 @@ const TeamsPage: React.FC = () => {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="w-64 border-r border-surface-200 bg-white overflow-y-auto">
-          <div className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-medium text-surface-500 uppercase tracking-wider">
-                团队列表
-              </h2>
-              <button
-                onClick={openCreateTeamModal}
-                className="p-1 hover:bg-surface-100 rounded"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              </button>
-            </div>
-            {teams.length === 0 ? (
-              <div className="text-sm text-surface-500 text-center py-8">
-                暂无团队配置
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {teams.map((team) => (
-                  <div
-                    key={team.id}
-                    className={`group relative p-3 rounded-xl transition-all ${
-                      selectedTeam?.id === team.id
-                        ? 'bg-primary-50 border border-primary-200'
-                        : 'hover:bg-surface-50 border border-transparent'
-                    }`}
-                  >
-                    <button
-                      onClick={() => handleSelectTeam(team)}
-                      data-testid="team-list-select"
-                      data-team-id={team.id}
-                      className="w-full text-left flex items-center gap-3"
-                    >
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                        selectedTeam?.id === team.id
-                          ? 'bg-primary-500 text-white'
-                          : 'bg-surface-100 text-surface-600'
-                      }`}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                        </svg>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-surface-900 truncate">{team.name}</p>
-                        <p className="text-xs text-surface-500">{team.members.length} 成员</p>
-                      </div>
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleEditTeam(team); }}
-                      className="absolute right-8 top-1/2 -translate-y-1/2 p-1 opacity-0 group-hover:opacity-100 hover:bg-surface-100 rounded transition-all"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                      </svg>
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleDeleteTeam(team.id); }}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 opacity-0 group-hover:opacity-100 hover:bg-red-100 rounded transition-all"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="p-4 border-t border-surface-100">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-medium text-surface-500 uppercase tracking-wider">
-                所有 Agent
-              </h2>
-              <button
-                onClick={openCreateAgentModal}
-                className="p-1 hover:bg-surface-100 rounded"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              </button>
-            </div>
-            <div className="space-y-2">
-              {agents.map((agent) => {
-                const statusMeta = getAgentStatusMeta(agent);
-                return (
-                  <div
-                    key={agent.id}
-                    data-testid="agent-list-item"
-                    data-agent-id={agent.id}
-                    className={`group relative flex items-center gap-3 p-2 rounded-lg transition-colors ${
-                      selectedAgentId === agent.id ? 'bg-primary-50 ring-1 ring-primary-200' : 'hover:bg-surface-50'
-                    }`}
-                  >
-                    <button
-                      onClick={() => handleSelectAgent(agent.id)}
-                      data-testid="agent-list-select"
-                      data-agent-id={agent.id}
-                      className="min-w-0 flex flex-1 items-center gap-3 text-left"
-                    >
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                        agent.setup_required ? 'bg-accent-orange/15 text-accent-orange' : 'bg-surface-100 text-surface-600'
-                      }`}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-surface-900 truncate">{agent.name}</p>
-                        <div className="flex items-center gap-2">
-                          <p className="text-xs text-surface-500 truncate">{agent.description || agent.model || '等待首次配置'}</p>
-                          {agent.profile && (
-                            <span className={`shrink-0 ${getBadgeClassName('neutral', 'sm')}`}>
-                              {getAgentProfilePreset(agent.profile)?.label || agent.profile}
-                            </span>
-                          )}
-                          {(agent.permission_profile || agent.tool_permission_profile) && (
-                            <span className={`shrink-0 ${getBadgeClassName('slate', 'sm')}`}>
-                              {getAgentPermissionPreset(agent.permission_profile || agent.tool_permission_profile)?.label || agent.permission_profile || agent.tool_permission_profile}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <span className={getBadgeClassName(statusMeta.tone, 'sm')}>{statusMeta.shortLabel}</span>
-                    </button>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                      <button
-                        onClick={() => handleEditAgent(agent)}
-                        className="p-1 hover:bg-surface-200 rounded transition-all"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={() => handleDeleteAgent(agent.id)}
-                        className="p-1 hover:bg-red-100 rounded transition-all"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+        <TeamsSidebar
+          teams={teams}
+          agents={agents}
+          selectedTeamId={selectedTeam?.id || null}
+          selectedAgentId={selectedAgentId}
+          onCreateTeam={openCreateTeamModal}
+          onCreateAgent={openCreateAgentModal}
+          onSelectTeam={handleSelectTeam}
+          onEditTeam={handleEditTeam}
+          onDeleteTeam={handleDeleteTeam}
+          onSelectAgent={handleSelectAgent}
+          onEditAgent={handleEditAgent}
+          onDeleteAgent={handleDeleteAgent}
+          getBadgeClassName={(tone, size = 'md') => getBadgeClassName(tone as BadgeTone, size)}
+          getAgentProfileLabel={(profileId) => {
+            if (!profileId) {
+              return null;
+            }
+            return getAgentProfilePreset(profileId)?.label || profileId;
+          }}
+          getAgentPermissionLabel={(permissionId) => {
+            if (!permissionId) {
+              return null;
+            }
+            return getAgentPermissionPreset(permissionId)?.label || permissionId;
+          }}
+          getAgentStatusMeta={getAgentStatusMeta}
+        />
 
         <div className="flex-1 overflow-y-auto p-6">
           {selectedAgent ? (

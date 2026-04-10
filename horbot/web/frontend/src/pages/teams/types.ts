@@ -1,3 +1,61 @@
+export interface AgentInfo {
+  id: string;
+  name: string;
+  description: string;
+  profile?: string;
+  permission_profile?: string;
+  tool_permission_profile?: string;
+  model: string;
+  provider: string;
+  capabilities: string[];
+  tools: string[];
+  skills: string[];
+  teams: string[];
+  setup_required?: boolean;
+  bootstrap_setup_pending?: boolean;
+  workspace?: string;
+  effective_workspace?: string;
+  system_prompt?: string;
+  personality?: string;
+  avatar?: string;
+  evolution_enabled?: boolean;
+  learning_enabled?: boolean;
+  memory_bank_profile?: {
+    mission?: string;
+    directives?: string[];
+    reasoning_style?: string;
+  };
+}
+
+export interface TeamMemberProfile {
+  role?: string;
+  responsibility?: string;
+  priority?: number;
+  isLead?: boolean;
+}
+
+export interface TeamInfo {
+  id: string;
+  name: string;
+  description: string;
+  members: string[];
+  member_profiles?: Record<string, TeamMemberProfile>;
+  workspace?: string;
+  effective_workspace?: string;
+}
+
+export interface ProviderInfo {
+  id: string;
+  name: string;
+  configured: boolean;
+  models: { id: string; name: string; description: string }[];
+}
+
+export interface TeamsPageSelection {
+  kind: 'agent' | 'team';
+  id: string | null;
+}
+
 export interface AgentBootstrapFile {
   path: string;
   exists: boolean;
