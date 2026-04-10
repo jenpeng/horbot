@@ -95,12 +95,12 @@ const DashboardPage: React.FC = () => {
         <DashboardAlerts alerts={dashboardAlerts} />
         <DashboardSkillGrid onSkillClick={(skillId) => { void handleSkillClick(skillId); }} />
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-2">
+        <div className="grid grid-cols-1 items-start gap-6 mt-2 xl:grid-cols-3">
           <DashboardSystemStatusCard systemStatus={systemStatus} />
           <DashboardActivityCard activities={recentActivities} />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 gap-6 mt-6">
+        <div className="grid grid-cols-1 items-start gap-6 mt-6 lg:grid-cols-2 xl:grid-cols-2">
           <DashboardChannelsCard
             channels={channelStatusList}
             counts={channelCounts}

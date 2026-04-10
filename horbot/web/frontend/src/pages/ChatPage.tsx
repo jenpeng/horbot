@@ -2222,7 +2222,9 @@ const ChatPage: React.FC = () => {
           return;
         }
 
-        next[turn.id] = false;
+        // Team history should load fully by default so stable relay steps are not
+        // mistaken for missing history. Users can still collapse a turn manually.
+        next[turn.id] = true;
         changed = true;
       });
 

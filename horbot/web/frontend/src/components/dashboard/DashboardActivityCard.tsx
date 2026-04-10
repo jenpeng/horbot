@@ -8,7 +8,7 @@ interface DashboardActivityCardProps {
 }
 
 const DashboardActivityCard = ({ activities }: DashboardActivityCardProps) => (
-  <Card data-testid="dashboard-activity-card" className="xl:col-span-2 border border-surface-200/60 shadow-sm hover:shadow-lg transition-shadow duration-500 ease-out overflow-hidden">
+  <Card data-testid="dashboard-activity-card" className="xl:col-span-2 self-start overflow-hidden border border-surface-200/60 shadow-sm transition-shadow duration-500 ease-out hover:shadow-lg">
     <CardHeader
       className="mb-4 px-5 pt-5"
       title={(
@@ -30,12 +30,12 @@ const DashboardActivityCard = ({ activities }: DashboardActivityCardProps) => (
     />
     <CardContent padding="none">
       {activities.length > 0 ? (
-        <div className="divide-y divide-surface-100/80">
+        <div className="grid gap-3 px-5 pb-5 sm:grid-cols-2">
           {activities.map((activity, index) => (
             <div
               key={activity.id}
               data-testid={`dashboard-activity-${activity.id}`}
-              className="flex items-start gap-4 px-5 py-4 hover:bg-gradient-to-r hover:from-surface-50/80 hover:to-transparent transition-all duration-300 ease-out group"
+              className="group flex min-h-[112px] items-start gap-4 rounded-2xl border border-surface-200/70 bg-white px-4 py-4 transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-surface-300 hover:shadow-sm"
               style={{ animationDelay: `${index * 80}ms` }}
             >
               <div className={`relative w-10 h-10 rounded-[10px] flex items-center justify-center flex-shrink-0 transition-all duration-300 group-hover:scale-110 ${
@@ -54,8 +54,8 @@ const DashboardActivityCard = ({ activities }: DashboardActivityCardProps) => (
                 </div>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[14px] font-medium text-surface-900 tracking-wide">{activity.message}</p>
-                <div className="flex items-center gap-3 mt-1.5">
+                <p className="text-[14px] font-medium leading-6 text-surface-900 tracking-wide">{activity.message}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
                   <p className="text-[12px] text-surface-400 flex items-center gap-1.5 group-hover:text-surface-500 transition-colors duration-300">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
