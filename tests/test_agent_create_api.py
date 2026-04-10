@@ -33,7 +33,36 @@ class AgentCreateApiTests(unittest.IsolatedAsyncioTestCase):
         save_config_mock.assert_not_called()
         reset_mock.assert_not_awaited()
 
-    async def _post_create_request(self, existing_agent_id: str, request_id: str):
+    async def test_create_agent_requires_explicit_provider(self):
+        response, save_config_mock, reset_mock = await self._post_create_request(
+            existing_agent_id="writer",
+            request_id="reviewer",
+            payload_overrides={"provider": "auto"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "Agent provider is required")
+        save_config_mock.assert_not_called()
+        reset_mock.assert_not_awaited()
+
+    async def test_create_agent_requires_model(self):
+        response, save_config_mock, reset_mock = await self._post_create_request(
+            existing_agent_id="writer",
+            request_id="reviewer",
+            payload_overrides={"model": "  "},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "Agent model is required")
+        save_config_mock.assert_not_called()
+        reset_mock.assert_not_awaited()
+
+    async def _post_create_request(
+        self,
+        existing_agent_id: str,
+        request_id: str,
+        payload_overrides: dict | None = None,
+    ):
         with tempfile.TemporaryDirectory() as tempdir:
             workspace_root = Path(tempdir) / "workspace"
             config = Config()
@@ -57,30 +86,34 @@ class AgentCreateApiTests(unittest.IsolatedAsyncioTestCase):
                 patch("horbot.config.loader.save_config") as save_config_mock,
                 patch("horbot.web.api.reset_agent_loop", reset_mock),
             ):
+                payload = {
+                    "id": request_id,
+                    "name": "Writer Clone",
+                    "description": "duplicate id test",
+                    "profile": "",
+                    "permission_profile": "",
+                    "model": "gpt-5.4",
+                    "provider": "openai",
+                    "system_prompt": "",
+                    "capabilities": [],
+                    "tools": [],
+                    "skills": [],
+                    "workspace": "",
+                    "teams": [],
+                    "personality": "",
+                    "avatar": "",
+                    "evolution_enabled": True,
+                    "learning_enabled": True,
+                    "memory_bank_profile": {},
+                }
+                if payload_overrides:
+                    payload.update(payload_overrides)
+
                 transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 43123))
                 async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
                     response = await client.post(
                         "/api/agents",
-                        json={
-                            "id": request_id,
-                            "name": "Writer Clone",
-                            "description": "duplicate id test",
-                            "profile": "",
-                            "permission_profile": "",
-                            "model": "",
-                            "provider": "auto",
-                            "system_prompt": "",
-                            "capabilities": [],
-                            "tools": [],
-                            "skills": [],
-                            "workspace": "",
-                            "teams": [],
-                            "personality": "",
-                            "avatar": "",
-                            "evolution_enabled": True,
-                            "learning_enabled": True,
-                            "memory_bank_profile": {},
-                        },
+                        json=payload,
                     )
 
         return response, save_config_mock, reset_mock

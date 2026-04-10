@@ -21,6 +21,8 @@ interface AgentFormModalProps {
   capabilityOptions: Array<{ id: string; label: string; description: string }>;
   createIdError?: string;
   createNameError?: string;
+  createProviderError?: string;
+  createModelError?: string;
   submitDisabled?: boolean;
   recommendedMemoryProfile: AgentFormState['memory_bank_profile'];
   recommendedMemoryProfileMeta: {
@@ -47,6 +49,8 @@ const AgentFormModal = ({
   capabilityOptions,
   createIdError = '',
   createNameError = '',
+  createProviderError = '',
+  createModelError = '',
   submitDisabled = false,
   recommendedMemoryProfile,
   recommendedMemoryProfileMeta,
@@ -70,8 +74,9 @@ const AgentFormModal = ({
         </h3>
         <div className="space-y-4 max-h-[70vh] overflow-y-auto">
           <div>
-            <label className="block text-sm font-medium text-surface-700 mb-1">ID</label>
+            <label htmlFor="agent-form-id" className="block text-sm font-medium text-surface-700 mb-1">ID</label>
             <input
+              id="agent-form-id"
               type="text"
               value={form.id}
               disabled={!isCreateMode}
@@ -91,8 +96,9 @@ const AgentFormModal = ({
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium text-surface-700 mb-1">名称</label>
+            <label htmlFor="agent-form-name" className="block text-sm font-medium text-surface-700 mb-1">名称</label>
             <input
+              id="agent-form-name"
               type="text"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -224,32 +230,48 @@ const AgentFormModal = ({
             <h4 className="text-sm font-medium text-surface-700 mb-3">模型配置</h4>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-surface-600 mb-1">供应商</label>
+                <label htmlFor="agent-form-provider" className="block text-xs font-medium text-surface-600 mb-1">供应商</label>
                 <select
+                  id="agent-form-provider"
                   value={form.provider}
                   onChange={(e) => setForm({ ...form, provider: e.target.value })}
-                  className="w-full px-3 py-2 border border-surface-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm ${
+                    isCreateMode && createProviderError ? 'border-red-300 bg-red-50/40' : 'border-surface-300'
+                  }`}
+                  aria-invalid={Boolean(createProviderError)}
                 >
-                  <option value="auto">自动选择</option>
+                  {isCreateMode && <option value="">请选择供应商</option>}
+                  <option value="auto" disabled={isCreateMode}>自动选择</option>
                   {providers.map((provider) => (
                     <option key={provider.id} value={provider.id} disabled={!provider.configured}>
                       {provider.name} {!provider.configured && '(未配置)'}
                     </option>
                   ))}
                 </select>
+                {createProviderError && (
+                  <p className="mt-1 text-xs text-red-600">{createProviderError}</p>
+                )}
               </div>
               <div>
-                <label className="block text-xs font-medium text-surface-600 mb-1">模型名称</label>
+                <label htmlFor="agent-form-model" className="block text-xs font-medium text-surface-600 mb-1">模型名称</label>
                 <input
+                  id="agent-form-model"
                   type="text"
                   value={form.model}
                   onChange={(e) => setForm({ ...form, model: e.target.value })}
-                  className="w-full px-3 py-2 border border-surface-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm ${
+                    isCreateMode && createModelError ? 'border-red-300 bg-red-50/40' : 'border-surface-300'
+                  }`}
                   placeholder="如: gpt-4o, claude-sonnet-4-5"
+                  aria-invalid={Boolean(createModelError)}
                 />
-                <p className="mt-1 text-xs text-surface-500">
-                  创建时即可配置 provider 和 model；留空则仍可稍后在编辑页或配置页补齐。
-                </p>
+                {createModelError ? (
+                  <p className="mt-1 text-xs text-red-600">{createModelError}</p>
+                ) : (
+                  <p className="mt-1 text-xs text-surface-500">
+                    创建阶段需要明确 provider 和 model，创建完成后即可直接开始首次私聊。
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -263,9 +285,9 @@ const AgentFormModal = ({
                 </div>
               </div>
               <div className="rounded-2xl border border-primary-200 bg-primary-50/70 px-4 py-4 text-sm text-surface-700">
-                <div className="font-semibold text-surface-900">建议创建时就把模型配置一起补齐。</div>
+                <div className="font-semibold text-surface-900">创建前需要先把模型配置补齐。</div>
                 <div className="mt-1">
-                  这样创建完成后就可以直接进入首次私聊，引导它完善职责、风格与协作边界；如果暂时不确定，也可以留空，后续再编辑。
+                  这样创建完成后就可以直接进入首次私聊，引导它完善职责、风格与协作边界，不再出现“先创建、再补模型”的往返操作。
                 </div>
               </div>
             </>

@@ -132,6 +132,25 @@ describe('TeamsPage', () => {
     expect(screen.getByText('模型名称')).toBeInTheDocument();
   });
 
+  it('requires provider and model before enabling agent creation', () => {
+    window.history.replaceState({}, '', '/teams?agent=agent-a');
+
+    render(<TeamsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: '创建 Agent' }));
+
+    const createButton = screen.getByRole('button', { name: '创建' });
+    expect(createButton).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('ID'), { target: { value: 'agent-b' } });
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'Agent B' } });
+    expect(createButton).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('供应商'), { target: { value: 'openai' } });
+    fireEvent.change(screen.getByLabelText('模型名称'), { target: { value: 'gpt-5.4' } });
+    expect(createButton).not.toBeDisabled();
+  });
+
   it('opens the extracted edit team modal from the team detail panel', () => {
     window.history.replaceState({}, '', '/teams?team=team-a');
 

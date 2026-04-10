@@ -117,7 +117,7 @@ from horbot.agent.context_manager import HierarchicalContextManager
 from pathlib import Path
 
 # 初始化
-manager = HierarchicalContextManager(workspace=Path(".horbot/workspace"))
+manager = HierarchicalContextManager(workspace=Path(".horbot/agents/main/workspace"))
 
 # 加载上下文
 context = manager.load_context(
@@ -255,11 +255,12 @@ results = manager.search_context(
 ```
 docs/
 ├── README_CN.md              # 中文 README
+├── USER_MANUAL_CN.md         # 用户手册
+├── MULTI_AGENT_GUIDE_CN.md   # 多 Agent 手册
 ├── ARCHITECTURE_CN.md        # 架构文档
 ├── API_CN.md                 # API 文档
 ├── SKILLS_CN.md              # 技能系统文档
-├── HIERARCHICAL_CONTEXT_CN.md # 分层上下文文档
-├── HOT_RELOAD_CN.md          # 热加载文档
+├── SECURITY_CN.md            # 安全指南
 └── CONTRIBUTING_CN.md        # 贡献指南
 ```
 

@@ -1396,6 +1396,20 @@ def _legacy_agent_session_managers(agent) -> list[SessionManager]:
     return candidates
 
 
+def _team_history_session_managers(team_id: str) -> list[SessionManager]:
+    candidates: list[SessionManager] = [get_session_manager()]
+    try:
+        from horbot.workspace.manager import get_workspace_manager
+
+        workspace_manager = get_workspace_manager()
+        team_ws = workspace_manager.get_team_workspace(team_id)
+        if team_ws:
+            candidates.append(SessionManager(workspace=Path(team_ws.workspace_path) / "sessions"))
+    except Exception as exc:
+        logger.warning("Failed to resolve team history paths for team {}: {}", team_id, exc)
+    return _unique_session_managers(candidates)
+
+
 def _load_merged_session_messages(session_key: str, managers: list[SessionManager]) -> list[dict[str, Any]]:
     message_groups: list[list[dict[str, Any]]] = []
     for manager in _unique_session_managers(managers):
@@ -3212,7 +3226,9 @@ async def get_chat_history(session_key: str = "default", agent_id: Optional[str]
     logger.info(f"[DEBUG] Using sessions_dir={manager.sessions_dir}")
 
     candidate_managers = [manager]
-    if resolved_agent_id:
+    if raw_session_key.startswith("team_"):
+        candidate_managers = _team_history_session_managers(raw_session_key[5:])
+    elif resolved_agent_id:
         from horbot.agent.manager import get_agent_manager
 
         agent = get_agent_manager().get_agent(resolved_agent_id)
@@ -6822,7 +6838,6 @@ async def get_conversation_messages(conv_id: str):
     """Get messages for a specific conversation."""
     from horbot.conversation import get_conversation_manager, ConversationType
     from horbot.session.manager import SessionManager
-    from horbot.workspace.manager import get_workspace_manager
     
     conv_manager = get_conversation_manager()
     conv = conv_manager.get(conv_id)
@@ -6849,11 +6864,7 @@ async def get_conversation_messages(conv_id: str):
     
     candidate_managers: list[SessionManager] = []
     if conv.type == ConversationType.TEAM:
-        workspace_manager = get_workspace_manager()
-        team_ws = workspace_manager.get_team_workspace(conv.target_id)
-        sessions_path = Path(team_ws.workspace_path) / "sessions"
-        session_manager = SessionManager(workspace=sessions_path)
-        candidate_managers = [session_manager]
+        candidate_managers = _team_history_session_managers(conv.target_id)
     elif conv.type == ConversationType.DM:
         from horbot.agent.manager import get_agent_manager
 
@@ -7208,6 +7219,8 @@ async def create_agent(request: CreateAgentRequest):
     
     request_id = request.id.strip()
     request_name = request.name.strip()
+    request_provider = request.provider.strip()
+    request_model = request.model.strip()
     normalized_request_id = _normalize_agent_id(request_id)
 
     if not request_id:
@@ -7215,6 +7228,12 @@ async def create_agent(request: CreateAgentRequest):
 
     if not request_name:
         raise HTTPException(status_code=400, detail="Agent name is required")
+
+    if not request_provider or request_provider == "auto":
+        raise HTTPException(status_code=400, detail="Agent provider is required")
+
+    if not request_model:
+        raise HTTPException(status_code=400, detail="Agent model is required")
 
     existing_agent_id = next(
         (
@@ -7235,8 +7254,8 @@ async def create_agent(request: CreateAgentRequest):
         description=request.description,
         profile=request.profile.strip(),
         permission_profile=request.permission_profile.strip(),
-        model=request.model,
-        provider=request.provider,
+        model=request_model,
+        provider=request_provider,
         system_prompt=request.system_prompt,
         capabilities=_normalize_string_list(request.capabilities),
         tools=_normalize_string_list(request.tools),

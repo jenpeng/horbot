@@ -379,8 +379,8 @@ class PlanStepSubagent:
    - 如果指定的路径目录不存在，必须先创建目录
    - 不要在用户指定的路径之外创建新的目录
 6. **路径示例**:
-   - 如果用户要求保存到"/Users/jenpeng/Desktop/个人/AI Project/horbot/.horbot/workspace/Project/"
-   - 那么文件必须保存到这个路径下，例如："/Users/jenpeng/Desktop/个人/AI Project/horbot/.horbot/workspace/Project/文档名称.docx"
+   - 如果用户要求保存到"/Users/jenpeng/Desktop/个人/AI Project/horbot/.horbot/agents/main/workspace/Project/"
+   - 那么文件必须保存到这个路径下，例如："/Users/jenpeng/Desktop/个人/AI Project/horbot/.horbot/agents/main/workspace/Project/文档名称.docx"
    - 不能保存到其他位置，如当前工作目录或其他目录
 7. **工具使用示例**：
    - 创建Word文档：使用 mcp_office-word_create_document 工具，savePath 参数使用绝对路径

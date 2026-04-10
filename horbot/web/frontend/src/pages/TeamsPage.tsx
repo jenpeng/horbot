@@ -365,7 +365,7 @@ const createEmptyAgentForm = (): AgentFormState => ({
   profile: '',
   permission_profile: '',
   model: '',
-  provider: 'auto',
+  provider: '',
   system_prompt: '',
   capabilities: [],
   tools: [],
@@ -507,6 +507,8 @@ const TeamsPage: React.FC = () => {
   const normalizedCreateAgentId = normalizeAgentId(agentForm.id);
   const createAgentIdRequired = modalType === 'create-agent' && !agentForm.id.trim();
   const createAgentNameRequired = modalType === 'create-agent' && !agentForm.name.trim();
+  const createAgentProviderRequired = modalType === 'create-agent' && !agentForm.provider.trim();
+  const createAgentModelRequired = modalType === 'create-agent' && !agentForm.model.trim();
   const createAgentIdExists = modalType === 'create-agent'
     && normalizedCreateAgentId.length > 0
     && agents.some((agent) => normalizeAgentId(agent.id) === normalizedCreateAgentId);
@@ -516,8 +518,16 @@ const TeamsPage: React.FC = () => {
       ? `Agent ID "${agentForm.id.trim()}" 已存在，请使用新的唯一 ID。`
       : '';
   const createAgentNameError = createAgentNameRequired ? '请输入 Agent 名称。' : '';
+  const createAgentProviderError = createAgentProviderRequired ? '请选择 provider。' : '';
+  const createAgentModelError = createAgentModelRequired ? '请输入 model。' : '';
   const createAgentSubmitDisabled = modalType === 'create-agent'
-    && (!agentForm.id.trim() || !agentForm.name.trim() || createAgentIdExists);
+    && (
+      !agentForm.id.trim()
+      || !agentForm.name.trim()
+      || !agentForm.provider.trim()
+      || !agentForm.model.trim()
+      || createAgentIdExists
+    );
   const normalizedCreateTeamId = normalizeTeamId(teamForm.id);
   const createTeamIdRequired = modalType === 'create-team' && !teamForm.id.trim();
   const createTeamNameRequired = modalType === 'create-team' && !teamForm.name.trim();
@@ -775,6 +785,16 @@ const TeamsPage: React.FC = () => {
 
     if (!agentForm.name.trim()) {
       alert('Agent name is required');
+      return;
+    }
+
+    if (!agentForm.provider.trim()) {
+      alert('Agent provider is required');
+      return;
+    }
+
+    if (!agentForm.model.trim()) {
+      alert('Agent model is required');
       return;
     }
 
@@ -1102,6 +1122,8 @@ const TeamsPage: React.FC = () => {
           capabilityOptions={capabilityOptions}
           createIdError={createAgentIdError}
           createNameError={createAgentNameError}
+          createProviderError={createAgentProviderError}
+          createModelError={createAgentModelError}
           submitDisabled={createAgentSubmitDisabled}
           recommendedMemoryProfile={recommendedMemoryProfile}
           recommendedMemoryProfileMeta={recommendedMemoryProfileMeta}

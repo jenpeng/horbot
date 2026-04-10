@@ -28,21 +28,21 @@ npx --yes clawhub@latest search "web scraping" --limit 5
 ## Install
 
 ```bash
-npx --yes clawhub@latest install <slug> --workdir ~/.horbot/workspace
+npx --yes clawhub@latest install <slug> --workdir ~/.horbot/agents/main/workspace
 ```
 
-Replace `<slug>` with the skill name from search results. This places the skill into `~/.horbot/workspace/skills/`, where horbot loads workspace skills from. Always include `--workdir`.
+Replace `<slug>` with the skill name from search results. This places the skill into `~/.horbot/agents/main/workspace/skills/`, where horbot loads workspace skills from. Always include `--workdir`.
 
 ## Update
 
 ```bash
-npx --yes clawhub@latest update --all --workdir ~/.horbot/workspace
+npx --yes clawhub@latest update --all --workdir ~/.horbot/agents/main/workspace
 ```
 
 ## List installed
 
 ```bash
-npx --yes clawhub@latest list --workdir ~/.horbot/workspace
+npx --yes clawhub@latest list --workdir ~/.horbot/agents/main/workspace
 ```
 
 ## Notes
@@ -50,5 +50,5 @@ npx --yes clawhub@latest list --workdir ~/.horbot/workspace
 - Requires Node.js (`npx` comes with it).
 - No API key needed for search and install.
 - Login (`npx --yes clawhub@latest login`) is only required for publishing.
-- `--workdir ~/.horbot/workspace` is critical — without it, skills install to the current directory instead of the horbot workspace.
+- `--workdir ~/.horbot/agents/main/workspace` is critical — without it, skills install to the current directory instead of the horbot workspace.
 - After install, remind the user to start a new session to load the skill.

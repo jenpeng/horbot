@@ -28,21 +28,21 @@ npx --yes clawhub@latest search "关键词" --registry https://skillhub.tencent.
 ## Install
 
 ```bash
-npx --yes clawhub@latest install <slug> --registry https://skillhub.tencent.com/api --workdir ~/.horbot/workspace
+npx --yes clawhub@latest install <slug> --registry https://skillhub.tencent.com/api --workdir ~/.horbot/agents/main/workspace
 ```
 
-Replace `<slug>` with the skill name from search results. This places the skill into `~/.horbot/workspace/skills/`, where horbot loads workspace skills from. Always include `--workdir`.
+Replace `<slug>` with the skill name from search results. This places the skill into `~/.horbot/agents/main/workspace/skills/`, where horbot loads workspace skills from. Always include `--workdir`.
 
 ## Update
 
 ```bash
-npx --yes clawhub@latest update --all --registry https://skillhub.tencent.com/api --workdir ~/.horbot/workspace
+npx --yes clawhub@latest update --all --registry https://skillhub.tencent.com/api --workdir ~/.horbot/agents/main/workspace
 ```
 
 ## List installed
 
 ```bash
-npx --yes clawhub@latest list --workdir ~/.horbot/workspace
+npx --yes clawhub@latest list --workdir ~/.horbot/agents/main/workspace
 ```
 
 ## Notes
@@ -50,7 +50,7 @@ npx --yes clawhub@latest list --workdir ~/.horbot/workspace
 - Requires Node.js (`npx` comes with it).
 - No API key needed for search and install.
 - Login is only required for publishing.
-- `--workdir ~/.horbot/workspace` is critical — without it, skills install to the current directory instead of the horbot workspace.
+- `--workdir ~/.horbot/agents/main/workspace` is critical — without it, skills install to the current directory instead of the horbot workspace.
 - `--registry https://skillhub.tencent.com/api` points to Tencent SkillHub instead of default ClawHub.
 - After install, remind the user to start a new session to load the skill.
 - For Chinese users, SkillHub may provide better network performance and localized skills.

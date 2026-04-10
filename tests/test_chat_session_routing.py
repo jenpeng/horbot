@@ -157,3 +157,47 @@ class ChatSessionRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(payload["messages"]), 2)
         self.assertEqual(payload["messages"][0]["content"], "hello writer")
         self.assertEqual(payload["messages"][1]["content"], "hi there")
+
+    async def test_get_team_conversation_messages_merges_legacy_global_and_team_scoped_history(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            global_manager = SessionManager(workspace=root / "global-workspace" / "sessions")
+            team_workspace = root / "team-alpha-workspace"
+            team_manager = SessionManager(workspace=team_workspace / "sessions")
+
+            legacy_session = global_manager.get_or_create("web:team_alpha")
+            legacy_session.add_message("user", "先前的团队问题")
+            global_manager.save(legacy_session)
+
+            current_session = team_manager.get_or_create("web:team_alpha")
+            current_session.add_message(
+                "assistant",
+                "当前团队回复",
+                agent_id="writer",
+                agent_name="Writer",
+            )
+            team_manager.save(current_session)
+
+            fake_conversation = SimpleNamespace(
+                id="team_alpha",
+                type=ConversationType.TEAM,
+                target_id="alpha",
+                to_dict=lambda: {"id": "team_alpha", "type": "team", "target_id": "alpha"},
+            )
+            fake_conv_manager = SimpleNamespace(
+                get=lambda conv_id: fake_conversation if conv_id == "team_alpha" else None,
+            )
+            fake_workspace_manager = SimpleNamespace(
+                get_team_workspace=lambda team_id: SimpleNamespace(workspace_path=str(team_workspace))
+                if team_id == "alpha" else None,
+            )
+
+            with (
+                patch("horbot.conversation.get_conversation_manager", return_value=fake_conv_manager),
+                patch("horbot.workspace.manager.get_workspace_manager", return_value=fake_workspace_manager),
+                patch("horbot.web.api.get_session_manager", return_value=global_manager),
+            ):
+                payload = await get_conversation_messages("team_alpha")
+
+        self.assertEqual(payload["conversation_id"], "team_alpha")
+        self.assertEqual([message["content"] for message in payload["messages"]], ["先前的团队问题", "当前团队回复"])

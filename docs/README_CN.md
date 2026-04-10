@@ -628,7 +628,7 @@ horbot/
 {
   "agents": {
     "defaults": {
-      "workspace": ".horbot/workspace"
+      "workspace": ".horbot/agents/main/workspace"
     }
   }
 }
@@ -657,11 +657,13 @@ workspace/
 
 | 配置值 | 解析结果 |
 |--------|----------|
-| `.horbot/workspace`（默认） | `{project_root}/.horbot/workspace` |
-| `~/.horbot/workspace` | `/home/user/.horbot/workspace` |
+| `.horbot/agents/main/workspace`（默认） | `{project_root}/.horbot/agents/main/workspace` |
+| `~/.horbot/agents/main/workspace` | `/home/user/.horbot/agents/main/workspace` |
 | `/custom/path` | `/custom/path` |
 
 > **注意**：相对路径相对于项目根目录解析（通过 `.git`、`pyproject.toml` 或 `.horbot` 标记文件检测）。
+>
+> `/.horbot/workspace` 属于早期兼容路径，当前项目默认不再使用；如果你的环境里仍残留该目录，通常只剩旧的运行时缓存或历史产物。
 
 ---
 

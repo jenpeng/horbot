@@ -26,7 +26,7 @@ GET /api/config
 {
   "agents": {
     "defaults": {
-      "workspace": ".horbot/workspace",
+      "workspace": ".horbot/agents/main/workspace",
       "models": {
         "main": {
           "provider": "openrouter",
@@ -62,7 +62,7 @@ Content-Type: application/json
 {
   "agents": {
     "defaults": {
-      "workspace": ".horbot/workspace",
+      "workspace": ".horbot/agents/main/workspace",
       "models": {
         "main": {
           "provider": "openrouter",
@@ -394,7 +394,7 @@ GET /api/status
   "version": "0.1.4.post2",
   "provider": "openrouter",
   "model": "anthropic/claude-opus-4-5",
-  "workspace": "./.horbot/workspace",
+  "workspace": "./.horbot/agents/main/workspace",
   "channels": {
     "telegram": "connected",
     "discord": "disconnected"
