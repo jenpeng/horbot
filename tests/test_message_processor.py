@@ -2,6 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import MagicMock, AsyncMock
 
+from horbot.agent.loop import AgentLoop
 from horbot.agent.message_processor import MessageProcessor
 from horbot.bus.events import InboundMessage, OutboundMessage
 
@@ -190,6 +191,48 @@ class TestMessageProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outbound_msg.channel, "telegram")
         self.assertEqual(outbound_msg.chat_id, "chat_123")
         self.assertEqual(outbound_msg.content, "Sorry, I encountered an error.")
+
+    def test_agent_to_agent_turn_skips_planning(self):
+        loop = AgentLoop.__new__(AgentLoop)
+        msg = InboundMessage(
+            channel="web",
+            sender_id="web_user",
+            chat_id="team_team-001",
+            content="请从风险角度补充",
+            metadata={
+                "conversation_context": {
+                    "conversation_type": "agent_to_agent",
+                    "source": "alpha",
+                    "source_name": "Alpha",
+                    "target": "beta",
+                    "target_name": "Beta",
+                }
+            },
+        )
+
+        self.assertTrue(AgentLoop._should_skip_planning_for_message(loop, msg))
+
+    def test_group_chat_summary_return_turn_skips_planning(self):
+        loop = AgentLoop.__new__(AgentLoop)
+        msg = InboundMessage(
+            channel="web",
+            sender_id="web_user",
+            chat_id="team_team-001",
+            content="请基于当前团队对话历史，吸收其他 agent 已经给出的分析。",
+            metadata={
+                "group_chat": True,
+                "conversation_context": {
+                    "conversation_type": "user_to_agent",
+                    "source": "user",
+                    "source_name": "用户",
+                    "target": "main",
+                    "target_name": "小项 🐎",
+                    "trigger_message": "请基于当前团队对话历史，吸收其他 agent 已经给出的分析，现在直接面向用户输出最终总结。",
+                },
+            },
+        )
+
+        self.assertTrue(AgentLoop._should_skip_planning_for_message(loop, msg))
 
     async def test_process_message_new_task(self):
         self.mock_agent._is_new_task = MagicMock(return_value=True)

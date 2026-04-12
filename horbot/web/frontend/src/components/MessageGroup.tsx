@@ -580,7 +580,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
     }
 
     return (
-      <div className="mb-3 flex flex-wrap gap-2">
+      <div className="mb-2 flex flex-wrap gap-2">
         {files.map((file) => {
           const previewUrl = file.localPreview || file.previewUrl || file.url;
           const cardTone = isUserMessage
@@ -674,28 +674,45 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
     const memoryRecall = !isUser ? coerceMemoryRecall(message.metadata?._memory_recall) : null;
     const memorySummaryLabel = memorySources.length > 0 ? `记忆参考 ${memorySources.length} 条` : '记忆召回';
     const shouldRenderMarkdown = !isUser && !message.isStreaming && !isErrorMessage && !!cleanedContent.trim();
+    const handoffFromName = !isUser && typeof message.metadata?.handoff_from_name === 'string'
+      ? message.metadata.handoff_from_name
+      : '';
+    const handoffMode = !isUser && typeof message.metadata?.handoff_mode === 'string'
+      ? message.metadata.handoff_mode
+      : '';
+    const handoffPreview = !isUser && typeof message.metadata?.handoff_preview === 'string'
+      ? message.metadata.handoff_preview
+      : '';
+    const relayStatusLabel = handoffFromName
+      ? `${handoffFromName} -> ${agentName || '助手'}`
+      : `${agentName || '助手'} 接力中`;
+    const relayStatusTone = handoffMode === 'summary'
+      ? 'border-emerald-200 bg-emerald-50/80 text-emerald-800'
+      : handoffMode === 'continue'
+        ? 'border-sky-200 bg-sky-50/80 text-sky-800'
+        : 'border-violet-200 bg-violet-50/80 text-violet-800';
 
     return (
       <div
         key={message.id}
-        className={`group/message-row flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'} ${index > 0 ? 'mt-2' : ''}`}
+        className={`group/message-row flex gap-1.5 ${isUser ? 'flex-row-reverse' : 'flex-row'} ${index > 0 ? 'mt-0.5' : ''}`}
       >
         {showAvatar ? (
-          <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${isUser ? 'from-blue-500 to-cyan-500' : avatarColor} text-xs font-semibold text-white shadow-sm`}>
+          <div className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${isUser ? 'from-blue-500 to-cyan-500' : avatarColor} text-[10px] font-semibold text-white shadow-sm`}>
             {isUser ? '你' : (agentName ? agentName.charAt(0).toUpperCase() : '?')}
           </div>
         ) : (
-          <div className="w-9 flex-shrink-0" />
+          <div className="w-6 flex-shrink-0" />
         )}
 
-        <div className={`flex max-w-[84%] flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+        <div className={`flex min-w-0 max-w-full flex-col ${isUser ? 'items-end' : 'items-start'}`}>
           {showAvatar && (
-            <div className={`mb-1 flex items-center gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-              <span className="text-sm font-semibold text-slate-800">
+            <div className={`mb-0.5 flex items-center gap-1.5 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+              <span className="text-[12px] font-semibold text-slate-800">
                 {isUser ? '你' : agentName || '助手'}
               </span>
               {showTimestamp && message.timestamp && (
-                <span className="text-xs text-slate-400">
+                <span className="text-[10px] text-slate-400">
                   {formatTime(message.timestamp)}
                 </span>
               )}
@@ -703,14 +720,37 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
           )}
 
           {message.statusMessage && !message.content && (
-            <div className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-500">
-              <span>{message.statusMessage}</span>
-              <span className="inline-block h-4 w-1.5 animate-pulse rounded-full bg-slate-400" />
+            <div className={`w-fit max-w-full rounded-2xl border px-3 py-2 shadow-sm sm:max-w-[36rem] ${relayStatusTone}`}>
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium">
+                <span className="inline-flex items-center rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                  团队接力
+                </span>
+                <span>{relayStatusLabel}</span>
+                {handoffMode === 'summary' && (
+                  <span className="inline-flex items-center rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                    返回总结
+                  </span>
+                )}
+                {handoffMode === 'continue' && (
+                  <span className="inline-flex items-center rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                    继续下一棒
+                  </span>
+                )}
+              </div>
+              <div className="mt-1.5 flex items-center gap-2 text-[12px] leading-5">
+                <span>{message.statusMessage}</span>
+                <span className="inline-block h-3.5 w-1.5 animate-pulse rounded-full bg-current" />
+              </div>
+              {handoffPreview && (
+                <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                  当前子任务: {handoffPreview}
+                </p>
+              )}
             </div>
           )}
 
           <div
-            className={`rounded-3xl px-4 py-3 text-sm shadow-sm ${
+            className={`w-fit min-w-0 max-w-full rounded-2xl px-2.5 py-1.5 text-[13px] shadow-sm sm:max-w-[42rem] ${
               isUser
                 ? 'rounded-tr-md bg-blue-500 text-white'
                 : isErrorMessage
@@ -735,15 +775,15 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
             )}
 
             {message.isStreaming ? (
-              <div className="flex items-center gap-1 whitespace-pre-wrap break-words">
-                <div className="w-full">
+              <div className="flex items-center gap-1 whitespace-pre-wrap break-words leading-[1.55]">
+                <div className="min-w-0">
                   {renderMessageFiles(message.files, isUser)}
                   <span>{cleanedContent}</span>
                 </div>
                 <span className="inline-block h-4 w-1.5 animate-pulse rounded-full bg-current" />
               </div>
             ) : (
-              <div className="whitespace-pre-wrap break-words">
+              <div className="min-w-0 whitespace-pre-wrap break-words leading-[1.55]">
                 {renderMessageFiles(message.files, isUser)}
                 {shouldRenderMarkdown ? (
                   <MarkdownRenderer
@@ -770,11 +810,11 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
           </div>
 
           {children && index === messages.length - 1 && (
-            <div className="mt-0.5">{children}</div>
+            <div className="mt-0.5 w-full max-w-full sm:max-w-[42rem]">{children}</div>
           )}
 
           {!isUser && (memorySources.length > 0 || memoryRecall) && index === messages.length - 1 && (
-            <details className="mt-2 w-full max-w-[84%] rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-slate-700 shadow-sm">
+            <details className="mt-1.5 w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-slate-700 shadow-sm sm:max-w-[42rem]">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-medium text-slate-600 marker:hidden">
                 <span className="inline-flex items-center gap-2">
                   <BookMarked className="h-3.5 w-3.5" strokeWidth={2} />
@@ -905,7 +945,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
           )}
 
           {!message.isStreaming && (
-            <div className={`mt-2 flex transition-all duration-150 ${isUser ? 'justify-end' : 'justify-start'} opacity-0 translate-y-1 pointer-events-none group-hover/message-row:opacity-100 group-hover/message-row:translate-y-0 group-hover/message-row:pointer-events-auto group-focus-within/message-row:opacity-100 group-focus-within/message-row:translate-y-0 group-focus-within/message-row:pointer-events-auto`}>
+            <div className={`mt-1.5 flex transition-all duration-150 ${isUser ? 'justify-end' : 'justify-start'} opacity-0 translate-y-1 pointer-events-none group-hover/message-row:opacity-100 group-hover/message-row:translate-y-0 group-hover/message-row:pointer-events-auto group-focus-within/message-row:opacity-100 group-focus-within/message-row:translate-y-0 group-focus-within/message-row:pointer-events-auto`}>
               <div className={`inline-flex items-center gap-2 rounded-full border px-2 py-1 shadow-sm ${
                 isUser
                   ? 'border-blue-200 bg-blue-50/80 text-blue-700'
@@ -947,7 +987,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
 
   return (
     <div
-      className="space-y-0.5"
+      className="min-w-0 space-y-0"
       data-testid="chat-message-group"
       data-role={isUser ? 'user' : 'assistant'}
       data-agent-id={agentId || ''}

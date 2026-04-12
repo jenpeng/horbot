@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import json_repair
 from openai import AsyncOpenAI
@@ -55,7 +55,11 @@ class CustomProvider(LLMProvider):
             return CustomProvider._extract_text(text)
         return ""
 
-    async def _chat_streaming(self, kwargs: dict[str, Any]) -> LLMResponse:
+    async def _chat_streaming(
+        self,
+        kwargs: dict[str, Any],
+        on_content_delta: Callable[[str], Awaitable[None] | None] | None = None,
+    ) -> LLMResponse:
         stream = await self._client.chat.completions.create(
             **kwargs,
             stream=True,
@@ -85,6 +89,10 @@ class CustomProvider(LLMProvider):
                 content = self._extract_text(getattr(delta, "content", None))
                 if content:
                     content_parts.append(content)
+                    if on_content_delta:
+                        maybe_result = on_content_delta("".join(content_parts))
+                        if maybe_result is not None:
+                            await maybe_result
 
                 reasoning = (
                     self._extract_text(getattr(delta, "reasoning_content", None))
@@ -137,6 +145,7 @@ class CustomProvider(LLMProvider):
         temperature: float = 0.7,
         file_ids: list[str] | None = None,
         files: list[dict[str, Any]] | None = None,
+        on_content_delta: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
@@ -147,11 +156,13 @@ class CustomProvider(LLMProvider):
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
         try:
+            if on_content_delta:
+                return await self._chat_streaming(kwargs, on_content_delta=on_content_delta)
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:
             if "Stream must be set to true" in str(e):
                 try:
-                    return await self._chat_streaming(kwargs)
+                    return await self._chat_streaming(kwargs, on_content_delta=on_content_delta)
                 except Exception as stream_error:
                     error_info = diagnose_provider_error(
                         stream_error,

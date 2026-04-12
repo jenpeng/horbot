@@ -4,6 +4,12 @@ This changelog tracks notable product and documentation milestones for Horbot. F
 
 ## 2026-04-12
 
+### Chat And Team Relay
+
+- Tightened assistant message spacing and Markdown layout in the chat UI to reduce excessive whitespace
+- Added clearer baton-oriented team relay state in chat, including who handed off the turn and whether the next baton is continuation or final summary
+- Added a local multi-agent relay SSE regression covering a longer ordered handoff chain
+
 ### Channels
 
 - Added `WeCom` channel support for the official enterprise WeChat AI Bot WebSocket gateway

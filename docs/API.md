@@ -72,5 +72,7 @@
 - `POST /api/chat/sessions` returns UUID-based session keys such as `session_4f0c...`, avoiding timestamp collisions.
 - Channel endpoint metadata now includes WeCom, including required fields for `bot_id` and `secret`.
 - `POST /api/skills/import` validates `.skill` and `.zip` packages before writing them into the active agent skill directory.
+- Team relay SSE flows include relay-oriented events such as `agent_start`, `agent_mentioned`, and `agent_done`.
+- `agent_mentioned` may also include `mentioned_by_name`, `handoff_mode` (`relay` / `continue` / `summary`), and `handoff_preview` so the frontend can show clearer baton status.
 
 For detailed request and response examples, use the Chinese reference: [API_CN.md](./API_CN.md).

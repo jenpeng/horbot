@@ -45,6 +45,8 @@ Chat supports:
 - drag and drop
 - paste upload
 - inline history preview
+- compact assistant bubbles with tighter Markdown spacing for long replies
+- baton-aware team relay status so the UI shows who handed off to whom and whether the next turn is continuing discussion or returning to a final summary
 
 Uploads are stored under `.horbot/data/uploads`.
 
@@ -72,6 +74,17 @@ Before import, Horbot validates:
 - environment compatibility and missing requirements
 
 Imported skills are written to the current agent skill directory, and compatibility results are shown immediately in the UI.
+
+## Team Relay Behavior
+
+Current team relay behavior is intentionally ordered, not parallel:
+
+- one agent responds at a time
+- the UI keeps showing each baton as a separate relay group
+- waiting cards can display who handed the turn off and a short preview of the subtask
+- summary-return turns are treated differently from normal teammate handoffs
+
+Agent-to-agent turns are also guided to stay shorter by default so relay chains feel more incremental in the chat UI.
 
 ## External Channels
 

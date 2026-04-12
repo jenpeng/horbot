@@ -93,7 +93,23 @@ export const useConversationStore = create<ConversationState>()(
       getOrCreateTeamConversation: (teamId, teamName, memberIds, description) => {
         const convId = createTeamConversationId(teamId);
         const existing = get().conversations.find(c => c.id === convId);
-        if (existing) return existing;
+        if (existing) {
+          const refreshedConversation: Conversation = {
+            ...existing,
+            name: teamName,
+            description,
+            agentIds: memberIds,
+            updatedAt: new Date().toISOString(),
+          };
+
+          set(state => ({
+            conversations: state.conversations.map(conversation =>
+              conversation.id === convId ? refreshedConversation : conversation
+            ),
+          }));
+
+          return refreshedConversation;
+        }
         
         const newConv: Conversation = {
           id: convId,

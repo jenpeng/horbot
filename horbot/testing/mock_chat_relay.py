@@ -40,6 +40,21 @@ class FakeAgentManager:
         return self.agents["alpha"]
 
 
+class FlexibleFakeAgentManager:
+    def __init__(self, agents: dict[str, FakeAgent], main_agent_id: str):
+        self.agents = agents
+        self.main_agent_id = main_agent_id
+
+    def get_agent(self, agent_id: str):
+        return self.agents.get(agent_id)
+
+    def get_all_agents(self):
+        return list(self.agents.values())
+
+    def get_main_agent(self):
+        return self.agents[self.main_agent_id]
+
+
 class FakeWorkspaceManager:
     def get_team_workspace(self, team_id: str):
         return None
@@ -200,6 +215,149 @@ async def run_mock_relay_stream_test() -> dict[str, Any]:
     if not events or events[-1].get("event") != "done" or events[-1].get("total_agents") != 3:
         result["errors"].append("missing_final_done_event")
     if [call["agent_id"] for call in loop_calls] != ["alpha", "beta", "alpha"]:
+        result["errors"].append(f"unexpected_loop_call_order={loop_calls}")
+
+    result["ok"] = not result["errors"]
+    return result
+
+
+async def run_mock_multi_agent_relay_stream_test() -> dict[str, Any]:
+    fake_agent_manager = FlexibleFakeAgentManager(
+        {
+            "alpha": FakeAgent("alpha", "Alpha", is_main=True),
+            "beta": FakeAgent("beta", "Beta"),
+            "gamma": FakeAgent("gamma", "Gamma"),
+            "delta": FakeAgent("delta", "Delta"),
+        },
+        main_agent_id="alpha",
+    )
+    fake_workspace_manager = FakeWorkspaceManager()
+    loop_calls: list[dict[str, Any]] = []
+    outputs = {
+        "alpha": [
+            "@Beta 请补市场验证，@Gamma 请补 MVP 技术路线，@Delta 请补交付和风险边界，等你们都回完我再给用户总结。",
+            "最终总结：先卖轻服务验证需求，再把复用部分产品化。",
+        ],
+        "beta": "@Alpha 市场建议：先做垂直行业的小单验证成交。",
+        "gamma": "@Alpha 技术建议：先做轻量拼装 MVP，不要一开始重研发。",
+        "delta": "@Alpha 交付建议：边界必须写清，避免陷入低利润定制。",
+    }
+    loops = {
+        agent_id: FakeAgentLoop(agent_id, outputs, loop_calls)
+        for agent_id in outputs
+    }
+
+    async def fake_get_agent_loop_with_session_manager(agent_id, session_manager):
+        return loops[agent_id]
+
+    fake_config = SimpleNamespace(
+        get_provider=lambda: SimpleNamespace(api_key="mock-key", api_base=None),
+    )
+
+    payload = {
+        "content": "请开始多 agent 接力",
+        "session_key": "web:test_mock_multi_agent_relay_e2e",
+        "group_chat": True,
+        "mentioned_agents": ["alpha"],
+        "conversation_id": "test_mock_multi_agent_relay_e2e",
+        "conversation_type": "team",
+    }
+
+    result: dict[str, Any] = {
+        "ok": False,
+        "status_code": None,
+        "events": [],
+        "agent_start_sequence": [],
+        "agent_done_sequence": [],
+        "mention_sequence": [],
+        "loop_calls": loop_calls,
+        "errors": [],
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        session_manager = SessionManager(workspace=Path(tmpdir))
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with (
+            patch("horbot.agent.manager.get_agent_manager", return_value=fake_agent_manager),
+            patch("horbot.workspace.manager.get_workspace_manager", return_value=fake_workspace_manager),
+            patch("horbot.web.api.get_session_manager", return_value=session_manager),
+            patch("horbot.web.api.get_cached_config", return_value=fake_config),
+            patch(
+                "horbot.web.api.get_agent_loop_with_session_manager",
+                side_effect=fake_get_agent_loop_with_session_manager,
+            ),
+        ):
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://mock-horbot.local",
+            ) as client:
+                async with client.stream("POST", "/api/chat/stream", json=payload) as response:
+                    result["status_code"] = response.status_code
+                    lines = [line async for line in response.aiter_lines() if line]
+
+    events = _decode_sse_lines(lines)
+    result["events"] = [
+        {
+            "event": event.get("event"),
+            "agent_id": event.get("agent_id"),
+            "mentioned_by": event.get("mentioned_by"),
+            "content": event.get("content"),
+            "total_agents": event.get("total_agents"),
+        }
+        for event in events
+        if event.get("event") in {"agent_start", "agent_done", "agent_mentioned", "done", "agent_error"}
+    ]
+    result["agent_start_sequence"] = [
+        event["agent_id"] for event in events if event.get("event") == "agent_start"
+    ]
+    result["agent_done_sequence"] = [
+        [event.get("agent_id"), event.get("content")]
+        for event in events
+        if event.get("event") == "agent_done"
+    ]
+    result["mention_sequence"] = [
+        [event.get("mentioned_by"), event.get("agent_id")]
+        for event in events
+        if event.get("event") == "agent_mentioned"
+    ]
+
+    expected_start_sequence = ["alpha", "beta", "gamma", "delta", "alpha"]
+    expected_done_sequence = [
+        ["alpha", "@Beta 请补市场验证，@Gamma 请补 MVP 技术路线，@Delta 请补交付和风险边界，等你们都回完我再给用户总结。"],
+        ["beta", "@Alpha 市场建议：先做垂直行业的小单验证成交。"],
+        ["gamma", "@Alpha 技术建议：先做轻量拼装 MVP，不要一开始重研发。"],
+        ["delta", "@Alpha 交付建议：边界必须写清，避免陷入低利润定制。"],
+        ["alpha", "最终总结：先卖轻服务验证需求，再把复用部分产品化。"],
+    ]
+    expected_mentions = [
+        ["alpha", "beta"],
+        ["alpha", "gamma"],
+        ["alpha", "delta"],
+        ["beta", "alpha"],
+        ["gamma", "alpha"],
+        ["delta", "alpha"],
+    ]
+
+    if result["status_code"] != 200:
+        result["errors"].append(f"unexpected_status={result['status_code']}")
+    if result["agent_start_sequence"] != expected_start_sequence:
+        result["errors"].append(
+            f"unexpected_agent_start_sequence={result['agent_start_sequence']}"
+        )
+    if result["agent_done_sequence"] != expected_done_sequence:
+        result["errors"].append(
+            f"unexpected_agent_done_sequence={result['agent_done_sequence']}"
+        )
+    if result["mention_sequence"] != expected_mentions:
+        result["errors"].append(
+            f"unexpected_mention_sequence={result['mention_sequence']}"
+        )
+    if not events or events[-1].get("event") != "done" or events[-1].get("total_agents") != 5:
+        result["errors"].append("missing_final_done_event")
+    if [call["agent_id"] for call in loop_calls] != expected_start_sequence:
         result["errors"].append(f"unexpected_loop_call_order={loop_calls}")
 
     result["ok"] = not result["errors"]

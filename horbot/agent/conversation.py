@@ -6,10 +6,40 @@ Agent 间对话上下文管理
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 import logging
+import re
+from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+_SUMMARY_TRIGGER_MARKER = "现在直接面向用户输出最终总结"
+_GENERIC_MENTION_PATTERN = re.compile(r"@[\w\u4e00-\u9fff-]+")
+_SUMMARY_HANDOFF_KEYWORDS = (
+    "总结",
+    "收尾",
+    "汇总",
+    "汇报",
+    "给用户",
+    "最终答复",
+    "最终回复",
+    "最终规划",
+)
+_RELAY_COORDINATION_KEYWORDS = (
+    "接力",
+    "接棒",
+    "轮到",
+    "交给",
+    "继续补",
+    "继续讨论",
+    "继续拆",
+    "继续推演",
+    "你继续",
+    "请你继续",
+    "等你",
+    "等 ",
+    "回给",
+    "收口",
+)
 
 
 class ConversationType(Enum):
@@ -109,6 +139,90 @@ def build_conversation_context(
     return ctx
 
 
+def _normalize_agent_mention_token(text: str) -> str:
+    return re.sub(r"[^\w\u4e00-\u9fff-]+", "", (text or "")).lower()
+
+
+def _build_agent_mention_regex(agent_name: str, agent_id: str) -> re.Pattern[str] | None:
+    variants: set[str] = set()
+    for value in (agent_name, agent_id):
+        if value:
+            variants.add(value.strip())
+
+    if agent_name:
+        first_token = re.split(r"\s+", agent_name.strip(), maxsplit=1)[0]
+        if first_token:
+            variants.add(first_token)
+        normalized_name = _normalize_agent_mention_token(agent_name)
+        if normalized_name:
+            variants.add(normalized_name)
+
+    variants = {item for item in variants if item}
+    if not variants:
+        return None
+
+    escaped = "|".join(sorted((re.escape(item) for item in variants), key=len, reverse=True))
+    return re.compile(rf"@(?:{escaped})(?=$|[\s,，。！？；;:：])")
+
+
+def _is_user_summary_turn(conversation_ctx: ConversationContext | None) -> bool:
+    if not conversation_ctx or conversation_ctx.conversation_type != ConversationType.USER_TO_AGENT:
+        return False
+    trigger_message = (conversation_ctx.trigger_message or "").strip()
+    return _SUMMARY_TRIGGER_MARKER in trigger_message
+
+
+def _sanitize_summary_turn_message(
+    content: str,
+    *,
+    target_agent_id: str,
+    target_agent_name: str,
+    metadata: dict,
+) -> str:
+    text = (content or "").strip()
+    if not text:
+        return ""
+
+    target_mention_regex = _build_agent_mention_regex(target_agent_name, target_agent_id)
+    directed_to_target = metadata.get("target") == target_agent_id
+    authored_by_target = metadata.get("agent_id") == target_agent_id
+    segments = re.findall(r"[^。！？!?；;，,\n]+[。！？!?；;，,\n]*", text) or [text]
+    sanitized_segments: list[str] = []
+
+    for segment in segments:
+        match = re.match(r"(?P<body>.*?)(?P<suffix>[。！？!?；;，,\n]*)$", segment, re.S)
+        if not match:
+            continue
+        body = match.group("body").strip()
+        suffix = match.group("suffix")
+        if not body:
+            continue
+
+        normalized = re.sub(r"\s+", "", body)
+        mentions_any_agent = bool(_GENERIC_MENTION_PATTERN.search(body))
+        mentions_target_agent = bool(target_mention_regex.search(body)) if target_mention_regex else False
+        has_summary_handoff = any(keyword in normalized for keyword in _SUMMARY_HANDOFF_KEYWORDS)
+        has_relay_coordination = any(keyword in normalized for keyword in _RELAY_COORDINATION_KEYWORDS)
+
+        if authored_by_target and mentions_any_agent:
+            continue
+        if has_summary_handoff and (directed_to_target or mentions_target_agent or mentions_any_agent):
+            continue
+        if has_relay_coordination and mentions_any_agent:
+            continue
+
+        body = re.sub(r"^(?:@\S+\s*)+", "", body).strip(" \t,，:：;-")
+        body = re.sub(r"\s{2,}", " ", body).strip()
+        if not body:
+            continue
+
+        sanitized_segments.append(f"{body}{suffix}")
+
+    sanitized = "".join(sanitized_segments).strip()
+    sanitized = re.sub(r"\n{3,}", "\n\n", sanitized)
+    return sanitized
+
+
 def filter_messages_for_agent(
     messages: list[dict],
     agent_id: str,
@@ -174,6 +288,7 @@ def format_history_for_agent(
         Formatted list of messages for the agent
     """
     tool_call_ids_to_include = set()
+    is_user_summary_turn = _is_user_summary_turn(conversation_ctx)
     
     if conversation_ctx and conversation_ctx.conversation_type == ConversationType.AGENT_TO_AGENT:
         filtered = []
@@ -211,9 +326,14 @@ def format_history_for_agent(
             msg_agent_id = metadata.get("agent_id", "")
             
             if role == "user":
-                filtered.append(msg)
+                if not is_user_summary_turn:
+                    filtered.append(msg)
             elif role == "assistant":
-                if msg_agent_id == target_agent_id or not msg_agent_id:
+                if is_group_chat:
+                    filtered.append(msg)
+                    for tc in msg.get("tool_calls", []):
+                        tool_call_ids_to_include.add(tc.get("id"))
+                elif msg_agent_id == target_agent_id or not msg_agent_id:
                     filtered.append(msg)
                     for tc in msg.get("tool_calls", []):
                         tool_call_ids_to_include.add(tc.get("id"))
@@ -245,6 +365,15 @@ def format_history_for_agent(
         if m.get("role") == "assistant":
             metadata = m.get("metadata", {})
             msg_agent_id = metadata.get("agent_id", "")
+            if is_group_chat and is_user_summary_turn and entry["content"]:
+                entry["content"] = _sanitize_summary_turn_message(
+                    entry["content"],
+                    target_agent_id=target_agent_id,
+                    target_agent_name=target_agent_name,
+                    metadata=metadata,
+                )
+                if not entry["content"] and not m.get("tool_calls"):
+                    continue
             
             if is_group_chat:
                 # In group chat, if the message is from the target agent itself, keep it plain.

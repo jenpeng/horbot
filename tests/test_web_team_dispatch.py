@@ -69,6 +69,35 @@ class WebTeamDispatchTests(unittest.IsolatedAsyncioTestCase):
         local_bus.publish_outbound.assert_not_awaited()
         external_dispatch.assert_not_awaited()
 
+    async def test_message_tool_keeps_same_team_web_messages_inline(self):
+        local_bus = MessageBus()
+        local_bus.publish_outbound = AsyncMock()
+
+        message_tool = MessageTool()
+        fake_loop = SimpleNamespace(
+            tools=SimpleNamespace(get=lambda name: message_tool if name == "message" else None),
+        )
+
+        with patch("horbot.web.api._dispatch_internal_web_outbound", new=AsyncMock()) as internal_dispatch, patch(
+            "horbot.web.api._dispatch_outbound_via_gateway",
+            new=AsyncMock(),
+        ) as external_dispatch:
+            _configure_web_agent_loop_message_routing(fake_loop, local_bus)
+            message_tool.set_context("web", "team_team-001")
+
+            await message_tool.execute(
+                "请 @main 看一下这个问题",
+                channel="web",
+                chat_id="team_team-001",
+                team_id="team-001",
+                trigger_group_chat=True,
+                mentioned_agents=["main"],
+            )
+
+        internal_dispatch.assert_not_awaited()
+        local_bus.publish_outbound.assert_not_awaited()
+        external_dispatch.assert_not_awaited()
+
     def test_resolve_team_dispatch_targets_prefers_mentions_then_default_non_source_member(self):
         fake_team = SimpleNamespace(get_ordered_member_ids=lambda: ["horbot-02", "main"])
         fake_manager = SimpleNamespace(get_team=lambda team_id: fake_team if team_id == "team-001" else None)
@@ -110,6 +139,22 @@ class WebTeamDispatchTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(mentioned, ["main"])
+
+    def test_parse_agent_mentions_preserves_text_order(self):
+        fake_agent_manager = SimpleNamespace(
+            get_agent=lambda agent_id: {
+                "horbot-02": SimpleNamespace(id="horbot-02", name="袭人"),
+                "main": SimpleNamespace(id="main", name="小项 🐎"),
+            }.get(agent_id),
+        )
+
+        with patch("horbot.agent.manager.get_agent_manager", return_value=fake_agent_manager):
+            mentioned = parse_agent_mentions(
+                "@小项 🐎 你先处理，然后再请 @袭人 补充风险。",
+                ["horbot-02", "main"],
+            )
+
+        self.assertEqual(mentioned, ["main", "horbot-02"])
 
     async def test_resolve_internal_web_session_manager_reuses_matching_team_sessions(self):
         team_sessions_dir = Path("/tmp/team-001-sessions")

@@ -4,6 +4,7 @@ import unittest
 from horbot.web.api import (
     _build_chat_stream_event,
     _create_chat_stream_callbacks,
+    _resolve_final_agent_display_content,
     _sse_event,
 )
 
@@ -44,6 +45,14 @@ class ChatStreamEventTests(unittest.TestCase):
     def test_sse_event_wraps_payload(self):
         payload = {"event": "heartbeat"}
         self.assertEqual(_sse_event(payload), 'data: {"event": "heartbeat"}\n\n')
+
+    def test_resolve_final_agent_display_content_prefers_streamed_content_when_response_is_tool_system_text(self):
+        resolved = _resolve_final_agent_display_content(
+            "Message sent to web:team_team-001",
+            "彭老师，我先拉上袭人做一轮接力式深度讨论。",
+        )
+
+        self.assertEqual(resolved, "彭老师，我先拉上袭人做一轮接力式深度讨论。")
 
 
 class ChatStreamCallbackTests(unittest.IsolatedAsyncioTestCase):
@@ -92,8 +101,8 @@ class ChatStreamCallbackTests(unittest.IsolatedAsyncioTestCase):
         step_complete_event = await queue.get()
         self.assertEqual(step_complete_event["event"], "step_complete")
         self.assertEqual(execution_steps[0]["status"], "success")
-        self.assertEqual(execution_steps[0]["details"], {})
-        self.assertEqual(step_complete_event["details"], {})
+        self.assertEqual(execution_steps[0]["details"], {"thinking": "ok"})
+        self.assertEqual(step_complete_event["details"], {"thinking": "ok"})
 
         await callbacks["on_tool_start"]("message", {"content": "tool text"})
         tool_start_event = await queue.get()

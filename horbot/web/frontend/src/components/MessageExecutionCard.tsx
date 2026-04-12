@@ -190,63 +190,63 @@ const MessageExecutionCard: React.FC<MessageExecutionCardProps> = ({
   }
 
   return (
-    <div className="mt-0.5 rounded-2xl border border-slate-200/90 bg-slate-50/70 px-3 py-2 shadow-sm">
+    <div className="mt-0.5 rounded-2xl border border-slate-200/90 bg-slate-50/80 px-2.5 py-2 shadow-sm">
       <button
         type="button"
         onClick={handleExpandedToggle}
         className="flex w-full items-center justify-between gap-2 text-left"
       >
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-700 shadow-sm">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 shadow-sm">
               执行过程
             </span>
-            <span className="text-[11px] text-slate-500">
+            <span className="text-[10px] text-slate-500">
               {steps.length} 步
             </span>
             {summary.toolSteps > 0 && (
-              <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+              <span className="inline-flex items-center rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
                 工具 {summary.toolSteps}
               </span>
             )}
             {summary.running > 0 && (
-              <span className="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-700">
+              <span className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-700">
                 进行中 {summary.running}
               </span>
             )}
             {summary.failed > 0 && (
-              <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700">
+              <span className="inline-flex items-center rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
                 失败 {summary.failed}
               </span>
             )}
           </div>
           {summary.toolNames.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {summary.toolNames.slice(0, 4).map((toolName) => (
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              {summary.toolNames.slice(0, 3).map((toolName) => (
                 <span
                   key={toolName}
-                  className="inline-flex items-center rounded-full border border-indigo-200 bg-white px-2 py-0.5 text-[10px] font-medium text-indigo-700"
+                  className="inline-flex items-center rounded-full border border-indigo-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-indigo-700"
                 >
                   {toolName}
                 </span>
               ))}
-              {summary.toolNames.length > 4 && (
+              {summary.toolNames.length > 3 && (
                 <span className="text-[10px] text-slate-400">
-                  +{summary.toolNames.length - 4}
+                  +{summary.toolNames.length - 3}
                 </span>
               )}
             </div>
           )}
-          <p className="mt-0.5 text-[11px] text-slate-500">
+          <p className="mt-0.5 text-[10px] leading-4 text-slate-500">
             {expanded
               ? '已展开完整步骤与工具细节。'
               : (isStreaming || summary.running > 0
-                  ? '默认已收起，点击查看执行过程。'
-                  : '点击查看思考、工具调用与回复过程。')}
+                  ? '收起中，点击查看。'
+                  : '点击展开查看细节。')}
           </p>
         </div>
-        <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm">
-          {expanded ? <ChevronDown className="h-4 w-4" strokeWidth={2} /> : <ChevronRight className="h-4 w-4" strokeWidth={2} />}
+        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm">
+          {expanded ? <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} /> : <ChevronRight className="h-3.5 w-3.5" strokeWidth={2} />}
         </span>
       </button>
 

@@ -655,6 +655,9 @@ POST /api/subagents/cancel-all?session_key=default
 | `status` | 状态消息 | `{"message": "..."}` |
 | `thinking` | 思考过程 | `{"content": "..."}` |
 | `content` | 最终内容 | `{"content": "..."}` |
+| `agent_start` | 某个 Agent 开始接棒 | `{"agent_id": "...", "agent_name": "...", "turn_id": "...", "message_id": "..."}` |
+| `agent_mentioned` | 某个 Agent 被点名进入等待队列 | `{"agent_id": "...", "agent_name": "...", "mentioned_by": "...", "mentioned_by_name": "...", "handoff_mode": "relay|continue|summary", "handoff_preview": "..."}` |
+| `agent_done` | 某个 Agent 完成这一棒 | `{"agent_id": "...", "content": "...", "turn_id": "...", "message_id": "..."}` |
 | `done` | 完成 | `{}` |
 | `stopped` | 已停止 | `{"content": "..."}` |
 | `error` | 错误 | `{"content": "..."}` |
@@ -677,6 +680,12 @@ POST /api/subagents/cancel-all?session_key=default
 | `confirmation_required` | 需要确认 | `{"confirmation_id": "...", "tool_name": "..."}` |
 | `step_start` | 步骤开始 | `{"step_id": "..."}` |
 | `step_complete` | 步骤完成 | `{"step_id": "...", "status": "..."}` |
+
+补充说明：
+
+- `handoff_mode=relay` 表示普通转派
+- `handoff_mode=continue` 表示发起 Agent 要求下一棒继续深入讨论
+- `handoff_mode=summary` 表示这一棒准备回到最终面向用户的总结
 
 ---
 

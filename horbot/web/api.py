@@ -10,6 +10,7 @@ import json
 import uuid
 import os
 import mimetypes
+import re
 import shutil
 import threading
 import time
@@ -470,6 +471,9 @@ def _configure_web_agent_loop_message_routing(agent_loop: AgentLoop, bus: Messag
             current_session_key = _normalize_web_session_key(
                 str((msg.metadata or {}).get("_source_chat_id") or msg.chat_id)
             )
+            if target_session_key == current_session_key:
+                msg.metadata.setdefault("outbound_via", "same_session_inline")
+                return
             if target_team_id or target_session_key != current_session_key:
                 msg.metadata.setdefault("outbound_via", "internal_web_dispatch")
                 await _dispatch_internal_web_outbound(agent_loop, msg)
@@ -1077,9 +1081,8 @@ def parse_agent_mentions(content: str, available_agents: List[str]) -> List[str]
     from horbot.agent.manager import get_agent_manager
     
     agent_manager = get_agent_manager()
-    mentioned = []
-    
-    # Build a list of agent identities used for mention matching.
+    mentioned: list[str] = []
+
     agents_info = []
     for agent_id in available_agents:
         agent = agent_manager.get_agent(agent_id)
@@ -1092,42 +1095,33 @@ def parse_agent_mentions(content: str, available_agents: List[str]) -> List[str]
                     "normalized_name": _normalize_agent_mention_token(agent.name),
                 }
             )
-    
-    # Sort by name length (longest first) to match longer names first
-    # This ensures "@小项 🐎" matches "小项 🐎" not just "小项"
-    agents_info.sort(key=lambda x: len(x["name"]), reverse=True)
-    
-    # Track which positions in content have been matched
-    matched_positions = set()
-    
-    # First pass: try to match full agent names (including spaces)
+
+    matched_spans: list[tuple[int, int]] = []
+    name_matches: list[tuple[int, int, str]] = []
     for agent_info in agents_info:
-        agent_id = agent_info["id"]
-        agent_name = agent_info["name"]
-        # Create pattern to match @agent_name
-        # The name can be followed by space, punctuation, or end of string
-        pattern = re.escape(f"@{agent_name}")
+        pattern = re.escape(f"@{agent_info['name']}")
         for match in re.finditer(pattern, content):
             start, end = match.start(), match.end()
-            # Check if this position hasn't been matched yet
-            # and the character after match is space, punctuation, or end of string
-            if start not in matched_positions:
-                # Verify it's a valid mention (not part of a longer word)
-                if end >= len(content) or content[end] in ' \t\n\r.,!?;:，。！？；：':
-                    if agent_id not in mentioned:
-                        mentioned.append(agent_id)
-                    # Mark all positions of this match as used
-                    for i in range(start, end):
-                        matched_positions.add(i)
-    
-    # Second pass: try to match agent IDs (for cases like @main, @horbot-02)
+            if end < len(content) and content[end] not in ' \t\n\r.,!?;:，。！？；：':
+                continue
+            name_matches.append((start, end, agent_info["id"]))
+
+    # Preserve the order in which mentions appear in the text while still
+    # preferring longer exact-name matches when multiple names overlap.
+    name_matches.sort(key=lambda item: (item[0], -(item[1] - item[0])))
+    for start, end, agent_id in name_matches:
+        if any(not (end <= existing_start or start >= existing_end) for existing_start, existing_end in matched_spans):
+            continue
+        if agent_id not in mentioned:
+            mentioned.append(agent_id)
+        matched_spans.append((start, end))
+
     mention_pattern = r'@(\S+)'
     for match in re.finditer(mention_pattern, content):
-        start = match.start()
-        # Skip if this position was already matched by name matching
-        if start in matched_positions:
+        start, end = match.start(), match.end()
+        if any(not (end <= existing_start or start >= existing_end) for existing_start, existing_end in matched_spans):
             continue
-        
+
         mention_text = match.group(1)
         normalized_mention = _normalize_agent_mention_token(mention_text)
         for agent_info in agents_info:
@@ -1143,9 +1137,24 @@ def parse_agent_mentions(content: str, available_agents: List[str]) -> List[str]
                 )
             ):
                 mentioned.append(agent_id)
+                matched_spans.append((start, end))
                 break
-    
+
     return mentioned
+
+
+def _get_team_member_agent_ids(team_id: str | None) -> List[str]:
+    """Return ordered member agent ids for a team, or an empty list."""
+    if not team_id:
+        return []
+
+    from horbot.team.manager import get_team_manager
+
+    team = get_team_manager().get_team(team_id)
+    if not team:
+        return []
+
+    return team.get_ordered_member_ids()
 
 
 def extract_agent_mention_payload(
@@ -1181,6 +1190,53 @@ def extract_agent_mention_payload(
         return suffix or None
 
     return None
+
+
+def _should_return_to_user_summary_turn(
+    *,
+    candidate_agent_id: str,
+    response_agent_id: str,
+    response_context,
+    originally_mentioned: set[str],
+) -> bool:
+    """Decide whether a relay should switch back to the user's summary turn.
+
+    Only the originator's own handoff intent should decide whether the relay
+    returns to a user-facing summary turn. This avoids teammates prematurely
+    collapsing a deep discussion just by saying "you summarize".
+    """
+    if (
+        response_context is None
+        or getattr(response_context.conversation_type, "value", response_context.conversation_type) != "agent_to_agent"
+        or candidate_agent_id != response_context.source
+        or candidate_agent_id not in originally_mentioned
+        or response_agent_id in originally_mentioned
+    ):
+        return False
+
+    return _get_originator_return_mode(response_context) == "summary"
+
+
+def _build_user_summary_trigger_message(original_request: str) -> str:
+    cleaned_request = clean_message_content(original_request or "").strip()
+    if not cleaned_request:
+        cleaned_request = "请基于当前团队讨论，直接给用户一个最终总结。"
+    return (
+        "请基于当前团队对话历史，吸收其他 agent 已经给出的分析，"
+        "现在直接面向用户输出最终总结。不要再次点名或 @ 其他 agent，"
+        "也不要把任务再分派出去。\n\n"
+        f"原始用户问题：{cleaned_request}"
+    )
+
+
+def _build_relay_handoff_preview(content: str, *, max_chars: int = 88) -> str:
+    cleaned = clean_message_content(content or "").strip()
+    if not cleaned:
+        return ""
+    single_line = re.sub(r"\s+", " ", cleaned).strip()
+    if len(single_line) <= max_chars:
+        return single_line
+    return f"{single_line[:max_chars - 1].rstrip()}…"
 
 
 def is_stop_discussion_message(content: str) -> bool:
@@ -1270,6 +1326,91 @@ def clean_message_content(content: str) -> str:
             return ""  # Return empty string for system messages
     
     return content.strip()
+
+
+def _resolve_final_agent_display_content(
+    response_content: str | None,
+    streamed_content: str | None,
+) -> str:
+    """Choose the best displayable content for an agent turn.
+
+    Tool-oriented responses may return a non-empty system string such as
+    "Message sent to ...", which gets stripped by `clean_message_content`.
+    In that case we should still fall back to the already streamed text.
+    """
+    cleaned_response = clean_message_content(response_content or "")
+    if cleaned_response:
+        return cleaned_response
+    return clean_message_content(streamed_content or "")
+
+
+def _get_originator_return_mode(conversation_ctx: "ConversationContext | None") -> str | None:
+    if conversation_ctx is None or getattr(conversation_ctx.conversation_type, "value", "") != "agent_to_agent":
+        return None
+
+    trigger_message = (conversation_ctx.trigger_message or "").replace(" ", "")
+    if not trigger_message:
+        return None
+
+    has_return_intent = any(
+        token in trigger_message
+        for token in (
+            "我来总结",
+            "我再总结",
+            "我再汇总",
+            "我来汇总",
+            "我再给",
+            "我再整理",
+            "我再收敛",
+            "回给我",
+            "回我",
+        )
+    )
+    has_handoff_intent = any(
+        token in trigger_message
+        for token in (
+            "等你",
+            "请你先",
+            "先帮我",
+            "先从",
+            "先按",
+        )
+    )
+    if has_return_intent and has_handoff_intent:
+        return "summary"
+
+    has_continue_intent = any(
+        token in trigger_message
+        for token in (
+            "我再继续",
+            "我继续",
+            "继续讨论",
+            "继续分析",
+            "继续推演",
+            "继续往下",
+            "继续深挖",
+            "继续拆",
+            "再补一轮",
+            "再来一轮",
+            "我们继续",
+            "不要急着总结",
+            "还不要总结",
+            "先别总结",
+        )
+    )
+    if has_continue_intent and has_handoff_intent:
+        return "continue"
+
+    # Chinese relay prompts often say "等你回复后我再总结/继续", which doesn't
+    # fit the shorter exact tokens above. Preserve the originator's intent so
+    # the baton returns after the teammate finishes instead of stalling.
+    if has_handoff_intent and any(token in trigger_message for token in ("回复后", "之后", "完后", "说完", "补完")):
+        if any(token in trigger_message for token in ("总结", "汇总", "整理", "收敛", "收口", "定稿", "给用户")):
+            return "summary"
+        if any(token in trigger_message for token in ("继续", "讨论", "分析", "推演", "深挖", "往下", "拆解")):
+            return "continue"
+
+    return None
 
 
 def ensure_history_message_id(message: dict[str, Any]) -> str:
@@ -3498,6 +3639,7 @@ def _create_chat_stream_callbacks(
     execution_steps: List[dict],
     content_state: Dict[str, str],
     on_message_tool_content: Optional[Callable[[str], None]] = None,
+    on_message_tool_dispatch: Optional[Callable[[dict[str, Any]], None]] = None,
     on_step_start_hook: Optional[Callable[[dict], None]] = None,
 ) -> Dict[str, Callable[..., Any]]:
     async def emit(event: str, **payload: Any) -> None:
@@ -3524,6 +3666,8 @@ def _create_chat_stream_callbacks(
             content = arguments.get("content")
             if content:
                 on_message_tool_content(content)
+        if tool_name == "message" and arguments and on_message_tool_dispatch:
+            on_message_tool_dispatch(dict(arguments))
         await emit("tool_start", tool_name=tool_name, arguments=arguments)
 
     async def on_tool_result(tool_name: str, result: str, execution_time: float) -> None:
@@ -3673,6 +3817,9 @@ async def _stream_generator(
     execution_steps: list[dict] = []
     content_state = {"content": ""}
 
+    def store_message_tool_content(content: str) -> None:
+        content_state["content"] = content
+
     callbacks = _create_chat_stream_callbacks(
         queue=queue,
         stream_manager=stream_manager,
@@ -3683,6 +3830,7 @@ async def _stream_generator(
         message_id=assistant_message_id,
         execution_steps=execution_steps,
         content_state=content_state,
+        on_message_tool_content=store_message_tool_content,
         on_step_start_hook=lambda step: logger.info(
             f"[ChatAPI] Added step: id={step['id']}, type={step['type']}, title={step['title']}, total steps: {len(execution_steps)}"
         ),
@@ -3816,7 +3964,10 @@ async def _stream_generator(
                         _maybe_materialize_bootstrap_from_session(agent_instance, session)
                         yield _sse_event({"event": "done"})
                 elif final_response["content"] or exec_steps_to_save:
-                    cleaned_content = clean_message_content(final_response["content"] or "")
+                    cleaned_content = _resolve_final_agent_display_content(
+                        final_response["content"],
+                        content_state["content"],
+                    )
                     provider_error = final_response.get("metadata", {}).get("_provider_error")
                     if cleaned_content:
                         yield _sse_event(
@@ -3984,9 +4135,9 @@ async def _group_chat_stream_generator(
     
     logger.info(f"[ChatAPI][{request_id}] Group chat request: mentioned_agents={request.mentioned_agents}, team_id={request.team_id}")
     
-    all_agents = [a.id for a in agent_manager.get_all_agents()]
-    
-    parsed_mentions = parse_agent_mentions(request.content, all_agents)
+    available_agents = _get_team_member_agent_ids(request.team_id) if request.team_id else [a.id for a in agent_manager.get_all_agents()]
+
+    parsed_mentions = parse_agent_mentions(request.content, available_agents)
     logger.info(f"[ChatAPI][{request_id}] Parsed mentions from content: {parsed_mentions}")
     
     if has_mentioned_agents and len(request.mentioned_agents) > 0:
@@ -4003,8 +4154,8 @@ async def _group_chat_stream_generator(
         if team_default_agent_id:
             agents_to_respond = [team_default_agent_id]
             logger.info(f"[ChatAPI][{request_id}] Team mode without mentions, using team lead/default: {agents_to_respond}")
-        elif all_agents:
-            agents_to_respond = [all_agents[0]]
+        elif available_agents:
+            agents_to_respond = [available_agents[0]]
             logger.info(f"[ChatAPI][{request_id}] Team mode without mentions, using first agent: {agents_to_respond}")
     else:
         default_agent = agent_manager.get_default_agent()
@@ -4013,13 +4164,14 @@ async def _group_chat_stream_generator(
             logger.info(f"[ChatAPI][{request_id}] Using default agent: {agents_to_respond}")
     
     if not agents_to_respond:
-        if all_agents:
-            agents_to_respond = [all_agents[0]]
+        if available_agents:
+            agents_to_respond = [available_agents[0]]
 
     queue: asyncio.Queue = asyncio.Queue()
     all_responses: List[dict] = []
     
     originally_mentioned = set(agents_to_respond.copy())
+    return_to_user_agents: set[str] = set()
     
     conversation_contexts: Dict[str, ConversationContext] = {}
     for agent_id in originally_mentioned:
@@ -4050,10 +4202,25 @@ async def _group_chat_stream_generator(
             
             execution_steps: list[dict] = []
             content_state = {"content": ""}
+            message_tool_dispatch_state: dict[str, Any] = {}
 
             def store_message_tool_content(content: str) -> None:
                 content_state["content"] = content
                 logger.info(f"[ChatAPI][{request_id}] Extracted content from message tool (on_tool_start): {content[:100]}...")
+
+            def store_message_tool_dispatch(arguments: dict[str, Any]) -> None:
+                message_tool_dispatch_state.clear()
+                message_tool_dispatch_state.update(arguments)
+                logger.info(
+                    "[ChatAPI][{}] Captured message tool dispatch for {}: channel={}, chat_id={}, team_id={}, mentioned_agents={}, trigger_group_chat={}",
+                    request_id,
+                    agent_id,
+                    arguments.get("channel"),
+                    arguments.get("chat_id"),
+                    arguments.get("team_id"),
+                    arguments.get("mentioned_agents"),
+                    arguments.get("trigger_group_chat"),
+                )
 
             await _queue_chat_stream_event(
                 queue,
@@ -4076,6 +4243,7 @@ async def _group_chat_stream_generator(
                 execution_steps=execution_steps,
                 content_state=content_state,
                 on_message_tool_content=store_message_tool_content,
+                on_message_tool_dispatch=store_message_tool_dispatch,
             )
 
             speaking_to = conversation_ctx.get_speaking_to()
@@ -4083,7 +4251,9 @@ async def _group_chat_stream_generator(
             
             logger.info(f"[ChatAPI][{request_id}] Agent {agent_name} speaking_to={speaking_to}, conversation_type={conv_type}")
             
-            if conversation_ctx.conversation_type == ConversationType.AGENT_TO_AGENT:
+            if conversation_ctx.trigger_message:
+                message_content = conversation_ctx.trigger_message.strip()
+            elif conversation_ctx.conversation_type == ConversationType.AGENT_TO_AGENT:
                 message_content = (conversation_ctx.trigger_message or request.content).strip()
                 logger.info(
                     f"[ChatAPI][{request_id}] Agent-to-agent message for {agent_name}: "
@@ -4119,13 +4289,35 @@ async def _group_chat_stream_generator(
             )
             
             response_content = response.content if response else None
-            # Use the latest streamed content if response.content is empty.
-            # This handles cases where the agent uses tools like 'message' to send content
-            final_content = response_content if response_content else content_state["content"]
-            # Clean the content before sending to frontend
-            final_content = clean_message_content(final_content)
+            final_content = _resolve_final_agent_display_content(
+                response_content,
+                content_state["content"],
+            )
             
             logger.info(f"[ChatAPI][{request_id}] Agent {agent_id} response: response={response is not None}, response_content={response_content[:50] if response_content else None}, streamed_content={content_state['content'][:50] if content_state['content'] else None}, final_content={final_content[:50] if final_content else None}")
+
+            relay_targets: list[str] = []
+            if team_id and message_tool_dispatch_state:
+                target_chat_id = str(message_tool_dispatch_state.get("chat_id") or "").strip()
+                target_session_key = _normalize_web_session_key(target_chat_id) if target_chat_id else ""
+                target_team_id = (
+                    str(message_tool_dispatch_state.get("team_id") or "").strip()
+                    or _extract_team_id_from_chat_id(target_session_key)
+                )
+                if target_session_key == session_key and target_team_id == team_id:
+                    relay_targets = _resolve_team_dispatch_targets(
+                        team_id=team_id,
+                        source_agent_id=agent_id,
+                        content=str(message_tool_dispatch_state.get("content") or final_content or ""),
+                        explicit_mentions=list(message_tool_dispatch_state.get("mentioned_agents") or []),
+                        trigger_group_chat=bool(message_tool_dispatch_state.get("trigger_group_chat")),
+                    )
+                    logger.info(
+                        "[ChatAPI][{}] Resolved inline relay targets for {}: {}",
+                        request_id,
+                        agent_id,
+                        relay_targets,
+                    )
             
             # Only send agent_done event if there's actual content to display
             if final_content:
@@ -4155,6 +4347,7 @@ async def _group_chat_stream_generator(
                     execution_steps=sanitize_execution_steps(execution_steps),
                     memory_sources=memory_sources,
                     memory_recall=memory_recall,
+                    relay_targets=relay_targets,
                 )
             else:
                 logger.info(f"[ChatAPI][{request_id}] Agent {agent_id} completed with empty content, skipping agent_done event")
@@ -4300,20 +4493,72 @@ async def _group_chat_stream_generator(
                         sanitized_item["execution_steps"] = resp["execution_steps"]
                         yield _sse_event(sanitized_item)
                         
-                        if resp["content"]:
-                            logger.info(f"[ChatAPI][{request_id}] Checking for @mentions in content from {resp['agent_id']}: {resp['content'][:100]}...")
-                            mentioned_agents = parse_agent_mentions(resp["content"], all_agents)
+                        relay_targets = list(item.get("relay_targets") or [])
+
+                        if resp["content"] or relay_targets:
+                            logger.info(f"[ChatAPI][{request_id}] Checking relay targets from {resp['agent_id']}: content_preview={resp['content'][:100] if resp['content'] else None}, tool_targets={relay_targets}")
+                            ordered_candidates: list[str] = []
+                            allow_plaintext_mentions = resp["agent_id"] not in return_to_user_agents
+                            mentioned_agents = (
+                                parse_agent_mentions(resp["content"], available_agents)
+                                if resp["content"] and allow_plaintext_mentions
+                                else []
+                            )
+                            if not allow_plaintext_mentions and resp["content"]:
+                                logger.info(
+                                    "[ChatAPI][{}] Ignoring plain-text mentions for user-summary return turn: agent={}",
+                                    request_id,
+                                    resp["agent_id"],
+                                )
                             logger.info(f"[ChatAPI][{request_id}] Found mentioned agents: {mentioned_agents}")
-                            new_agents_to_respond = [a for a in mentioned_agents if a != resp['agent_id'] and a not in active_tasks]
+                            if resp["agent_id"] in return_to_user_agents:
+                                return_to_user_agents.discard(resp["agent_id"])
+                            for candidate in relay_targets + mentioned_agents:
+                                if candidate not in ordered_candidates:
+                                    ordered_candidates.append(candidate)
+                            resp_ctx = conversation_contexts.get(resp["agent_id"])
+                            originator_return_mode = _get_originator_return_mode(resp_ctx)
+                            should_auto_return_to_source = (
+                                not ordered_candidates
+                                and resp_ctx is not None
+                                and resp_ctx.conversation_type == ConversationType.AGENT_TO_AGENT
+                                and resp_ctx.source != "user"
+                                and resp_ctx.source in originally_mentioned
+                                and resp["agent_id"] not in originally_mentioned
+                                and originator_return_mode in {"summary", "continue"}
+                            )
+                            if should_auto_return_to_source:
+                                ordered_candidates.append(resp_ctx.source)
+                                logger.info(
+                                    "[ChatAPI][{}] Auto-returning relay from {} back to originator {} with mode={}",
+                                    request_id,
+                                    resp["agent_id"],
+                                    resp_ctx.source,
+                                    originator_return_mode,
+                                )
+                            new_agents_to_respond = [a for a in ordered_candidates if a != resp['agent_id'] and a not in active_tasks]
                             logger.info(f"[ChatAPI][{request_id}] New agents to respond (after filtering): {new_agents_to_respond}")
                             
                             if new_agents_to_respond:
                                 logger.info(f"[ChatAPI][{request_id}] Agent {resp['agent_id']} mentioned agents: {new_agents_to_respond}")
+                                queued_future_agents = set(agents_to_respond[current_idx + 1:])
+                                handoff_event_meta: dict[str, dict[str, Any]] = {}
                                 for a in new_agents_to_respond:
+                                    pending_again = a in processed_agents and a not in queued_future_agents
+                                    pending_unprocessed = a in queued_future_agents and a not in processed_agents
+
+                                    if pending_unprocessed:
+                                        logger.info(
+                                            "[ChatAPI][{}] Preserving pending context for {} while already queued; source mention from {} is ignored",
+                                            request_id,
+                                            a,
+                                            resp["agent_id"],
+                                        )
+                                        continue
+
                                     mention_triggered_agents.add(a)
                                     last_speaking_agent[a] = resp["agent_id"]
-                                    
-                                    pending_again = a in processed_agents and a not in agents_to_respond[current_idx + 1:]
+
                                     if a not in agents_to_respond or pending_again:
                                         agents_to_respond.append(a)
                                         logger.info(
@@ -4323,23 +4568,71 @@ async def _group_chat_stream_generator(
                                     
                                     target_agent = agent_manager.get_agent(a)
                                     target_name = target_agent.name if target_agent else a
-                                    new_conv_ctx = build_conversation_context(
-                                        conversation_type=ConversationType.AGENT_TO_AGENT,
-                                        source_id=resp["agent_id"],
-                                        source_name=resp["agent_name"],
-                                        target_id=a,
-                                        target_name=target_name,
-                                        trigger_message=(
+                                    return_to_user_summary = _should_return_to_user_summary_turn(
+                                        candidate_agent_id=a,
+                                        response_agent_id=resp["agent_id"],
+                                        response_context=resp_ctx,
+                                        originally_mentioned=originally_mentioned,
+                                    )
+                                    if return_to_user_summary:
+                                        handoff_preview = _build_relay_handoff_preview(request.content)
+                                        return_to_user_agents.add(a)
+                                        new_conv_ctx = build_conversation_context(
+                                            conversation_type=ConversationType.USER_TO_AGENT,
+                                            source_id="user",
+                                            source_name="用户",
+                                            target_id=a,
+                                            target_name=target_name,
+                                            trigger_message=_build_user_summary_trigger_message(request.content),
+                                        )
+                                        logger.info(
+                                            "[ChatAPI][{}] Re-entering user-summary turn for {} after relay from {}",
+                                            request_id,
+                                            a,
+                                            resp["agent_id"],
+                                        )
+                                        handoff_mode = "summary"
+                                    else:
+                                        handoff_payload = (
                                             extract_agent_mention_payload(
                                                 resp["content"],
                                                 target_agent_id=a,
                                                 target_agent_name=target_name,
                                             )
                                             or resp["content"]
-                                        ),
-                                    )
+                                        )
+                                        handoff_preview = _build_relay_handoff_preview(handoff_payload)
+                                        new_conv_ctx = build_conversation_context(
+                                            conversation_type=ConversationType.AGENT_TO_AGENT,
+                                            source_id=resp["agent_id"],
+                                            source_name=resp["agent_name"],
+                                            target_id=a,
+                                            target_name=target_name,
+                                            trigger_message=handoff_payload,
+                                        )
+                                        handoff_mode = (
+                                            "continue"
+                                            if (
+                                                should_auto_return_to_source
+                                                and resp_ctx is not None
+                                                and a == resp_ctx.source
+                                                and originator_return_mode == "continue"
+                                            )
+                                            else "relay"
+                                        )
                                     conversation_contexts[a] = new_conv_ctx
-                                    logger.info(f"[ChatAPI][{request_id}] Created agent_to_agent context: {resp['agent_name']} -> {target_name}")
+                                    handoff_event_meta[a] = {
+                                        "mentioned_by_name": resp["agent_name"],
+                                        "handoff_mode": handoff_mode,
+                                        "handoff_preview": handoff_preview,
+                                    }
+                                    logger.info(
+                                        "[ChatAPI][{}] Created {} context: {} -> {}",
+                                        request_id,
+                                        new_conv_ctx.conversation_type.value,
+                                        resp["agent_name"],
+                                        target_name,
+                                    )
                                 
                                 total_agents = len(agents_to_respond)
                                 
@@ -4352,6 +4645,7 @@ async def _group_chat_stream_generator(
                                                 agent_id=new_agent_id,
                                                 agent_name=new_agent.name,
                                                 mentioned_by=resp["agent_id"],
+                                                **handoff_event_meta.get(new_agent_id, {}),
                                             )
                                         )
                         
@@ -4428,9 +4722,15 @@ def _validate_chat_request(request: StreamRequest) -> None:
             raise HTTPException(status_code=404, detail=f"Agent '{request.agent_id}' not found")
     
     if request.group_chat and request.mentioned_agents:
+        team_members = set(_get_team_member_agent_ids(request.team_id)) if request.team_id else set()
         for agent_id in request.mentioned_agents:
             if not agent_manager.get_agent(agent_id):
                 raise HTTPException(status_code=404, detail=f"Mentioned agent '{agent_id}' not found")
+            if team_members and agent_id not in team_members:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Mentioned agent '{agent_id}' is not a member of team '{request.team_id}'",
+                )
     
     config = get_cached_config()
     provider_config = config.get_provider() if config else None

@@ -312,6 +312,17 @@ const buildDefaultAttachmentPrompt = (attachments: ComposerAttachment[]): string
   return '请先分析我上传的附件，并告诉我关键信息。';
 };
 
+const getMentionedAgentIdsFromText = (value: string, agents: AgentInfo[]): string[] => (
+  agents
+    .map((agent) => ({
+      id: agent.id,
+      index: value.indexOf(`@${agent.name}`),
+    }))
+    .filter((item) => item.index >= 0)
+    .sort((left, right) => left.index - right.index)
+    .map((item) => item.id)
+);
+
 const MessageInput: React.FC<MessageInputProps> = ({
   conversationType,
   conversationName,
@@ -363,9 +374,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
       }
       return;
     }
-    const nextMentioned = agents
-      .filter((agent) => value.includes(`@${agent.name}`))
-      .map((agent) => agent.id);
+    const nextMentioned = getMentionedAgentIdsFromText(value, agents);
     setMentionedAgents((prev) => {
       if (prev.length === nextMentioned.length && prev.every((agentId, index) => agentId === nextMentioned[index])) {
         return prev;
@@ -416,9 +425,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     const newMessage = `${beforeMention}@${agent.name} ${afterCursor}`;
 
     setMessage(newMessage);
-    setMentionedAgents((prev) => (
-      prev.includes(agent.id) ? prev : [...prev, agent.id]
-    ));
+    setMentionedAgents(getMentionedAgentIdsFromText(newMessage, agents));
     setShowMentionPicker(false);
     setMentionStartIndex(-1);
 
@@ -429,7 +436,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
         textareaRef.current?.setSelectionRange(newCursorPos, newCursorPos);
       }, 0);
     }
-  }, [message, mentionStartIndex]);
+  }, [agents, message, mentionStartIndex]);
 
   const handleRemoveMention = useCallback((agentId: string) => {
     const agent = agents.find((item) => item.id === agentId);
@@ -737,10 +744,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
     const trimmedMessage = message.trim();
     const normalizedMessage = trimmedMessage || buildDefaultAttachmentPrompt(readyAttachments);
     if ((!normalizedMessage && readyAttachments.length === 0) || disabled || hasPendingUploads) return;
+    const orderedMentionedAgents = isTeamChat
+      ? getMentionedAgentIdsFromText(normalizedMessage, agents)
+      : mentionedAgents;
 
     recognitionRef.current?.stop();
     setIsRecording(false);
-    onSend(normalizedMessage, mentionedAgents, readyAttachments);
+    onSend(normalizedMessage, orderedMentionedAgents, readyAttachments);
     attachments.forEach((attachment) => revokeObjectPreview(attachment.localPreview));
     setMessage('');
     setMentionedAgents([]);
@@ -750,7 +760,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [message, disabled, hasPendingUploads, mentionedAgents, onSend, readyAttachments]);
+  }, [agents, isTeamChat, message, disabled, hasPendingUploads, mentionedAgents, onSend, readyAttachments]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (showMentionPicker) return;

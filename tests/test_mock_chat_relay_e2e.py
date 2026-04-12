@@ -1,6 +1,9 @@
 import unittest
 
-from horbot.testing.mock_chat_relay import run_mock_relay_stream_test
+from horbot.testing.mock_chat_relay import (
+    run_mock_multi_agent_relay_stream_test,
+    run_mock_relay_stream_test,
+)
 
 
 class MockChatRelayE2ETests(unittest.IsolatedAsyncioTestCase):
@@ -21,6 +24,27 @@ class MockChatRelayE2ETests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             result["mention_sequence"],
             [["alpha", "beta"], ["beta", "alpha"]],
+        )
+
+    async def test_mock_multi_agent_relay_stream_runs_all_handoffs(self):
+        result = await run_mock_multi_agent_relay_stream_test()
+
+        self.assertTrue(result["ok"], msg=result)
+        self.assertEqual(result["status_code"], 200)
+        self.assertEqual(
+            result["agent_start_sequence"],
+            ["alpha", "beta", "gamma", "delta", "alpha"],
+        )
+        self.assertEqual(
+            result["mention_sequence"],
+            [
+                ["alpha", "beta"],
+                ["alpha", "gamma"],
+                ["alpha", "delta"],
+                ["beta", "alpha"],
+                ["gamma", "alpha"],
+                ["delta", "alpha"],
+            ],
         )
 
 

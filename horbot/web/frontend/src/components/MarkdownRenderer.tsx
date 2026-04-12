@@ -91,8 +91,8 @@ const CodeBlock: React.FC<CodeBlockProps> = memo(({ language, children }) => {
   const displayLanguage = highlightedLanguage || normalizedLanguage || 'plaintext';
 
   return (
-    <div className="relative group my-4 rounded-lg overflow-hidden bg-surface-50 border border-surface-200">
-      <div className="flex items-center justify-between px-4 py-2.5 bg-surface-100 border-b border-surface-200">
+    <div className="group relative my-1.5 overflow-hidden rounded-lg border border-surface-200 bg-surface-50">
+      <div className="flex items-center justify-between border-b border-surface-200 bg-surface-100 px-2.5 py-1.5">
         <div className="flex items-center gap-2">
           <span className="text-xs text-surface-500 font-mono uppercase tracking-wide">
             {displayLanguage}
@@ -100,7 +100,7 @@ const CodeBlock: React.FC<CodeBlockProps> = memo(({ language, children }) => {
         </div>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-surface-600 hover:text-surface-900 bg-surface-200 hover:bg-surface-300 rounded transition-all duration-200"
+          className="flex items-center gap-1.5 rounded bg-surface-200 px-2 py-1 text-[11px] text-surface-600 transition-all duration-200 hover:bg-surface-300 hover:text-surface-900"
           title={copied ? 'Copied' : 'Copy code'}
         >
           {copied ? (
@@ -120,10 +120,10 @@ const CodeBlock: React.FC<CodeBlockProps> = memo(({ language, children }) => {
           )}
         </button>
       </div>
-      <pre className="!m-0 !p-4 overflow-x-auto bg-surface-50">
+      <pre className="!m-0 overflow-x-auto bg-surface-50 !p-2.5">
         <code
           ref={codeRef}
-          className={`${highlightedLanguage ? `language-${highlightedLanguage}` : ''} !bg-transparent !p-0 text-[13px] leading-relaxed font-mono text-surface-900`}
+          className={`${highlightedLanguage ? `language-${highlightedLanguage}` : ''} !bg-transparent !p-0 font-mono text-[12px] leading-[1.45] text-surface-900`}
         >
           {children}
         </code>
@@ -136,28 +136,35 @@ CodeBlock.displayName = 'CodeBlock';
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = memo(({ content, className = '', theme = 'dark' }) => {
   const remarkPlugins = useMemo(() => [remarkGfm], []);
+  const normalizedContent = useMemo(
+    () => content
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim(),
+    [content],
+  );
 
   const isDark = theme === 'dark';
 
   const styles = {
-    h1: isDark ? 'text-2xl font-bold text-surface-100 mb-4 mt-6 pb-2 border-b border-surface-700' : 'text-2xl font-bold text-surface-900 mb-4 mt-6 pb-2 border-b border-surface-200',
-    h2: isDark ? 'text-xl font-semibold text-surface-100 mb-3 mt-5' : 'text-xl font-semibold text-surface-800 mb-3 mt-5',
-    h3: isDark ? 'text-lg font-medium text-surface-100 mb-2 mt-4' : 'text-lg font-medium text-surface-800 mb-2 mt-4',
-    h4: isDark ? 'text-base font-medium text-surface-200 mb-2 mt-3' : 'text-base font-medium text-surface-700 mb-2 mt-3',
-    p: isDark ? 'text-surface-300 leading-relaxed mb-4 break-words' : 'text-surface-700 leading-relaxed mb-4 break-words',
+    h1: isDark ? 'text-lg font-bold text-surface-100 mb-1.5 mt-3 pb-1 border-b border-surface-700' : 'text-lg font-bold text-surface-900 mb-1.5 mt-3 pb-1 border-b border-surface-200',
+    h2: isDark ? 'text-base font-semibold text-surface-100 mb-1.5 mt-2.5' : 'text-base font-semibold text-surface-800 mb-1.5 mt-2.5',
+    h3: isDark ? 'text-sm font-semibold text-surface-100 mb-1 mt-2' : 'text-sm font-semibold text-surface-800 mb-1 mt-2',
+    h4: isDark ? 'text-sm font-semibold text-surface-200 mb-1 mt-1.5' : 'text-sm font-semibold text-surface-700 mb-1 mt-1.5',
+    p: isDark ? 'text-surface-300 leading-[1.55] mb-1.5 break-words' : 'text-surface-700 leading-[1.55] mb-1.5 break-words',
     a: isDark ? 'text-primary-400 hover:text-primary-300 hover:underline transition-colors' : 'text-primary-600 hover:text-primary-700 hover:underline transition-colors',
     strong: isDark ? 'text-surface-100 font-semibold' : 'text-surface-900 font-semibold',
     em: isDark ? 'text-surface-300 italic' : 'text-surface-600 italic',
-    ul: isDark ? 'text-surface-300 my-3 ml-4 list-disc list-outside space-y-1' : 'text-surface-700 my-3 ml-4 list-disc list-outside space-y-1',
-    ol: isDark ? 'text-surface-300 my-3 ml-4 list-decimal list-outside space-y-1' : 'text-surface-700 my-3 ml-4 list-decimal list-outside space-y-1',
-    li: 'my-1 pl-1',
-    blockquote: isDark ? 'border-l-4 border-primary-500 bg-surface-800/50 py-2 px-4 my-4 rounded-r text-surface-300' : 'border-l-4 border-primary-500 bg-surface-100 py-2 px-4 my-4 rounded-r text-surface-600',
-    hr: isDark ? 'border-surface-700 my-6' : 'border-surface-200 my-6',
-    inlineCode: isDark ? 'bg-surface-800 text-primary-300 px-1.5 py-0.5 rounded text-sm font-mono border border-surface-700' : 'bg-surface-100 text-primary-700 px-1.5 py-0.5 rounded text-sm font-mono border border-surface-200',
+    ul: isDark ? 'text-surface-300 my-1.5 ml-4 list-disc list-outside space-y-0.5' : 'text-surface-700 my-1.5 ml-4 list-disc list-outside space-y-0.5',
+    ol: isDark ? 'text-surface-300 my-1.5 ml-4 list-decimal list-outside space-y-0.5' : 'text-surface-700 my-1.5 ml-4 list-decimal list-outside space-y-0.5',
+    li: 'my-0.5 pl-0.5',
+    blockquote: isDark ? 'border-l-4 border-primary-500 bg-surface-800/50 py-1.5 px-3 my-1.5 rounded-r text-surface-300' : 'border-l-4 border-primary-500 bg-surface-100 py-1.5 px-3 my-1.5 rounded-r text-surface-600',
+    hr: isDark ? 'border-surface-700 my-3' : 'border-surface-200 my-3',
+    inlineCode: isDark ? 'bg-surface-800 text-primary-300 px-1.5 py-0.5 rounded text-[12px] font-mono border border-surface-700' : 'bg-surface-100 text-primary-700 px-1.5 py-0.5 rounded text-[12px] font-mono border border-surface-200',
   };
 
   return (
-    <div className={`markdown-content max-w-none break-words ${className}`}>
+    <div className={`markdown-content max-w-none break-words text-[13px] ${className}`}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         components={{
@@ -233,7 +240,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = memo(({ content, class
             <img 
               src={src} 
               alt={alt} 
-              className="rounded-lg max-w-full my-4"
+              className="my-2 max-w-full rounded-lg"
             />
           ),
           code({ className: codeClassName, children, ...props }) {
@@ -265,8 +272,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = memo(({ content, class
           },
           table({ children }) {
             return (
-              <div className="overflow-x-auto my-4">
-                <table className="w-full border-separate border-spacing-0 bg-surface-50 table-fixed border border-surface-400 rounded-lg overflow-hidden">
+              <div className="overflow-x-auto my-2">
+                <table className="w-full table-fixed overflow-hidden rounded-lg border border-surface-400 border-separate border-spacing-0 bg-surface-50">
                   {children}
                 </table>
               </div>
@@ -295,21 +302,21 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = memo(({ content, class
           },
           th({ children }) {
             return (
-              <th className="text-left px-4 py-3 text-surface-900 font-semibold border-r border-b border-surface-400 last:border-r-0 bg-surface-100 min-w-[100px]">
+              <th className="min-w-[100px] border-r border-b border-surface-400 bg-surface-100 px-3 py-2 text-left font-semibold text-surface-900 last:border-r-0">
                 {children}
               </th>
             );
           },
           td({ children }) {
             return (
-              <td className="px-4 py-3 text-surface-800 border-r border-b border-surface-300 last:border-r-0 align-top min-w-[100px]">
+              <td className="min-w-[100px] border-r border-b border-surface-300 px-3 py-2 align-top text-surface-800 last:border-r-0">
                 {children}
               </td>
             );
           },
         }}
       >
-        {content}
+        {normalizedContent}
       </ReactMarkdown>
     </div>
   );

@@ -339,7 +339,11 @@ class MessageProcessor:
         
         from horbot.agent.conversation import format_history_for_agent, ConversationType
         
-        is_group_chat = conversation_type == "group_chat" or (conversation_ctx and conversation_ctx.conversation_type == ConversationType.AGENT_TO_AGENT)
+        is_group_chat = (
+            conversation_type == "group_chat"
+            or (bool(msg.metadata.get("group_chat")) if msg.metadata else False)
+            or (conversation_ctx and conversation_ctx.conversation_type == ConversationType.AGENT_TO_AGENT)
+        )
         
         history = format_history_for_agent(
             raw_history,

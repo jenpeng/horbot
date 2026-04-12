@@ -4,7 +4,7 @@ import asyncio
 import json
 import json_repair
 import os
-from typing import Any
+from typing import Any, Awaitable, Callable
 from loguru import logger
 import httpx
 
@@ -163,6 +163,43 @@ class LiteLLMProvider(LLMProvider):
                 if pattern in model_lower:
                     kwargs.update(overrides)
                     return
+
+    @staticmethod
+    def _extract_text(payload: Any) -> str:
+        if isinstance(payload, str):
+            return payload
+        if isinstance(payload, list):
+            parts: list[str] = []
+            for item in payload:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    text = item.get("text") or item.get("content") or item.get("value") or item.get("output_text")
+                    if isinstance(text, str):
+                        parts.append(text)
+                else:
+                    text = (
+                        getattr(item, "text", None)
+                        or getattr(item, "content", None)
+                        or getattr(item, "value", None)
+                        or getattr(item, "output_text", None)
+                    )
+                    extracted = LiteLLMProvider._extract_text(text)
+                    if extracted:
+                        parts.append(extracted)
+            return "".join(parts)
+        if isinstance(payload, dict):
+            text = payload.get("text") or payload.get("content") or payload.get("value") or payload.get("output_text")
+            return LiteLLMProvider._extract_text(text)
+        text = (
+            getattr(payload, "text", None)
+            or getattr(payload, "content", None)
+            or getattr(payload, "value", None)
+            or getattr(payload, "output_text", None)
+        )
+        if text is not None and text is not payload:
+            return LiteLLMProvider._extract_text(text)
+        return ""
     
     @staticmethod
     def _sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -190,6 +227,87 @@ class LiteLLMProvider(LLMProvider):
             error_text=error_text,
         )
 
+    async def _chat_streaming(
+        self,
+        kwargs: dict[str, Any],
+        on_content_delta: Callable[[str], Awaitable[None] | None] | None = None,
+    ) -> LLMResponse:
+        stream = await acompletion(
+            **kwargs,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls: dict[int, dict[str, Any]] = {}
+        finish_reason = "stop"
+        usage: dict[str, int] = {}
+
+        async for chunk in stream:
+            if getattr(chunk, "usage", None):
+                usage = {
+                    "prompt_tokens": getattr(chunk.usage, "prompt_tokens", 0) or 0,
+                    "completion_tokens": getattr(chunk.usage, "completion_tokens", 0) or 0,
+                    "total_tokens": getattr(chunk.usage, "total_tokens", 0) or 0,
+                }
+
+            for choice in getattr(chunk, "choices", []) or []:
+                finish_reason = choice.finish_reason or finish_reason
+                delta = getattr(choice, "delta", None)
+                if delta is None:
+                    continue
+
+                content = LiteLLMProvider._extract_text(getattr(delta, "content", None))
+                if content:
+                    content_parts.append(content)
+                    if on_content_delta:
+                        maybe_result = on_content_delta("".join(content_parts))
+                        if maybe_result is not None:
+                            await maybe_result
+
+                reasoning = (
+                    LiteLLMProvider._extract_text(getattr(delta, "reasoning_content", None))
+                    or LiteLLMProvider._extract_text(getattr(delta, "reasoning", None))
+                )
+                if reasoning:
+                    reasoning_parts.append(reasoning)
+
+                for index, tc in enumerate(getattr(delta, "tool_calls", None) or []):
+                    bucket = tool_calls.setdefault(index, {"id": None, "name": "", "arguments": []})
+                    if getattr(tc, "id", None):
+                        bucket["id"] = tc.id
+                    function = getattr(tc, "function", None)
+                    if function is None:
+                        continue
+                    if getattr(function, "name", None):
+                        bucket["name"] = function.name
+                    if getattr(function, "arguments", None):
+                        bucket["arguments"].append(function.arguments)
+
+        parsed_tool_calls = [
+            ToolCallRequest(
+                id=data["id"] or f"tool_{index}",
+                name=data["name"],
+                arguments=json_repair.loads("".join(data["arguments"])) if data["arguments"] else {},
+            )
+            for index, data in sorted(tool_calls.items())
+            if data["name"]
+        ]
+
+        reasoning_content = "".join(reasoning_parts) or None
+        content = "".join(content_parts) or None
+        if not content and reasoning_content and not parsed_tool_calls:
+            content = reasoning_content
+
+        return LLMResponse(
+            content=content,
+            tool_calls=parsed_tool_calls,
+            finish_reason=finish_reason,
+            usage=usage,
+            reasoning_content=reasoning_content,
+        )
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -199,6 +317,7 @@ class LiteLLMProvider(LLMProvider):
         temperature: float = 0.7,
         file_ids: list[str] | None = None,
         files: list[dict] | None = None,
+        on_content_delta: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request via LiteLLM.
@@ -282,6 +401,8 @@ class LiteLLMProvider(LLMProvider):
         max_attempts = 2
         for attempt in range(1, max_attempts + 1):
             try:
+                if on_content_delta:
+                    return await self._chat_streaming(kwargs, on_content_delta=on_content_delta)
                 response = await acompletion(**kwargs)
                 return self._parse_response(response)
             except Exception as e:

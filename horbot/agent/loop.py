@@ -783,6 +783,14 @@ class AgentLoop:
             lines.append("- Team group chats available from web:")
             lines.append("  - To post into a team group, use `message` with channel=`web` and chat_id=`team_<team_id>`.")
             lines.append("  - To trigger teammates from that group, either include @mentions in the content or pass `mentioned_agents` and `trigger_group_chat=true`.")
+            current_chat_id = str(getattr(msg, "chat_id", "") or "")
+            if current_chat_id.startswith("team_"):
+                lines.append("  - If you are already speaking inside the current web team chat, do not use `message` to post back into that same `team_<team_id>` just to hand off work.")
+                lines.append("  - In that case, reply inline in the current conversation and include `@AgentName` so the existing group-chat relay can continue in the same turn.")
+                lines.append("  - If the user expects multi-agent discussion, do not write a full final answer before teammates respond.")
+                lines.append("  - Give only your own first-pass, explicitly hand off quickly, and let the visible relay continue round by round.")
+                lines.append("  - If you mention a teammate, stop after the handoff request or your local partial view. Do not pre-write the teammate's future意见, merged summary, or final plan.")
+                lines.append("  - Do not claim 'based on their feedback' or 'final summary' until that teammate has actually replied in history.")
             for target in team_targets:
                 lines.append(
                     "  - "
@@ -891,6 +899,24 @@ class AgentLoop:
         has_file_ids = bool(msg.metadata and msg.metadata.get("file_ids"))
         has_files = bool(msg.metadata and msg.metadata.get("files"))
         has_embedded_document = "---\n**文档:" in (msg.content or "")
+        conversation_ctx = msg.metadata.get("conversation_context") if msg.metadata else None
+        conversation_type = ""
+        trigger_message = ""
+        if isinstance(conversation_ctx, dict):
+            conversation_type = str(conversation_ctx.get("conversation_type") or "").strip()
+            trigger_message = str(conversation_ctx.get("trigger_message") or "").strip()
+
+        if conversation_type == "agent_to_agent":
+            logger.info("Skipping planning for agent-to-agent relay turn")
+            return True
+
+        if (
+            conversation_type == "user_to_agent"
+            and bool(msg.metadata and msg.metadata.get("group_chat"))
+            and "请基于当前团队对话历史" in trigger_message
+        ):
+            logger.info("Skipping planning for user-summary return turn")
+            return True
 
         if has_file_ids or has_files or has_embedded_document:
             logger.info(
@@ -1078,6 +1104,7 @@ class AgentLoop:
                 max_tokens=selected_max_tokens,
                 file_ids=file_ids,
                 files=files,
+                on_content_delta=on_progress,
             )
             llm_elapsed = time.time() - llm_start
             logger.info("LLM call took {:.2f}s (iteration {})", llm_elapsed, iteration)
@@ -1653,7 +1680,11 @@ class AgentLoop:
         
         from horbot.agent.conversation import format_history_for_agent, ConversationType
         
-        is_group_chat = conversation_type == "group_chat" or (conversation_ctx and conversation_ctx.conversation_type == ConversationType.AGENT_TO_AGENT)
+        is_group_chat = (
+            conversation_type == "group_chat"
+            or (bool(msg.metadata.get("group_chat")) if msg.metadata else False)
+            or (conversation_ctx and conversation_ctx.conversation_type == ConversationType.AGENT_TO_AGENT)
+        )
         
         history = format_history_for_agent(
             raw_history,

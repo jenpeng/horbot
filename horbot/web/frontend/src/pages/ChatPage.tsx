@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
+  ArrowDown,
   Bot,
   CalendarClock,
   ChevronsDown,
@@ -13,6 +14,7 @@ import {
   Search,
   TerminalSquare,
   UnfoldVertical,
+  X,
 } from 'lucide-react';
 import MessageGroup from '../components/MessageGroup';
 import MessageExecutionCard from '../components/MessageExecutionCard';
@@ -152,6 +154,15 @@ interface ExpandedRelaySegment {
   endIndex: number;
 }
 
+interface HistorySearchMatch {
+  key: string;
+  turnId: string;
+  groupIndex?: number;
+  role: 'user' | 'assistant';
+  label: string;
+  preview: string;
+}
+
 type RelayGroupState = RelayTimelineStep['state'];
 
 interface RelayRenderGroupItem {
@@ -171,6 +182,9 @@ interface RelayRenderSummaryItem {
 }
 
 type RelayRenderItem = RelayRenderGroupItem | RelayRenderSummaryItem;
+
+const EMPTY_MESSAGES: UIMessage[] = [];
+const EMPTY_TYPING_AGENTS: string[] = [];
 
 const FRIENDLY_PROVIDER_ERROR_MESSAGES = new Set([
   '模型服务鉴权失败，请检查配置。',
@@ -513,6 +527,21 @@ const parseMessageTimestamp = (timestamp?: string): number | null => {
   return Number.isNaN(value) ? null : value;
 };
 
+const normalizeSearchText = (value?: string): string => (
+  (value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+);
+
+const buildSearchPreview = (value?: string, maxLength: number = 96): string => {
+  const normalized = (value || '').replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(1, maxLength - 1))}…`;
+};
+
 const hasLegacyTimeBoundary = (
   currentTurn: MessageTurnAccumulator,
   message: UIMessage,
@@ -646,9 +675,37 @@ const getRelayGroupState = (group: UIMessage[]): RelayGroupState => {
   return 'done';
 };
 
+const getMessageMetadataString = (message: UIMessage, key: string): string | undefined => {
+  const value = message.metadata?.[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+};
+
+const getRelayGroupTransition = (
+  group: UIMessage[],
+  getAgentName: (agentId?: string) => string | undefined,
+): {
+  sourceName?: string;
+  targetName?: string;
+  conversationType?: string;
+  handoffMode?: string;
+} => {
+  const firstMessage = group[0];
+  return {
+    sourceName: getMessageMetadataString(firstMessage, 'handoff_from_name')
+      || getMessageMetadataString(firstMessage, 'source_name'),
+    targetName: firstMessage.agentName
+      || getMessageMetadataString(firstMessage, 'handoff_to_name')
+      || getMessageMetadataString(firstMessage, 'target_name')
+      || getAgentName(firstMessage.agentId),
+    conversationType: getMessageMetadataString(firstMessage, 'conversation_type'),
+    handoffMode: getMessageMetadataString(firstMessage, 'handoff_mode'),
+  };
+};
+
 const getRelayGroupStateDetail = (group: UIMessage[]): string => {
   const lastMessage = group[group.length - 1];
   const state = getRelayGroupState(group);
+  const { sourceName, targetName, conversationType, handoffMode } = getRelayGroupTransition(group, () => undefined);
 
   if (state === 'error') {
     return lastMessage.errorKind === 'provider'
@@ -660,12 +717,30 @@ const getRelayGroupStateDetail = (group: UIMessage[]): string => {
           : '请求失败';
   }
   if (state === 'waiting') {
+    if (handoffMode === 'summary' && sourceName && targetName) {
+      return `等待 ${targetName} 接棒并回到用户总结`;
+    }
+    if (handoffMode === 'continue' && sourceName && targetName) {
+      return `等待 ${targetName} 承接 ${sourceName} 的下一轮讨论`;
+    }
     return lastMessage.statusMessage || '等待接力';
   }
   if (state === 'active') {
+    if (handoffMode === 'summary' && targetName) {
+      return `${targetName} 正在汇总结论`;
+    }
+    if (sourceName && targetName && sourceName !== targetName) {
+      return `${targetName} 正在承接 ${sourceName} 的上一棒`;
+    }
     return lastMessage.isThinking
       ? '思考中'
       : (lastMessage.statusMessage || '处理中');
+  }
+  if (conversationType === 'user_to_agent') {
+    return targetName ? `${targetName} 已面向用户完成输出` : '已面向用户完成输出';
+  }
+  if (sourceName && targetName && sourceName !== targetName) {
+    return `${targetName} 已完成对 ${sourceName} 的交接回复`;
   }
   return '已完成回复';
 };
@@ -675,9 +750,20 @@ const getRelayGroupLabel = (
   index: number,
   getAgentName: (agentId?: string) => string | undefined,
 ): string => {
-  const firstMessage = group[0];
-  return firstMessage.agentName || getAgentName(firstMessage.agentId) || `助手 ${index + 1}`;
+  const { sourceName, targetName, conversationType, handoffMode } = getRelayGroupTransition(group, getAgentName);
+  if (conversationType === 'user_to_agent' && targetName) {
+    return `${targetName} -> 用户`;
+  }
+  if (handoffMode === 'summary' && sourceName && targetName) {
+    return `${sourceName} -> ${targetName}（总结）`;
+  }
+  if (sourceName && targetName && sourceName !== targetName) {
+    return `${sourceName} -> ${targetName}`;
+  }
+  return targetName || `助手 ${index + 1}`;
 };
+
+const MAX_VISIBLE_RELAY_GROUPS_WITHOUT_COLLAPSE = 4;
 
 const getDefaultVisibleRelayGroupIndexes = (
   turn: MessageTurn,
@@ -689,6 +775,12 @@ const getDefaultVisibleRelayGroupIndexes = (
 ): Set<number> => {
   const visibleIndexes = new Set<number>();
   const lastIndex = turn.responseGroups.length - 1;
+
+  if (turn.responseGroups.length <= MAX_VISIBLE_RELAY_GROUPS_WITHOUT_COLLAPSE) {
+    turn.responseGroups.forEach((_, groupIndex) => {
+      visibleIndexes.add(groupIndex);
+    });
+  }
 
   if (lastIndex >= 0) {
     visibleIndexes.add(lastIndex);
@@ -1043,23 +1135,30 @@ const ChatPage: React.FC = () => {
   const [inputDraftPreset, setInputDraftPreset] = useState({ key: 0, text: '' });
   const [pendingRelayJump, setPendingRelayJump] = useState<PendingRelayJump | null>(null);
   const [highlightedRelayGroupKey, setHighlightedRelayGroupKey] = useState<string | null>(null);
+  const [activeHistoryResultKey, setActiveHistoryResultKey] = useState<string | null>(null);
   const [expandedRelaySegments, setExpandedRelaySegments] = useState<Record<string, ExpandedRelaySegment[]>>({});
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
+  const [historySearchIndex, setHistorySearchIndex] = useState(0);
+  const [isHistorySearchOpen, setIsHistorySearchOpen] = useState(false);
+  const [isNearBottom, setIsNearBottom] = useState(true);
   
   const currentConversationId = useConversationStore((state: ConversationState) => state.currentConversationId);
-  const getCurrentConversation = useConversationStore((state: ConversationState) => state.getCurrentConversation);
+  const conversations = useConversationStore((state: ConversationState) => state.conversations);
+  const messageMap = useConversationStore((state: ConversationState) => state.messages);
+  const typingAgentMap = useConversationStore((state: ConversationState) => state.typingAgents);
   const getMessages = useConversationStore((state: ConversationState) => state.getMessages);
   const addMessage = useConversationStore((state: ConversationState) => state.addMessage);
   const updateMessage = useConversationStore((state: ConversationState) => state.updateMessage);
   const setMessages = useConversationStore((state: ConversationState) => state.setMessages);
   const addTypingAgent = useConversationStore((state: ConversationState) => state.addTypingAgent);
   const removeTypingAgent = useConversationStore((state: ConversationState) => state.removeTypingAgent);
-  const getTypingAgents = useConversationStore((state: ConversationState) => state.getTypingAgents);
   const getOrCreateDMConversation = useConversationStore((state: ConversationState) => state.getOrCreateDMConversation);
   const getOrCreateTeamConversation = useConversationStore((state: ConversationState) => state.getOrCreateTeamConversation);
   const setCurrentConversation = useConversationStore((state: ConversationState) => state.setCurrentConversation);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const historySearchInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentRequestIdRef = useRef<string | null>(null);
   const activeStreamPromiseRef = useRef<Promise<void> | null>(null);
@@ -1067,6 +1166,7 @@ const ChatPage: React.FC = () => {
   const activeRequestPayloadRef = useRef<RetryRequest | null>(null);
   const activeTurnIdRef = useRef<string | null>(null);
   const relayGroupRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const historyResultRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const relayHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyLoadPromisesRef = useRef(new Map<string, Promise<void>>());
   const relayStatusSnapshotRef = useRef<RelayStatusSnapshot>({
@@ -1225,10 +1325,16 @@ const ChatPage: React.FC = () => {
     document.addEventListener('keydown', handleEscapeStop);
     return () => document.removeEventListener('keydown', handleEscapeStop);
   }, [handleStopGeneration]);
+
+  const currentConversation = useMemo(() => {
+    if (!currentConversationId) {
+      return null;
+    }
+    return conversations.find((conversation) => conversation.id === currentConversationId) || null;
+  }, [conversations, currentConversationId]);
+  const messages = currentConversationId ? (messageMap[currentConversationId] || EMPTY_MESSAGES) : EMPTY_MESSAGES;
+  const typingAgents = currentConversationId ? (typingAgentMap[currentConversationId] || EMPTY_TYPING_AGENTS) : EMPTY_TYPING_AGENTS;
   
-  const currentConversation = getCurrentConversation();
-  const messages = currentConversationId ? getMessages(currentConversationId) : [];
-  const typingAgents = currentConversationId ? getTypingAgents(currentConversationId) : [];
   const isHistoryLoading = !!currentConversationId && historyLoadingConversationId === currentConversationId;
   
   const generateId = () => Math.random().toString(36).substring(2, 15);
@@ -1319,6 +1425,22 @@ const ChatPage: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
+  useEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const updateScrollState = () => {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      setIsNearBottom(distanceFromBottom < 120);
+    };
+
+    updateScrollState();
+    container.addEventListener('scroll', updateScrollState, { passive: true });
+    return () => container.removeEventListener('scroll', updateScrollState);
+  }, [currentConversationId]);
+
   const refreshAgents = useCallback(async () => {
     try {
       const response = await fetch('/api/agents');
@@ -1332,8 +1454,10 @@ const ChatPage: React.FC = () => {
   }, []);
   
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+    if (isNearBottom) {
+      scrollToBottom();
+    }
+  }, [messages, isNearBottom, scrollToBottom]);
   
   useEffect(() => {
     const initialize = async () => {
@@ -1360,6 +1484,40 @@ const ChatPage: React.FC = () => {
 
     void initialize();
   }, []);
+
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        setIsHistorySearchOpen(true);
+      }
+      if (event.key === 'Escape') {
+        if (historySearchQuery) {
+          setHistorySearchQuery('');
+          setHistorySearchIndex(0);
+          setActiveHistoryResultKey(null);
+          return;
+        }
+        if (isHistorySearchOpen) {
+          setIsHistorySearchOpen(false);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }, [historySearchQuery, isHistorySearchOpen]);
+
+  useEffect(() => {
+    if (!isHistorySearchOpen) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      historySearchInputRef.current?.focus();
+      historySearchInputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isHistorySearchOpen]);
 
   useEffect(() => {
     if (agents.length === 0) {
@@ -1639,7 +1797,7 @@ const ChatPage: React.FC = () => {
                   agentId,
                   agentName,
                   isStreaming: true,
-                  statusMessage: '正在输入...',
+                  statusMessage: streamEntry.content ? '正在输入...' : '已接棒，开始处理...',
                 });
               } else if (pendingEntryMatch) {
                 const [pendingKey, pendingEntry] = pendingEntryMatch;
@@ -1655,7 +1813,7 @@ const ChatPage: React.FC = () => {
                   agentId,
                   agentName,
                   isStreaming: true,
-                  statusMessage: '正在输入...',
+                  statusMessage: pendingEntry.content ? '正在输入...' : '已接棒，开始处理...',
                 });
               } else {
                 const messageId = messageIdFromEvent || generateId();
@@ -1691,10 +1849,18 @@ const ChatPage: React.FC = () => {
           else if (eventType === 'agent_mentioned') {
             const mentionedAgentId = eventData.agent_id as string;
             const mentionedAgentName = eventData.agent_name as string;
+            const mentionedByName = eventData.mentioned_by_name as string | undefined;
+            const handoffMode = eventData.handoff_mode as string | undefined;
+            const handoffPreview = eventData.handoff_preview as string | undefined;
             const pendingEntryMatch = mentionedAgentId ? findPendingEntry(mentionedAgentId) : undefined;
             if (mentionedAgentId && !pendingEntryMatch) {
               const pendingKey = `pending:${mentionedAgentId}:${generateId()}`;
               const messageId = messageIdFromEvent || generateId();
+              const waitingStatus = handoffMode === 'summary'
+                ? '已收到交棒，等待回来总结'
+                : handoffMode === 'continue'
+                  ? '已收到交棒，等待继续下一轮'
+                  : '已被提及，等待响应...';
               const newMessage: UIMessage = {
                 id: messageId,
                 role: 'assistant',
@@ -1704,9 +1870,14 @@ const ChatPage: React.FC = () => {
                 agentId: mentionedAgentId,
                 agentName: mentionedAgentName,
                 isStreaming: true,
-                statusMessage: '已被提及，等待响应...',
+                statusMessage: waitingStatus,
                 executionSteps: [],
-                metadata: {},
+                metadata: {
+                  ...(mentionedByName ? { handoff_from_name: mentionedByName } : {}),
+                  handoff_to_name: mentionedAgentName,
+                  ...(handoffMode ? { handoff_mode: handoffMode } : {}),
+                  ...(handoffPreview ? { handoff_preview: handoffPreview } : {}),
+                },
               };
               agentMessages.set(pendingKey, {
                 messageId,
@@ -2181,10 +2352,96 @@ const ChatPage: React.FC = () => {
   }, [currentConversation, lastInterruptedRequest, isLoading, dismissInterruptNotice, handleSendMessage]);
   
   const messageTurns = useMemo(() => buildMessageTurns(messages), [messages]);
+  const historySearchMatches = useMemo<HistorySearchMatch[]>(() => {
+    const query = normalizeSearchText(historySearchQuery);
+    if (!query) {
+      return [];
+    }
+
+    const matches: HistorySearchMatch[] = [];
+    messageTurns.forEach((turn, turnIndex) => {
+      if (turn.userMessage) {
+        const normalized = normalizeSearchText(turn.userMessage.content);
+        if (normalized.includes(query)) {
+          matches.push({
+            key: `user:${turn.id}`,
+            turnId: turn.id,
+            role: 'user',
+            label: `第 ${turnIndex + 1} 轮 · 你的消息`,
+            preview: buildSearchPreview(turn.userMessage.content),
+          });
+        }
+      }
+
+      turn.responseGroups.forEach((group, groupIndex) => {
+        const content = group
+          .map((message) => cleanHistoryMessageContent(message.content || ''))
+          .join('\n');
+        const normalized = normalizeSearchText(content);
+        if (!normalized.includes(query)) {
+          return;
+        }
+        const firstMessage = group[0];
+        matches.push({
+          key: `${turn.id}:${groupIndex}`,
+          turnId: turn.id,
+          groupIndex,
+          role: 'assistant',
+          label: `第 ${turnIndex + 1} 轮 · ${firstMessage?.agentName || getAgentName(firstMessage?.agentId) || '助手'}`,
+          preview: buildSearchPreview(content),
+        });
+      });
+    });
+
+    return matches;
+  }, [historySearchQuery, messageTurns]);
+
+  const activeHistoryMatch = historySearchMatches.length > 0
+    ? historySearchMatches[Math.min(historySearchIndex, historySearchMatches.length - 1)]
+    : null;
 
   useEffect(() => {
     setExpandedTurnIds({});
   }, [currentConversation?.id]);
+
+  useEffect(() => {
+    setHistorySearchQuery('');
+    setHistorySearchIndex(0);
+    setIsHistorySearchOpen(false);
+    setActiveHistoryResultKey(null);
+  }, [currentConversation?.id]);
+
+  useEffect(() => {
+    if (historySearchMatches.length === 0) {
+      setHistorySearchIndex(0);
+      setActiveHistoryResultKey(null);
+      return;
+    }
+    if (historySearchIndex >= historySearchMatches.length) {
+      setHistorySearchIndex(0);
+    }
+  }, [historySearchMatches, historySearchIndex]);
+
+  useEffect(() => {
+    if (!activeHistoryMatch) {
+      return;
+    }
+
+    setActiveHistoryResultKey(activeHistoryMatch.key);
+    setExpandedTurnIds((prev) => (
+      prev[activeHistoryMatch.turnId]
+        ? prev
+        : { ...prev, [activeHistoryMatch.turnId]: true }
+    ));
+
+    const frame = window.requestAnimationFrame(() => {
+      historyResultRefs.current[activeHistoryMatch.key]?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeHistoryMatch]);
 
   useEffect(() => {
     if (currentConversation?.type !== ConversationType.TEAM || messageTurns.length === 0) {
@@ -2319,6 +2576,16 @@ const ChatPage: React.FC = () => {
     return agents.find((agent) => agent.id === conversationAgentId) || (selectedAgentId ? agents.find((agent) => agent.id === selectedAgentId) : undefined);
   }, [agents, currentConversation, selectedAgentId]);
 
+  const currentTeamMembers = useMemo(() => {
+    if (currentConversation?.type !== ConversationType.TEAM) {
+      return [];
+    }
+
+    const liveTeam = teams.find((team) => team.id === currentConversation.targetId);
+    const memberIds = liveTeam?.members || currentConversation.agentIds || [];
+    return agents.filter((agent) => memberIds.includes(agent.id));
+  }, [agents, currentConversation, teams]);
+
   const currentDirectAgentProfilePreset = useMemo(
     () => getAgentProfilePreset(currentDirectAgent?.profile),
     [currentDirectAgent?.profile],
@@ -2346,7 +2613,7 @@ const ChatPage: React.FC = () => {
 
     const capabilityMap = new Map<string, ToolCapability>();
     const relevantAgents = currentConversation.type === ConversationType.TEAM
-      ? agents.filter((agent) => currentConversation.agentIds.includes(agent.id))
+      ? currentTeamMembers
       : (currentDirectAgent ? [currentDirectAgent] : []);
 
     relevantAgents.forEach((agent) => {
@@ -2368,7 +2635,7 @@ const ChatPage: React.FC = () => {
     });
 
     return Array.from(capabilityMap.values());
-  }, [agents, currentConversation, currentDirectAgent]);
+  }, [currentConversation, currentDirectAgent, currentTeamMembers]);
 
   const canRetryCurrentConversation = !!(
     currentConversation &&
@@ -2388,10 +2655,22 @@ const ChatPage: React.FC = () => {
   );
 
   const currentConversationSummary = currentConversation?.type === ConversationType.TEAM
-    ? `当前为团队接力会话，共 ${currentConversation.agentIds.length} 个成员。`
+    ? `当前为团队接力会话，共 ${currentTeamMembers.length} 个成员。`
     : currentDirectAgentProfilePreset
       ? `当前为单聊会话，已按“${currentDirectAgentProfilePreset.label}”画像进入对话。`
       : '当前为单聊会话，消息会直接发给所选 Agent。';
+
+  const handleHistorySearchMove = useCallback((direction: 'prev' | 'next') => {
+    if (historySearchMatches.length === 0) {
+      return;
+    }
+    setHistorySearchIndex((prev) => {
+      if (direction === 'prev') {
+        return (prev - 1 + historySearchMatches.length) % historySearchMatches.length;
+      }
+      return (prev + 1) % historySearchMatches.length;
+    });
+  }, [historySearchMatches.length]);
 
   const activeStreamingMessages = useMemo(
     () => messages.filter((message) => message.role === 'assistant' && message.isStreaming),
@@ -2687,7 +2966,7 @@ const ChatPage: React.FC = () => {
                     <h2 className="truncate font-semibold text-slate-800">{currentConversation.name}</h2>
                     <p className="text-xs text-slate-500">
                       {currentConversation.type === ConversationType.TEAM
-                        ? `${currentConversation.agentIds.length} 个成员 · 可直接 @agent 接力`
+                        ? `${currentTeamMembers.length} 个成员 · 可直接 @agent 接力`
                         : currentDirectAgentProfilePreset
                           ? `${currentDirectAgentProfilePreset.label} · ${currentDirectAgentProfilePreset.summary}`
                           : '适合直接问答与配置确认'}
@@ -2732,7 +3011,7 @@ const ChatPage: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div className="hidden flex-wrap items-center gap-2 md:flex">
+              <div className="relative hidden shrink-0 md:flex md:flex-col md:items-end md:gap-2">
                 <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
                   currentConversation.type === ConversationType.TEAM
                     ? 'bg-violet-100 text-violet-700'
@@ -2740,13 +3019,116 @@ const ChatPage: React.FC = () => {
                 }`}>
                   {currentConversation.type === ConversationType.TEAM ? '团队接力' : '单聊'}
                 </span>
+                {messages.length > 0 && (
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsHistorySearchOpen((prev) => !prev)}
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium shadow-sm transition-colors ${
+                        isHistorySearchOpen || historySearchQuery
+                          ? 'border-sky-200 bg-white text-sky-700'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Search className="h-3.5 w-3.5" strokeWidth={2} />
+                      查找历史
+                      {historySearchMatches.length > 0 && (
+                        <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                          {historySearchIndex + 1}/{historySearchMatches.length}
+                        </span>
+                      )}
+                    </button>
+
+                    {(isHistorySearchOpen || historySearchQuery) && (
+                      <div className="absolute right-0 top-full z-20 mt-2 w-[min(92vw,32rem)] rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-slate-800">查找当前会话</div>
+                            <div className="text-[11px] text-slate-400">共 {messageTurns.length} 轮，快捷键 Cmd/Ctrl + F</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsHistorySearchOpen(false)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                            aria-label="关闭查找"
+                          >
+                            <X className="h-4 w-4" strokeWidth={2} />
+                          </button>
+                        </div>
+
+                        <div className="mt-3">
+                          <div className="relative">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" strokeWidth={2} />
+                            <input
+                              ref={historySearchInputRef}
+                              value={historySearchQuery}
+                              onChange={(event) => {
+                                setHistorySearchQuery(event.target.value);
+                                setHistorySearchIndex(0);
+                              }}
+                              placeholder="输入关键词，快速定位聊天记录"
+                              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-10 text-sm text-slate-700 outline-none transition focus:border-sky-300 focus:bg-white focus:ring-2 focus:ring-sky-100"
+                            />
+                            {historySearchQuery && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setHistorySearchQuery('');
+                                  setHistorySearchIndex(0);
+                                  setActiveHistoryResultKey(null);
+                                }}
+                                className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-600"
+                                aria-label="清空搜索"
+                              >
+                                <X className="h-3.5 w-3.5" strokeWidth={2} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleHistorySearchMove('prev')}
+                            disabled={historySearchMatches.length === 0}
+                            className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            上一个
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleHistorySearchMove('next')}
+                            disabled={historySearchMatches.length === 0}
+                            className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            下一个
+                          </button>
+                          {historySearchMatches.length > 0 && (
+                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
+                              {historySearchIndex + 1} / {historySearchMatches.length}
+                            </span>
+                          )}
+                        </div>
+
+                        {activeHistoryMatch && (
+                          <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+                            <span className="font-medium text-slate-700">{activeHistoryMatch.label}</span>
+                            {' · '}
+                            {activeHistoryMatch.preview}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             
-            <div
-              ref={chatContainerRef}
-              className="min-h-0 flex-1 overflow-y-auto bg-slate-50 px-4 py-3 space-y-4"
-            >
+            <div className="relative min-h-0 flex-1">
+              <div
+                ref={chatContainerRef}
+                className="min-h-0 h-full overflow-y-auto bg-slate-50 px-3 py-3 space-y-3"
+              >
               {messages.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-slate-400">
                   {isHistoryLoading ? (
@@ -2926,6 +3308,7 @@ const ChatPage: React.FC = () => {
                     const relayTimelineWaitingCount = relayTimelineSteps.filter((step) => step.state === 'waiting').length;
                     const relayTimelineFailedCount = relayTimelineSteps.filter((step) => step.state === 'error').length;
                     const isCollapsibleRelay = isTeamTurn && turn.relayCount > 1;
+                    const allowRelayCollapse = turn.relayCount > MAX_VISIBLE_RELAY_GROUPS_WITHOUT_COLLAPSE;
                     const isExpanded = isCollapsibleRelay
                       ? (expandedTurnIds[turn.id] ?? false)
                       : true;
@@ -2944,7 +3327,9 @@ const ChatPage: React.FC = () => {
                           pendingJumpGroupIndex,
                           interruptedGroupIndex,
                         });
-                    const visibleRelayGroupIndexes = isExpanded
+                    const visibleRelayGroupIndexes = !allowRelayCollapse
+                      ? new Set(turn.responseGroups.map((_, groupIndex) => groupIndex))
+                      : isExpanded
                       ? new Set(turn.responseGroups.map((_, groupIndex) => groupIndex))
                       : (() => {
                           const nextIndexes = new Set(defaultVisibleRelayGroupIndexes);
@@ -2978,7 +3363,7 @@ const ChatPage: React.FC = () => {
                         data-testid="chat-turn-card"
                         data-turn-id={turn.id}
                         data-expanded={isExpanded ? 'true' : 'false'}
-                        className={`rounded-[28px] border px-4 py-4 shadow-sm ${
+                        className={`rounded-[22px] border px-3 py-2.5 shadow-sm ${
                           turn.hasError
                             ? 'border-red-200 bg-red-50/60'
                             : 'border-slate-200 bg-white'
@@ -3176,7 +3561,7 @@ const ChatPage: React.FC = () => {
                           </div>
                         )}
 
-                        {isCollapsibleRelay && (
+                        {isCollapsibleRelay && allowRelayCollapse && (
                           <div className="mb-4 rounded-3xl border border-violet-200 bg-violet-50/70 px-4 py-3 transition-all hover:border-violet-300 hover:bg-violet-50 hover:shadow-sm">
                             <div className="flex flex-wrap items-center justify-between gap-3">
                               <div className="space-y-1">
@@ -3217,9 +3602,16 @@ const ChatPage: React.FC = () => {
                           </div>
                         )}
 
-                        <div className="space-y-4">
+                        <div className="space-y-3">
                           {turn.userMessage && (
-                            <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-3">
+                            <div
+                              ref={(node) => {
+                                historyResultRefs.current[`user:${turn.id}`] = node;
+                              }}
+                              className={`ml-auto max-w-[84%] scroll-mt-24 rounded-2xl border border-slate-200 bg-slate-50/80 px-1.5 py-1 ${
+                                activeHistoryResultKey === `user:${turn.id}` ? 'ring-2 ring-sky-300 ring-offset-2' : ''
+                              }`}
+                            >
                               <MessageGroup
                                 messages={[turn.userMessage]}
                                 isUser
@@ -3228,7 +3620,7 @@ const ChatPage: React.FC = () => {
                             </div>
                           )}
 
-                          <div className="space-y-4">
+                          <div className="space-y-3">
                             {relayRenderItems.map((item) => {
                               if (item.type === 'summary') {
                                 return (
@@ -3319,20 +3711,22 @@ const ChatPage: React.FC = () => {
                                     </div>
                                   )}
 
+                                  <div className="flex justify-start">
                                   <div
                                     ref={(node) => {
                                       relayGroupRefs.current[relayGroupKey] = node;
+                                      historyResultRefs.current[relayGroupKey] = node;
                                     }}
                                     data-testid="chat-turn-group"
                                     data-turn-id={turn.id}
                                     data-group-index={String(item.groupIndex)}
                                     data-highlighted={isHighlighted ? 'true' : 'false'}
-                                    className={`rounded-3xl border p-3 ${
+                                    className={`max-w-[84%] scroll-mt-24 rounded-2xl border px-1.5 py-1 ${
                                       firstMsg.isError
                                         ? 'border-red-200 bg-red-50/50'
-                                        : 'border-slate-200 bg-slate-50/60'
+                                        : 'border-slate-200 bg-slate-50/70'
                                     } ${
-                                      isHighlighted
+                                      isHighlighted || activeHistoryResultKey === relayGroupKey
                                         ? 'ring-2 ring-sky-300 ring-offset-2'
                                         : ''
                                     }`}
@@ -3350,6 +3744,7 @@ const ChatPage: React.FC = () => {
                                         isStreaming={item.group.some((message) => message.isStreaming)}
                                       />
                                     </MessageGroup>
+                                  </div>
                                   </div>
                                 </div>
                               );
@@ -3370,13 +3765,24 @@ const ChatPage: React.FC = () => {
                   <div ref={messagesEndRef} />
                 </>
               )}
+              </div>
+              {!isNearBottom && (
+                <button
+                  type="button"
+                  onClick={scrollToBottom}
+                  className="absolute bottom-4 right-4 inline-flex items-center gap-1 rounded-full border border-sky-200 bg-white/95 px-3 py-2 text-xs font-medium text-sky-700 shadow-lg backdrop-blur transition hover:-translate-y-0.5 hover:bg-sky-50"
+                >
+                  <ArrowDown className="h-3.5 w-3.5" strokeWidth={2} />
+                  回到底部
+                </button>
+              )}
             </div>
             
             <div className="relative shrink-0">
               <MessageInput
                 conversationType={currentConversation.type}
                 conversationName={currentConversation.name}
-                agents={agents}
+                agents={currentConversation.type === ConversationType.TEAM ? currentTeamMembers : agents}
                 onSend={handleSendMessage}
                 disabled={!isOnline}
                 isLoading={isLoading}

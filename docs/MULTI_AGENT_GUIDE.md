@@ -33,6 +33,15 @@ Teams define:
 
 Team chat can relay between members while still preserving per-agent execution state.
 
+Current relay behavior in the Web UI is ordered and baton-oriented:
+
+- one teammate speaks at a time
+- every baton appears as its own relay step in chat history
+- pending turns can show who handed off the work plus a short task preview
+- return-to-user summary turns are treated differently from normal teammate continuation turns
+
+Agent-to-agent prompts are also biased toward shorter subtask replies so long relay chains remain readable in chat.
+
 ## Files You Will Touch Most Often
 
 - `SOUL.md`

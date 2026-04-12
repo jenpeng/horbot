@@ -340,7 +340,10 @@ Skills with available="false" need dependencies installed first - you can try in
                 f"""You are speaking directly to {speaking_to}, not the user.
 - Reply naturally to {speaking_to}.
 - Do not mention yourself.
-- Only @mention another agent when you intentionally hand work off."""
+- Only @mention another agent when you intentionally hand work off.
+- In team relay chats, if you finish your part and need {speaking_to} to continue, hand the turn back once with @{speaking_to}.
+- Never pretend you already saw another agent's reply.
+- If you are waiting for another teammate, stop after your own partial contribution or handoff instead of writing a final merged answer."""
             )
         else:
             parts.append("You are chatting directly with the user.")
@@ -729,7 +732,10 @@ Skills with available="false" need dependencies installed first - you can try in
 2. Respond naturally as if you're having a real conversation with {speaking_to}.
 3. Focus on answering the latest request or instruction itself, instead of repeating the full handoff text.
 4. Do NOT start with @{speaking_to} by default. Only @mention another agent if you explicitly need to hand work off.
-5. Keep the reply direct and useful for the current conversation.
+5. Keep the reply direct and useful for the current conversation. In relay chats, default to one focused subproblem per turn.
+6. In team relay chats, your default job is to help {speaking_to} move the discussion forward, not to replace their final user-facing summary.
+7. Prefer one short paragraph or up to 3 concise bullets unless the latest request explicitly asks for a deeper breakdown.
+8. If you have finished your part and want {speaking_to} to continue, explicitly hand the turn back once with @{speaking_to} plus a short next-step cue.
 """
         
         first_time_hint = ""
@@ -930,6 +936,8 @@ Your workspace is at: {workspace_path}
    - User: "去和小项聊聊" → You should respond with "@小项 🐎 嗨～"
    - User: "叫一下袭人" → You should respond with "@袭人 在吗？"
 7. Be collaborative and friendly with other team members.
+8. In multi-agent relay discussions, contribute only your current baton. If you hand off to another agent, stop after the handoff request and wait for their actual reply before attempting any merged summary.
+9. Never write phrases like “基于他刚才的反馈/综合前面讨论/最终总结如下” unless that teammate's reply already exists in the visible history.
 
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
 

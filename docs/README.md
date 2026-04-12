@@ -12,6 +12,7 @@ Horbot is a lightweight multi-agent assistant stack with:
 - per-agent workspace, memory, sessions, and skills
 - Web UI for operations and configuration
 - chat, attachments, and relay-style team conversations
+- compact chat layout plus baton-aware relay status in team conversations
 - MCP and external channel integration
 - background skill distillation from reusable work
 - validated `.skill` / `.zip` imports with compatibility checks
@@ -40,3 +41,5 @@ The active runtime model is agent-scoped:
 Legacy `.horbot/context` and `.horbot/memory` directories are no longer used by the current memory pipeline.
 
 Creating an agent in the current UI requires choosing both `provider` and `model` up front.
+
+Recent chat updates also tightened assistant message spacing, improved Markdown density, and surfaced clearer relay baton state for multi-agent team discussions.

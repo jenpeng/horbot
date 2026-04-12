@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 
 @dataclass
@@ -89,6 +89,7 @@ class LLMProvider(ABC):
         model: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        on_content_delta: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> LLMResponse:
         """
         Send a chat completion request.
