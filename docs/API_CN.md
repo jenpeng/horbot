@@ -187,10 +187,15 @@ POST /api/chat/sessions
 **响应示例**:
 ```json
 {
-  "session_key": "web:session_1709123456",
+  "session_key": "session_4f0c6b0fd41f4c8bbf79d55d3d5421a8",
   "title": "新对话"
 }
 ```
+
+说明：
+
+- 返回值中的 `session_key` 供前端和 Web API 直接使用
+- 当前实现已改为 UUID 风格会话键，避免同秒创建时发生会话碰撞
 
 #### 列出所有会话
 
@@ -203,9 +208,9 @@ GET /api/chat/sessions
 {
   "sessions": [
     {
-      "key": "web:session_1709123456",
+      "key": "web:session_4f0c6b0fd41f4c8bbf79d55d3d5421a8",
       "title": "代码分析",
-      "created_at": "1709123456",
+      "created_at": "2026-04-12T11:05:12.120000",
       "message_count": 10
     }
   ]
@@ -401,6 +406,42 @@ GET /api/status
   }
 }
 ```
+
+#### 获取渠道端点目录
+
+```http
+GET /api/channels/endpoints
+```
+
+说明：
+
+- 返回所有渠道类型目录、当前已解析端点和缺失配置字段
+- 当前目录已包含 `wecom`
+- `wecom` 的必填字段为 `bot_id` 与 `secret`
+
+`wecom` 典型配置字段包括：
+
+- `websocket_url`
+- `bot_id`
+- `secret`
+- `dm_policy`
+- `group_policy`
+- `stream_replies`
+- `stream_edit_interval_ms`
+- `stream_buffer_threshold`
+- `stream_cursor`
+- `download_media`
+
+#### 测试渠道连通性
+
+```http
+POST /api/channels/endpoints/{endpoint_id}/test
+```
+
+说明：
+
+- 可用于校验渠道配置是否完整以及当前链路是否可连通
+- `wecom` 测试会检查 WeCom AI Bot WebSocket 网关配置
 
 ---
 
@@ -859,6 +900,12 @@ curl -X POST http://localhost:8000/api/skills/import \
   -F "file=@demo-skill.skill" \
   -F "replace_existing=false"
 ```
+
+说明：
+
+- 后端统一支持 `.skill` 与 `.zip`
+- 导入前会验证标准 skill 目录结构、`SKILL.md`、frontmatter、`name/description`、相对引用文件以及兼容性信息
+- 非法技能包会直接返回 `400`
 
 导入时会校验：
 

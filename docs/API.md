@@ -59,6 +59,8 @@
 - `GET /api/status`
 - `GET /api/providers`
 - `GET /api/channels/endpoints`
+- `GET /api/channels/endpoints/{endpoint_id}/events`
+- `POST /api/channels/endpoints/{endpoint_id}/test`
 - `GET /api/tasks`
 - `GET /api/token-usage/stats`
 
@@ -67,5 +69,8 @@
 - Agent creation requires explicit `provider` and `model`.
 - Team history and direct-message history automatically merge legacy and current session storage when possible.
 - Skills APIs resolve to the current agent skill directory, not a generic legacy workspace path.
+- `POST /api/chat/sessions` returns UUID-based session keys such as `session_4f0c...`, avoiding timestamp collisions.
+- Channel endpoint metadata now includes WeCom, including required fields for `bot_id` and `secret`.
+- `POST /api/skills/import` validates `.skill` and `.zip` packages before writing them into the active agent skill directory.
 
 For detailed request and response examples, use the Chinese reference: [API_CN.md](./API_CN.md).

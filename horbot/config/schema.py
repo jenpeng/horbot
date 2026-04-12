@@ -54,6 +54,31 @@ class DingTalkConfig(Base):
     allow_from: list[str] = Field(default_factory=list)  # Allowed staff_ids
 
 
+class WeComGroupRule(Base):
+    """WeCom per-group sender allowlist rule."""
+
+    allow_from: list[str] = Field(default_factory=list)
+
+
+class WeComConfig(Base):
+    """WeCom AI Bot channel configuration using WebSocket long connection."""
+
+    enabled: bool = False
+    websocket_url: str = "wss://openws.work.weixin.qq.com"
+    bot_id: str = ""
+    secret: str = ""
+    dm_policy: Literal["open", "allowlist", "disabled", "pairing"] = "open"
+    group_policy: Literal["open", "allowlist", "disabled"] = "open"
+    stream_replies: bool = True
+    stream_edit_interval_ms: int = 800
+    stream_buffer_threshold: int = 120
+    stream_cursor: bool = True
+    download_media: bool = True
+    allow_from: list[str] = Field(default_factory=list)
+    group_allow_from: list[str] = Field(default_factory=list)
+    groups: dict[str, WeComGroupRule] = Field(default_factory=dict)
+
+
 class DiscordConfig(Base):
     """Discord channel configuration."""
 
@@ -221,6 +246,7 @@ class ChannelsConfig(Base):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    wecom: WeComConfig = Field(default_factory=WeComConfig)
     mochat: MochatConfig = Field(default_factory=MochatConfig)
     dingtalk: DingTalkConfig = Field(default_factory=DingTalkConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)

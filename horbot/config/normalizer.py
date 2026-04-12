@@ -11,6 +11,7 @@ _CHANNEL_TYPES = {
     "telegram",
     "discord",
     "feishu",
+    "wecom",
     "mochat",
     "dingtalk",
     "email",

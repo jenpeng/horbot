@@ -1988,6 +1988,7 @@ _DASHBOARD_CHANNEL_REQUIRED_FIELDS: dict[str, list[str]] = {
     "telegram": ["token"],
     "discord": ["token"],
     "feishu": ["app_id", "app_secret"],
+    "wecom": ["bot_id", "secret"],
     "dingtalk": ["client_id", "client_secret"],
     "email": [
         "consent_granted",
@@ -2012,6 +2013,7 @@ _DASHBOARD_CHANNEL_DISPLAY_NAMES: dict[str, str] = {
     "sharecrm": "ShareCRM",
     "dingtalk": "DingTalk",
     "feishu": "Feishu",
+    "wecom": "WeCom",
 }
 
 
@@ -5163,6 +5165,21 @@ async def get_gateway_diagnostics():
                     return {"name": "feishu", "enabled": True, "status": "error", "latency_ms": latency, "error": f"HTTP {response.status_code}"}
         except Exception as e:
             return {"name": "feishu", "enabled": True, "status": "error", "latency_ms": 0, "error": str(e)}
+
+    async def test_wecom() -> dict:
+        """Test WeCom AI Bot gateway connection."""
+        wc_config = channels_config.wecom
+        if not wc_config.enabled:
+            return {"name": "wecom", "enabled": False, "status": "disabled", "latency_ms": 0, "error": None}
+
+        result = await test_channel_connection("wecom", wc_config)
+        return {
+            "name": "wecom",
+            "enabled": bool(result.get("enabled", True)),
+            "status": result.get("status", "error"),
+            "latency_ms": int(result.get("latency_ms", 0) or 0),
+            "error": result.get("error"),
+        }
     
     async def test_dingtalk() -> dict:
         """Test DingTalk API connection."""
@@ -5373,6 +5390,7 @@ async def get_gateway_diagnostics():
         test_discord(),
         test_whatsapp(),
         test_feishu(),
+        test_wecom(),
         test_dingtalk(),
         test_slack(),
         test_email(),

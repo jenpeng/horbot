@@ -61,6 +61,23 @@ class ChannelEndpointsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events_payload["summary"]["messages_received"], 1)
         self.assertEqual(events_payload["events"][0]["event_type"], "inbound")
 
+    async def test_catalog_includes_wecom_channel_type(self):
+        config = normalize_config(Config())
+
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with patch("horbot.web.api.get_cached_config", return_value=config):
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                response = await client.get("/api/channels/catalog")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        wecom_entry = next(item for item in payload["catalog"] if item["type"] == "wecom")
+        self.assertEqual(wecom_entry["label"], "WeCom")
+        self.assertIn("bot_id", wecom_entry["required_fields"])
+
     async def test_endpoint_test_api_returns_result_and_records_healthcheck_event(self):
         config = Config()
         config.agents.instances = {

@@ -32,6 +32,7 @@
 
 ## 📢 最新动态
 
+- **2026-04-12** 🚀 新增 **WeCom（企业微信 AI Bot）** 渠道支持，包含 reply-mode 流式回复、媒体上传、入站媒体下载/解密，以及对应的文档与诊断能力同步。
 - **2026-02-24** 🚀 发布 **v0.1.4.post2** — 可靠性版本，重新设计心跳、提示缓存优化、提供商和渠道稳定性增强。
 - **2026-02-21** 🎉 发布 **v0.1.4.post1** — 新增提供商、多渠道媒体支持、重大稳定性改进。
 - **2026-02-17** 🎉 发布 **v0.1.4** — MCP 支持、进度流式传输、新提供商、多渠道改进。
@@ -228,7 +229,26 @@ horbot agent
 - 权限档位
 - 协作画像
 
-因此不再需要“先创建，再进入编辑页补模型”这一步。
+`provider` 与 `model` 现在属于创建时必填项，因此不再需要“先创建，再进入编辑页补模型”这一步。
+
+## 🧩 Skills 导入与兼容性
+
+Skills 页面现在支持直接导入 `.skill` 与 `.zip` 技能包，并在导入时统一执行：
+
+- 压缩包结构校验
+- `SKILL.md` 与 frontmatter 校验
+- `name` / `description` 必填校验
+- 相对引用文件存在性校验
+- 当前环境兼容性与缺依赖分析
+
+导入成功后，页面会直接显示 `compatible`、`Needs Setup`、`Incompatible` 等兼容性状态，避免把不兼容 skill 静默导入后才发现无法运行。
+
+## 🏢 WeCom 与 Mochat 的区别
+
+- `WeCom`：对接企业微信官方 AI Bot WebSocket 网关，支持 reply-mode 流式回复、媒体上传、入站媒体下载与解密。
+- `Mochat`：对接企业微信生态账号托管链路，更适合已有 Mochat / Claw 体系的场景。
+
+两者都属于企业微信生态，但协议栈和接入方式不同，不能混为一套配置。
 
 ## 💬 聊天应用
 
@@ -240,6 +260,7 @@ horbot agent
 | **Discord** | Bot Token + Message Content intent |
 | **WhatsApp** | 扫描二维码 |
 | **飞书** | App ID + App Secret |
+| **WeCom** | Bot ID + Secret + AI Bot WebSocket |
 | **ShareCRM** | App ID + App Secret |
 | **Mochat** | Claw Token（支持自动设置） |
 | **钉钉** | App Key + App Secret |

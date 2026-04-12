@@ -77,7 +77,8 @@ Horbot does not attempt to be a giant framework. The emphasis is:
 - Multiple provider backends
 - MCP integration
 - Browser and file-oriented tooling
-- External channels such as Feishu, ShareCRM, Telegram, Discord, Slack, Matrix, Email, and others
+- External channels such as WeCom, Feishu, ShareCRM, Telegram, Discord, Slack, Matrix, Email, Mochat, and others
+- WeCom AI Bot support with reply-mode streaming, media upload, and inbound media download/decryption
 
 ### Operational Tooling
 
@@ -166,9 +167,3 @@ Legacy `.horbot/context` and `.horbot/memory` directories are no longer part of 
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=jenpeng/horbot&type=Date)](https://star-history.com/#jenpeng/horbot&Date)
-
-## Notes
-
-- Web Chat no longer exposes a `/plan` slash command. Planning is triggered internally when needed.
-- Agent creation now requires `provider` and `model` up front.
-- The project is evolving toward a cleaner split between global defaults and per-agent state.

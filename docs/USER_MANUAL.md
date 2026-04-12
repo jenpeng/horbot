@@ -32,6 +32,7 @@ Useful commands:
 - `Teams`: agents, teams, workspaces, `SOUL.md`, `USER.md`, and bootstrap summaries
 - `Chat`: direct chat, team relay chat, attachments, history, and interruptions
 - `Skills`: create, edit, import, and inspect compatibility
+- `Channels`: endpoint configuration, missing-field diagnostics, and connectivity tests
 - `Dashboard`: high-level operational overview
 - `Status`: runtime diagnostics
 - `Tokens`: token usage trends
@@ -57,6 +58,29 @@ Creating an agent now requires:
 - model
 
 After creation, you can refine the agent through chat or by editing workspace files.
+
+## Skills And Compatibility
+
+The Skills page accepts both `.skill` and `.zip` packages.
+
+Before import, Horbot validates:
+
+- package structure and safe paths
+- required `SKILL.md`
+- frontmatter plus `name` / `description`
+- relative file references
+- environment compatibility and missing requirements
+
+Imported skills are written to the current agent skill directory, and compatibility results are shown immediately in the UI.
+
+## External Channels
+
+Horbot currently distinguishes two enterprise-WeChat-style paths:
+
+- `WeCom`: the official AI Bot WebSocket gateway, with reply-mode streaming plus inbound/outbound media handling
+- `Mochat`: a separate ecosystem integration for Mochat / Claw deployments
+
+Treat them as different protocols with different credentials and operational assumptions.
 
 ## Smoke Tests
 

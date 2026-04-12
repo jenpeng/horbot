@@ -17,7 +17,7 @@ Horbot keeps the runtime intentionally small:
 
 - Web UI
 - CLI
-- external chat channels
+- external chat channels such as WeCom, Feishu, ShareCRM, Telegram, Slack, Matrix, and Mochat
 
 ### Core Runtime
 
@@ -38,6 +38,12 @@ Horbot keeps the runtime intentionally small:
 - provider registry and provider adapters
 - local tools, browser tools, MCP tools, and file operations
 - permission profiles and workspace restrictions
+
+### Channel Runtime
+
+- endpoint catalog and missing-config diagnostics
+- long-lived connectors for official and ecosystem chat gateways
+- reply-mode streaming and media handling for channels that support progressive edits
 
 ### Persistence Layer
 
@@ -68,6 +74,8 @@ Horbot supports two skill paths:
 
 Completed tool-backed work can be reviewed in the background and, when reusable, distilled into agent skills and reflection memory.
 
+This loop is aligned with the current agent-scoped memory layout rather than legacy global memory folders.
+
 ## Web Surface
 
 The Web UI currently covers:
@@ -76,5 +84,5 @@ The Web UI currently covers:
 - agents and teams
 - chat and relay conversations
 - skills import/edit/compatibility
-- channels and runtime status
+- channels and runtime status, including WeCom endpoint testing
 - dashboard and token usage

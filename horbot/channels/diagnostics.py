@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 from typing import Any
 
 import httpx
+
+from horbot.channels.wecom import (
+    build_wecom_subscribe_frame,
+    extract_wecom_error,
+    is_wecom_subscribe_success,
+)
 
 
 def _normalize_error(value: str | None) -> str:
@@ -231,6 +239,20 @@ def _channel_specific_remediation(channel_type: str, kind: str) -> list[str]:
                 "检查钉钉机器人消息接收、会话访问等权限是否已授权给当前应用。",
             ]
 
+    if channel_type == "wecom":
+        if kind == "missing":
+            return [
+                "至少补齐 Bot ID 和 Secret；如果走企业微信官方 AI Bot WebSocket 网关，再确认 WebSocket URL 没有填错。",
+            ]
+        if kind in {"credential", "permission"}:
+            return [
+                "去企业微信 AI Bot 管理后台核对 Bot ID、Secret 是否来自同一个机器人，并确认该机器人已发布可用。",
+                "如果连接建立后被立即拒绝，优先检查当前机器人是否具备消息接收与发送权限。",
+            ]
+        return [
+            "如果 WebSocket 握手阶段失败，先检查当前网络是否能访问 openws.work.weixin.qq.com，再核对企业内网代理策略。",
+        ]
+
     if channel_type == "matrix":
         if kind in {"missing", "credential"}:
             return [
@@ -406,6 +428,31 @@ async def test_channel_connection(channel_type: str, channel_config: Any) -> dic
                 enabled=True,
                 latency_ms=latency,
                 error=response.json().get("message") or f"HTTP {response.status_code}",
+            )
+        except Exception as exc:
+            return _build_error_result(channel_type, enabled=True, latency_ms=0, error=str(exc))
+
+    if channel_type == "wecom":
+        if not channel_config.bot_id or not channel_config.secret:
+            return _build_error_result(channel_type, enabled=False, latency_ms=0, error="Bot ID or Secret not configured")
+        start = time.time()
+        websocket_url = (channel_config.websocket_url or "wss://openws.work.weixin.qq.com").strip()
+        try:
+            import websockets
+
+            async with websockets.connect(websocket_url, ping_interval=None, open_timeout=10) as ws:
+                frame = build_wecom_subscribe_frame(channel_config.bot_id, channel_config.secret)
+                await ws.send(json.dumps(frame, ensure_ascii=False))
+                raw = await asyncio.wait_for(ws.recv(), timeout=10)
+            latency = int((time.time() - start) * 1000)
+            payload = json.loads(raw)
+            if is_wecom_subscribe_success(payload):
+                return _result(channel_type, True, "ok", latency, None)
+            return _build_error_result(
+                channel_type,
+                enabled=True,
+                latency_ms=latency,
+                error=extract_wecom_error(payload) or "Unexpected subscribe response",
             )
         except Exception as exc:
             return _build_error_result(channel_type, enabled=True, latency_ms=0, error=str(exc))

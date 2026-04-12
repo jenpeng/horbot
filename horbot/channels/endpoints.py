@@ -19,6 +19,7 @@ from horbot.config.schema import (
     ShareCrmConfig,
     SlackConfig,
     TelegramConfig,
+    WeComConfig,
     WhatsAppConfig,
 )
 
@@ -27,6 +28,7 @@ CHANNEL_TYPE_MODELS = {
     "telegram": TelegramConfig,
     "discord": DiscordConfig,
     "feishu": FeishuConfig,
+    "wecom": WeComConfig,
     "mochat": MochatConfig,
     "dingtalk": DingTalkConfig,
     "email": EmailConfig,
@@ -57,6 +59,23 @@ CHANNEL_CATALOG: dict[str, dict[str, Any]] = {
             {"key": "encrypt_key", "label": "Encrypt Key", "secret": True},
             {"key": "verification_token", "label": "Verification Token", "secret": True},
             {"key": "skip_ssl_verify", "label": "跳过 SSL 校验", "type": "boolean"},
+        ],
+    },
+    "wecom": {
+        "label": "WeCom",
+        "description": "使用企业微信 AI Bot WebSocket 网关接入。",
+        "required_fields": ["bot_id", "secret"],
+        "fields": [
+            {"key": "websocket_url", "label": "WebSocket URL", "placeholder": "wss://openws.work.weixin.qq.com"},
+            {"key": "bot_id", "label": "Bot ID"},
+            {"key": "secret", "label": "Secret", "secret": True},
+            {"key": "dm_policy", "label": "私聊策略"},
+            {"key": "group_policy", "label": "群聊策略"},
+            {"key": "stream_replies", "label": "启用流式回复", "type": "boolean"},
+            {"key": "stream_edit_interval_ms", "label": "流式编辑间隔(ms)", "type": "number"},
+            {"key": "stream_buffer_threshold", "label": "流式缓冲阈值", "type": "number"},
+            {"key": "stream_cursor", "label": "显示流式光标", "type": "boolean"},
+            {"key": "download_media", "label": "下载入站媒体", "type": "boolean"},
         ],
     },
     "discord": {

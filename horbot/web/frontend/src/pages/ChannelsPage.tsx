@@ -238,6 +238,23 @@ const getChannelSpecificHints = (channelType: string, kind: ConnectionErrorKind)
         '如果报的是网关或 404/5xx 类错误，优先核对 Gateway Base URL 是否仍然指向正确环境，再检查平台侧服务状态。',
       ];
 
+    case 'wecom':
+      if (kind === 'missing') {
+        return [
+          '至少补齐 Bot ID 和 Secret；如果走企业微信官方 AI Bot WebSocket 网关，再确认 WebSocket URL 没有填错。',
+          '如果这是刚创建的新机器人，先确认企业微信后台已经完成发布并可用。',
+        ];
+      }
+      if (kind === 'credential' || kind === 'permission') {
+        return [
+          '去企业微信 AI Bot 管理后台核对 Bot ID、Secret 是否来自同一个机器人，并确认该机器人已授予消息接收与发送权限。',
+          '如果连接建立后立即被关闭，优先排查密钥、权限和机器人状态，而不是本机网络。',
+        ];
+      }
+      return [
+        '如果 WebSocket 握手阶段失败，先检查当前网络是否能访问 openws.work.weixin.qq.com，再核对企业代理或内网出站策略。',
+      ];
+
     case 'telegram':
       if (kind === 'credential' || kind === 'missing') {
         return [

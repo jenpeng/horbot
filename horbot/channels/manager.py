@@ -40,6 +40,7 @@ class ChannelManager:
             "whatsapp": self._build_whatsapp_channel,
             "discord": self._build_discord_channel,
             "feishu": self._build_feishu_channel,
+            "wecom": self._build_wecom_channel,
             "mochat": self._build_mochat_channel,
             "dingtalk": self._build_dingtalk_channel,
             "email": self._build_email_channel,
@@ -113,6 +114,12 @@ class ChannelManager:
 
         runtime_config = build_runtime_channel_config(self.config.channels, endpoint)
         return FeishuChannel(runtime_config, self.bus, **self._channel_common_kwargs(endpoint))
+
+    def _build_wecom_channel(self, endpoint) -> BaseChannel:
+        from horbot.channels.wecom import WeComChannel
+
+        runtime_config = build_runtime_channel_config(self.config.channels, endpoint)
+        return WeComChannel(runtime_config, self.bus, **self._channel_common_kwargs(endpoint))
 
     def _build_mochat_channel(self, endpoint) -> BaseChannel:
         from horbot.channels.mochat import MochatChannel

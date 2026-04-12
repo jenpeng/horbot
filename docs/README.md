@@ -14,6 +14,8 @@ Horbot is a lightweight multi-agent assistant stack with:
 - chat, attachments, and relay-style team conversations
 - MCP and external channel integration
 - background skill distillation from reusable work
+- validated `.skill` / `.zip` imports with compatibility checks
+- WeCom AI Bot channel support with reply streaming and media handling
 
 ## Guides
 
@@ -36,3 +38,5 @@ The active runtime model is agent-scoped:
 - `.horbot/agents/<agent-id>/skills`
 
 Legacy `.horbot/context` and `.horbot/memory` directories are no longer used by the current memory pipeline.
+
+Creating an agent in the current UI requires choosing both `provider` and `model` up front.

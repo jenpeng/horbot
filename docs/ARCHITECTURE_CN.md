@@ -28,6 +28,7 @@ graph TB
         DC[Discord]
         SL[Slack]
         FS[飞书]
+        WC[WeCom]
         DT[钉钉]
         QQ[QQ]
         EM[Email]
@@ -144,6 +145,7 @@ horbot/
 │   ├── discord.py           # Discord
 │   ├── slack.py             # Slack
 │   ├── feishu.py            # 飞书
+│   ├── wecom.py             # WeCom
 │   ├── dingtalk.py          # 钉钉
 │   ├── qq.py                # QQ
 │   ├── email.py             # 邮件
@@ -429,6 +431,7 @@ graph TB
             DC[DiscordConfig]
             SL[SlackConfig]
             FS[FeishuConfig]
+            WC[WeComConfig]
             DT[DingTalkConfig]
             QQ[QQConfig]
             EM[EmailConfig]
@@ -564,12 +567,15 @@ class BaseChannel(ABC):
 | Discord  | discord.py  | 支持 Gateway 连接、频道消息    |
 | Slack    | slack.py    | 支持 Socket Mode、线程回复   |
 | 飞书       | feishu.py   | 支持 WebSocket 长连接      |
+| WeCom    | wecom.py    | 支持 AI Bot WebSocket、reply-mode 流式回复、媒体处理 |
 | 钉钉       | dingtalk.py | 支持 Stream 模式          |
 | QQ       | qq.py       | 支持 botpy SDK          |
 | Email    | email.py    | 支持 IMAP 接收、SMTP 发送    |
 | WhatsApp | whatsapp.py | 支持桥接模式                |
 | Matrix   | matrix.py   | 支持端到端加密               |
 | Mochat   | mochat.py   | 支持群组消息                |
+
+其中 `WeCom` 与 `Mochat` 都属于企业微信生态，但协议与运行链路不同：前者对接官方 AI Bot WebSocket 网关，后者对接 Mochat / Claw 生态账号链路。
 
 ***
 
@@ -1963,6 +1969,7 @@ graph TB
             TG[TelegramChannel]
             DC[DiscordChannel]
             SL[SlackChannel]
+            WC[WeComChannel]
             OTHER[其他渠道...]
         end
         
@@ -1973,6 +1980,7 @@ graph TB
         TG --> BASE
         DC --> BASE
         SL --> BASE
+        WC --> BASE
         OTHER --> BASE
     end
 ```
@@ -2321,6 +2329,7 @@ horbot/channels/
 ├── discord.py          # Discord 渠道 (适配新接口)
 ├── slack.py            # Slack 渠道 (适配新接口)
 ├── feishu.py           # 飞书渠道 (适配新接口)
+├── wecom.py            # WeCom 渠道 (适配新接口)
 ├── dingtalk.py         # 钉钉渠道 (适配新接口)
 ├── qq.py               # QQ 渠道 (适配新接口)
 ├── email.py            # 邮件渠道 (适配新接口)

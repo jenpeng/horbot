@@ -196,6 +196,25 @@ export interface DingTalkConfig extends ChannelConfig {
   client_secret: string;
 }
 
+export interface WeComGroupRule {
+  allow_from: string[];
+}
+
+export interface WeComConfig extends ChannelConfig {
+  websocket_url: string;
+  bot_id: string;
+  secret: string;
+  dm_policy: 'open' | 'allowlist' | 'disabled' | 'pairing';
+  group_policy: 'open' | 'allowlist' | 'disabled';
+  stream_replies: boolean;
+  stream_edit_interval_ms: number;
+  stream_buffer_threshold: number;
+  stream_cursor: boolean;
+  download_media: boolean;
+  group_allow_from: string[];
+  groups: Record<string, WeComGroupRule>;
+}
+
 export interface MatrixConfig extends ChannelConfig {
   homeserver: string;
   access_token: string;
@@ -263,6 +282,7 @@ export interface ChannelsConfig {
   telegram: TelegramConfig;
   discord: DiscordConfig;
   feishu: FeishuConfig;
+  wecom: WeComConfig;
   dingtalk: DingTalkConfig;
   email: EmailConfig;
   slack: SlackConfig;

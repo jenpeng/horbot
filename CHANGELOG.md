@@ -2,6 +2,20 @@
 
 This changelog tracks notable product and documentation milestones for Horbot. For lower-level file changes, use Git history.
 
+## 2026-04-12
+
+### Channels
+
+- Added `WeCom` channel support for the official enterprise WeChat AI Bot WebSocket gateway
+- Implemented reply-mode streaming with progressive edits and final stream completion handling
+- Added inbound media download/decryption plus outbound media upload/send support for WeCom conversations
+
+### Documentation
+
+- Removed the stale `## Notes` section from the repository homepage README
+- Synced README, documentation index, API, user manual, and architecture docs with current channel, skill import, and agent creation behavior
+- Updated API examples to reflect UUID-based chat session keys and the current channel endpoint catalog
+
 ## 2026-04-10
 
 ### Documentation And Project Positioning
