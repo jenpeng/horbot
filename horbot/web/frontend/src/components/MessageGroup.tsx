@@ -691,6 +691,10 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
       : handoffMode === 'continue'
         ? 'border-sky-200 bg-sky-50/80 text-sky-800'
         : 'border-violet-200 bg-violet-50/80 text-violet-800';
+    const compactStreamingTone = handoffFromName || handoffMode
+      ? relayStatusTone
+      : 'border-slate-200 bg-slate-50/90 text-slate-700';
+    const shouldShowCompactStreamingStatus = !isUser && message.isStreaming && !!message.statusMessage && !!message.content;
 
     return (
       <div
@@ -746,6 +750,16 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                   当前子任务: {handoffPreview}
                 </p>
               )}
+            </div>
+          )}
+
+          {shouldShowCompactStreamingStatus && (
+            <div className={`mb-1 inline-flex max-w-full items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-sm ${compactStreamingTone}`}>
+              <span className="inline-flex items-center rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                {handoffFromName || handoffMode ? '团队接力' : '处理中'}
+              </span>
+              <span className="truncate">{message.statusMessage}</span>
+              <span className="inline-block h-3.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-current" />
             </div>
           )}
 

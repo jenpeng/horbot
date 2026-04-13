@@ -490,6 +490,8 @@ async def _dispatch_team_group_followups(
                     "team_id": team_id,
                     "conversation_context": conversation_ctx.to_dict(),
                     "mentioned_agents": target_agent_ids,
+                    "turn_id": turn_id,
+                    "assistant_message_id": assistant_message_id,
                     "request_id": request_id,
                     "triggered_via": "message_tool_dispatch",
                 },
@@ -3928,7 +3930,11 @@ def _create_chat_stream_callbacks(
     on_message_tool_content: Optional[Callable[[str], None]] = None,
     on_message_tool_dispatch: Optional[Callable[[dict[str, Any]], None]] = None,
     on_step_start_hook: Optional[Callable[[dict], None]] = None,
+    enable_synthetic_progress: bool = False,
 ) -> Dict[str, Callable[..., Any]]:
+    has_real_progress = False
+    last_synthetic_progress = ""
+
     async def emit(event: str, **payload: Any) -> None:
         if stream_manager.should_stop(request_id):
             raise asyncio.CancelledError()
@@ -3943,10 +3949,29 @@ def _create_chat_stream_callbacks(
         )
 
     async def on_progress(content: str, **kwargs: Any) -> None:
+        nonlocal has_real_progress, last_synthetic_progress
         tool_hint = kwargs.get("tool_hint", False)
+        synthetic_progress = bool(kwargs.get("synthetic_progress"))
         if not tool_hint:
-            content_state["content"] = content
-        await emit("progress", content=content, tool_hint=tool_hint)
+            existing_content = clean_message_content(content_state.get("content") or "").strip()
+            if synthetic_progress:
+                if has_real_progress:
+                    return
+                cleaned_synthetic = clean_message_content(content or "").strip()
+                if not cleaned_synthetic or cleaned_synthetic == last_synthetic_progress:
+                    return
+                last_synthetic_progress = cleaned_synthetic
+                if not existing_content:
+                    content_state["content"] = content
+            else:
+                has_real_progress = True
+                content_state["content"] = content
+        await emit("progress", content=content, tool_hint=tool_hint, synthetic_progress=synthetic_progress)
+
+    async def emit_synthetic_progress(message: str) -> None:
+        if not enable_synthetic_progress:
+            return
+        await on_progress(message, synthetic_progress=True)
 
     async def on_tool_start(tool_name: str, arguments: dict) -> None:
         if tool_name == "message" and arguments and on_message_tool_content:
@@ -3955,9 +3980,15 @@ def _create_chat_stream_callbacks(
                 on_message_tool_content(content)
         if tool_name == "message" and arguments and on_message_tool_dispatch:
             on_message_tool_dispatch(dict(arguments))
+        label = str(tool_name or "").strip()
+        if label:
+            await emit_synthetic_progress(f"{agent_name} 正在调用 {label}...")
         await emit("tool_start", tool_name=tool_name, arguments=arguments)
 
     async def on_tool_result(tool_name: str, result: str, execution_time: float) -> None:
+        label = str(tool_name or "").strip()
+        if label:
+            await emit_synthetic_progress(f"{agent_name} 已拿到 {label} 结果，继续整理中...")
         await emit(
             "tool_result",
             tool_name=tool_name,
@@ -3982,6 +4013,10 @@ def _create_chat_stream_callbacks(
         execution_steps.append(new_step)
         if on_step_start_hook:
             on_step_start_hook(new_step)
+        if step_type == "thinking":
+            await emit_synthetic_progress(f"{agent_name} 正在分析任务与约束...")
+        elif step_type == "response":
+            await emit_synthetic_progress(f"{agent_name} 正在整理回复...")
         await emit("step_start", step_id=step_id, step_type=step_type, title=title)
 
     async def on_step_complete(step_id: str, status: str, details: dict) -> None:
@@ -3989,11 +4024,14 @@ def _create_chat_stream_callbacks(
             next((step.get("type") for step in execution_steps if step.get("id") == step_id), ""),
             details,
         )
+        step_type = next((step.get("type") for step in execution_steps if step.get("id") == step_id), "")
         for step in execution_steps:
             if step["id"] == step_id:
                 step["status"] = status
                 step["details"] = safe_details
                 break
+        if step_type == "thinking" and status not in {"error", "failed"}:
+            await emit_synthetic_progress(f"{agent_name} 正在收束思路，准备给出结论...")
         await emit("step_complete", step_id=step_id, status=status, details=safe_details)
 
     async def on_plan_created(plan: dict) -> None:
@@ -4536,6 +4574,7 @@ async def _group_chat_stream_generator(
                 content_state=content_state,
                 on_message_tool_content=store_message_tool_content,
                 on_message_tool_dispatch=store_message_tool_dispatch,
+                enable_synthetic_progress=bool(request.group_chat),
             )
 
             speaking_to = conversation_ctx.get_speaking_to()

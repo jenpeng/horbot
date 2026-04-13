@@ -129,6 +129,33 @@ async def collect_tail_groups(page: Page, limit: int = 12) -> list[dict[str, Any
     )
 
 
+async def collect_visible_active_controls(page: Page) -> list[dict[str, Any]]:
+    return await page.evaluate(
+        """
+        () => Array.from(document.querySelectorAll('button'))
+          .map((button) => {
+            const style = window.getComputedStyle(button);
+            const rect = button.getBoundingClientRect();
+            const label = (
+              button.getAttribute('aria-label')
+              || button.getAttribute('title')
+              || button.innerText
+              || ''
+            ).trim();
+            return {
+              label,
+              disabled: Boolean(button.disabled),
+              visible: style.display !== 'none'
+                && style.visibility !== 'hidden'
+                && rect.width > 0
+                && rect.height > 0,
+            };
+          })
+          .filter((item) => item.visible && ['停止生成', '停止接力', '停止并发送'].includes(item.label));
+        """
+    )
+
+
 async def count_assistant_groups(page: Page) -> int:
     return await page.evaluate(
         "() => document.querySelectorAll('[data-testid=\"chat-message-group\"][data-role=\"assistant\"]').length"
@@ -285,6 +312,15 @@ async def wait_for_generation_idle(page: Page, timeout: int = 120000) -> None:
           const activeLabels = ['停止生成', '停止接力', '停止并发送'];
           return !Array.from(document.querySelectorAll('button'))
             .some((button) => {
+              const style = window.getComputedStyle(button);
+              const rect = button.getBoundingClientRect();
+              const isVisible = style.display !== 'none'
+                && style.visibility !== 'hidden'
+                && rect.width > 0
+                && rect.height > 0;
+              if (!isVisible || button.disabled) {
+                return false;
+              }
               const label = (
                 button.getAttribute('aria-label')
                 || button.getAttribute('title')
@@ -975,6 +1011,7 @@ async def run_team_smoke(
         "secondary_forbidden_substring": "不要额外解释，不要寒暄",
         "team_selected": False,
         "pending_appeared": False,
+        "synthetic_progress_appeared": False,
         "pending_cleared": False,
         "pending_visible_at_end": False,
         "tail_groups": [],
@@ -1002,18 +1039,40 @@ async def run_team_smoke(
     except PlaywrightTimeoutError:
         pass
 
-    await page.wait_for_function(
-        f"() => !document.body.innerText.includes({json.dumps(PENDING_TEXT)})",
-        timeout=120000,
-    )
-    result["pending_cleared"] = True
+    try:
+        await page.wait_for_function(
+            """
+            () => {
+              const text = document.body.innerText || '';
+              return text.includes('正在分析任务与约束')
+                || text.includes('正在整理回复')
+                || text.includes('正在收束思路，准备给出结论');
+            }
+            """,
+            timeout=30000,
+        )
+        result["synthetic_progress_appeared"] = True
+    except PlaywrightTimeoutError:
+        pass
+
+    if result["pending_appeared"]:
+        try:
+            await page.wait_for_function(
+                f"() => !document.body.innerText.includes({json.dumps(PENDING_TEXT)})",
+                timeout=15000,
+            )
+            result["pending_cleared"] = True
+        except PlaywrightTimeoutError:
+            result["pending_cleared"] = False
+    else:
+        result["pending_cleared"] = True
     await wait_for_assistant_group_text(
         page,
         resolved_expected,
         agent_name=resolved_secondary_agent_name,
         timeout=120000,
     )
-    await wait_for_generation_idle(page)
+    await wait_for_generation_idle(page, timeout=10000)
     await page.wait_for_timeout(2000)
 
     tail_groups = await collect_tail_groups(page)
@@ -2121,14 +2180,20 @@ async def run_smoke(
                         raise RuntimeError(f"Unsupported scenario: {scenario}")
                 except PlaywrightTimeoutError as exc:
                     tail_groups: list[dict[str, Any]] = []
+                    active_controls: list[dict[str, Any]] = []
                     try:
                         tail_groups = await collect_tail_groups(page)
                     except Exception:
                         tail_groups = []
+                    try:
+                        active_controls = await collect_visible_active_controls(page)
+                    except Exception:
+                        active_controls = []
                     result = {
                         "ok": False,
                         "scenario": scenario,
                         "tail_groups": tail_groups,
+                        "active_controls": active_controls,
                         "errors": [f"timeout:{exc}"],
                     }
 

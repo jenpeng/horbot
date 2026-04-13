@@ -301,6 +301,7 @@ export const chatService = {
       const decoder = new TextDecoder();
       let buffer = '';
       let hasReceivedData = false;
+      let receivedDoneEvent = false;
 
       try {
         while (true) {
@@ -328,14 +329,25 @@ export const chatService = {
               try {
                 const data = JSON.parse(line.slice(6)) as StreamEvent;
                 onChunk(data);
+                if ((data.event || data.type) === 'done') {
+                  receivedDoneEvent = true;
+                  clearStreamTimeout();
+                  onStateChange?.('done');
+                  await reader.cancel().catch(() => undefined);
+                  break;
+                }
               } catch (e) {
                 console.error('Failed to parse SSE data:', line, e);
               }
             }
           }
+
+          if (receivedDoneEvent) {
+            break;
+          }
         }
         
-        if (buffer.startsWith('data: ')) {
+        if (!receivedDoneEvent && buffer.startsWith('data: ')) {
           try {
             const data = JSON.parse(buffer.slice(6)) as StreamEvent;
             onChunk(data);

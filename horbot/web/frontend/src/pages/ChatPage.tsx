@@ -1200,6 +1200,7 @@ const ChatPage: React.FC = () => {
   const historyLoadPromisesRef = useRef(new Map<string, Promise<void>>());
   const relayHistoryRefreshIntervalsRef = useRef(new Map<string, ReturnType<typeof setInterval>>());
   const relayHistoryRefreshStopTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const conversationReconcileTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>[]>());
   const pendingInitialBottomScrollConversationIdRef = useRef<string | null>(null);
   const chatWebSocketRef = useRef<WebSocket | null>(null);
   const chatWebSocketReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1375,6 +1376,8 @@ const ChatPage: React.FC = () => {
       relayHistoryRefreshIntervalsRef.current.clear();
       relayHistoryRefreshStopTimersRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
       relayHistoryRefreshStopTimersRef.current.clear();
+      conversationReconcileTimersRef.current.forEach((timerIds) => timerIds.forEach((timerId) => clearTimeout(timerId)));
+      conversationReconcileTimersRef.current.clear();
     };
   }, []);
 
@@ -1496,6 +1499,66 @@ const ChatPage: React.FC = () => {
       .map((entry) => entry.message);
   }, []);
 
+  const formatConversationHistoryMessages = useCallback((
+    rawMessages: Array<{
+      id?: string;
+      role: string;
+      content: string;
+      timestamp?: string;
+      metadata?: {
+        agent_id?: string;
+        agent_name?: string;
+        turn_id?: string;
+        request_id?: string;
+        _provider_error?: unknown;
+      };
+      files?: unknown[];
+      tool_calls?: unknown[];
+      execution_steps?: ExecutionStep[];
+    }>,
+  ): UIMessage[] => (
+    rawMessages
+      .filter((msg) => {
+        if (msg.role === 'tool') return false;
+        const hasToolCalls = msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+        const hasContent = msg.content && msg.content.trim();
+        if (!hasContent && !hasToolCalls) return false;
+        if (msg.content && msg.content.startsWith('Message sent to ')) return false;
+        return true;
+      })
+      .map((msg) => {
+        const agentId = msg.metadata?.agent_id;
+        let agentName = msg.metadata?.agent_name;
+        if (!agentName || agentName === 'Assistant') {
+          const agent = agents.find((a) => a.id === agentId);
+          if (agent) {
+            agentName = agent.name;
+          }
+        }
+        const cleanContent = cleanHistoryMessageContent(msg.content);
+        const normalizedError = msg.role === 'assistant'
+          ? normalizeAssistantErrorContent(cleanContent)
+          : { content: cleanContent, isProviderError: false };
+        const providerError = normalizeProviderErrorPayload(msg.metadata?._provider_error);
+        return {
+          id: msg.id || buildHistoryMessageFallbackId(msg),
+          role: msg.role as UIMessage['role'],
+          content: normalizedError.content,
+          timestamp: msg.timestamp,
+          turnId: msg.metadata?.turn_id,
+          requestId: msg.metadata?.request_id,
+          agentId,
+          agentName,
+          files: normalizeMessageFiles(msg.files),
+          executionSteps: mergeExecutionSteps([], msg.execution_steps),
+          metadata: msg.metadata,
+          isError: Boolean(providerError) || normalizedError.isProviderError,
+          errorKind: (providerError || normalizedError.isProviderError) ? 'provider' : undefined,
+          retryable: providerError?.retryable ?? normalizedError.isProviderError,
+        };
+      })
+  ), [agents]);
+
   const getConversationStreamRegistry = useCallback((conversationId: string) => {
     let registry = liveConversationStreamsRef.current.get(conversationId);
     if (!registry) {
@@ -1513,6 +1576,88 @@ const ChatPage: React.FC = () => {
     }
     return undefined;
   }, []);
+
+  const clearConversationReconcileTimers = useCallback((convId: string) => {
+    const timerIds = conversationReconcileTimersRef.current.get(convId) || [];
+    timerIds.forEach((timerId) => clearTimeout(timerId));
+    conversationReconcileTimersRef.current.delete(convId);
+  }, []);
+
+  const reconcileConversationAfterDone = useCallback((
+    convId: string,
+    streamEntries?: StreamMessageEntry[],
+  ) => {
+    const registry = getConversationStreamRegistry(convId);
+    const snapshot = streamEntries || Array.from(registry.values());
+    const streamMessageIds = new Set<string>();
+    const streamTurnIds = new Set<string>();
+    const streamAgentIds = new Set<string>();
+
+    snapshot.forEach((entry) => {
+      if (entry.messageId) {
+        streamMessageIds.add(entry.messageId);
+      }
+      if (entry.turnId) {
+        streamTurnIds.add(entry.turnId);
+      }
+      if (entry.agentId) {
+        streamAgentIds.add(entry.agentId);
+        removeTypingAgent(convId, entry.agentId);
+      }
+    });
+
+    registry.clear();
+    clearConversationReconcileTimers(convId);
+
+    const runReconcile = async () => {
+      try {
+        const response = await fetch(`/api/conversations/${convId}/messages`);
+        const data = await response.json();
+        const historyMessages = Array.isArray(data.messages)
+          ? formatConversationHistoryMessages(data.messages)
+          : [];
+        const existingMessages = (getMessages(convId) as UIMessage[]).filter((message) => {
+          if (message.role !== 'assistant') {
+            return true;
+          }
+          if (streamMessageIds.has(message.id)) {
+            return false;
+          }
+          if (message.isStreaming) {
+            return false;
+          }
+          if (message.turnId && streamTurnIds.has(message.turnId)) {
+            return false;
+          }
+          if (message.statusMessage?.includes('等待响应')) {
+            return false;
+          }
+          if (message.agentId && streamAgentIds.has(message.agentId) && !message.content.trim()) {
+            return false;
+          }
+          return true;
+        });
+        setMessages(convId, mergeConversationHistory(historyMessages, existingMessages));
+      } catch (error) {
+        console.error('Failed to reconcile conversation after done:', error);
+      }
+    };
+
+    void runReconcile();
+
+    const timerIds = [250, 1200].map((delay) => window.setTimeout(() => {
+      void runReconcile();
+    }, delay));
+    conversationReconcileTimersRef.current.set(convId, timerIds);
+  }, [
+    clearConversationReconcileTimers,
+    formatConversationHistoryMessages,
+    getConversationStreamRegistry,
+    getMessages,
+    mergeConversationHistory,
+    removeTypingAgent,
+    setMessages,
+  ]);
   
   const formatTime = (timestamp?: string) => {
     if (!timestamp) return '';
@@ -1711,46 +1856,7 @@ const ChatPage: React.FC = () => {
         const data = await response.json();
         
         if (data.messages && Array.isArray(data.messages)) {
-          const formattedMessages: UIMessage[] = data.messages
-            .filter((msg: { role: string; content: string; tool_calls?: unknown[] }) => {
-              if (msg.role === 'tool') return false;
-              const hasToolCalls = msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
-              const hasContent = msg.content && msg.content.trim();
-              if (!hasContent && !hasToolCalls) return false;
-              if (msg.content && msg.content.startsWith('Message sent to ')) return false;
-              return true;
-            })
-            .map((msg: { id?: string; role: string; content: string; timestamp?: string; metadata?: { agent_id?: string; agent_name?: string; turn_id?: string; request_id?: string; _provider_error?: unknown }; files?: unknown[]; execution_steps?: ExecutionStep[] }) => {
-              const agentId = msg.metadata?.agent_id;
-              let agentName = msg.metadata?.agent_name;
-              if (!agentName || agentName === 'Assistant') {
-                const agent = agents.find(a => a.id === agentId);
-                if (agent) {
-                  agentName = agent.name;
-                }
-              }
-              const cleanContent = cleanHistoryMessageContent(msg.content);
-              const normalizedError = msg.role === 'assistant'
-                ? normalizeAssistantErrorContent(cleanContent)
-                : { content: cleanContent, isProviderError: false };
-              const providerError = normalizeProviderErrorPayload(msg.metadata?._provider_error);
-              return {
-                id: msg.id || buildHistoryMessageFallbackId(msg),
-                role: msg.role,
-                content: normalizedError.content,
-                timestamp: msg.timestamp,
-                turnId: msg.metadata?.turn_id,
-                requestId: msg.metadata?.request_id,
-                agentId: agentId,
-                agentName: agentName,
-                files: normalizeMessageFiles(msg.files),
-                executionSteps: mergeExecutionSteps([], msg.execution_steps),
-                metadata: msg.metadata,
-                isError: Boolean(providerError) || normalizedError.isProviderError,
-                errorKind: (providerError || normalizedError.isProviderError) ? 'provider' : undefined,
-                retryable: providerError?.retryable ?? normalizedError.isProviderError,
-              };
-            });
+          const formattedMessages = formatConversationHistoryMessages(data.messages);
           setMessages(convId, mergeConversationHistory(formattedMessages, getMessages(convId) as UIMessage[]));
         }
       } catch (error) {
@@ -1771,7 +1877,7 @@ const ChatPage: React.FC = () => {
 
     historyLoadPromisesRef.current.set(convId, request);
     return request;
-  }, [setMessages, agents, getMessages, mergeConversationHistory, scrollToBottom]);
+  }, [formatConversationHistoryMessages, setMessages, getMessages, mergeConversationHistory, scrollToBottom]);
 
   const clearRelayHistoryRefresh = useCallback((convId: string) => {
     const intervalId = relayHistoryRefreshIntervalsRef.current.get(convId);
@@ -2279,6 +2385,14 @@ const ChatPage: React.FC = () => {
       return;
     }
 
+    if (eventType === 'done') {
+      reconcileConversationAfterDone(
+        conversationId,
+        Array.from(registry.values()),
+      );
+      return;
+    }
+
     if (eventType === 'error' || eventType === 'agent_error') {
       const normalizedError = normalizeAssistantErrorContent(
         (eventData.content as string) || (eventData.error as string) || '抱歉，发生了错误。请重试。',
@@ -2332,6 +2446,7 @@ const ChatPage: React.FC = () => {
     getMessages,
     loadConversationHistory,
     openDispatchedWebConversation,
+    reconcileConversationAfterDone,
     removeTypingAgent,
     updateMessage,
   ]);
@@ -2965,7 +3080,12 @@ const ChatPage: React.FC = () => {
           }
           // 所有响应完成
           else if (eventType === 'done') {
-            // 所有消息已完成，不需要额外操作
+            setIsLoading(false);
+            setStreamState(null);
+            reconcileConversationAfterDone(
+              currentConversation.id,
+              Array.from(agentMessages.values()),
+            );
           }
           // 后端处理失败
           else if (eventType === 'error' || eventType === 'agent_error') {
@@ -3169,7 +3289,7 @@ const ChatPage: React.FC = () => {
         void refreshAgents();
       }
     }
-  }, [currentConversation, agents, addMessage, updateMessage, addTypingAgent, removeTypingAgent, isOnline, requestStopGeneration, waitForActiveStreamToSettle, toast, showInterruptNotice, refreshAgents, openDispatchedWebConversation]);
+  }, [currentConversation, agents, addMessage, updateMessage, addTypingAgent, removeTypingAgent, isOnline, requestStopGeneration, waitForActiveStreamToSettle, toast, showInterruptNotice, refreshAgents, openDispatchedWebConversation, reconcileConversationAfterDone]);
 
   const handleRetryLastRequest = useCallback(async () => {
     if (!currentConversation || !lastFailedRequest || isLoading) return;

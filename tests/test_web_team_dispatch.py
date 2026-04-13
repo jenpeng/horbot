@@ -53,6 +53,7 @@ class FakeDispatchLoop:
             {
                 "agent_id": self.agent_id,
                 "content": msg.content,
+                "metadata": dict(msg.metadata or {}),
                 "speaking_to": kwargs.get("speaking_to"),
                 "conversation_type": kwargs.get("conversation_type"),
             }
@@ -408,6 +409,10 @@ class WebTeamDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent_done", event_names)
         self.assertEqual(loop_calls[-1]["agent_id"], "main")
         self.assertIn("现在直接面向用户输出最终总结", loop_calls[-1]["content"])
+        self.assertTrue(isinstance(loop_calls[0]["metadata"].get("assistant_message_id"), str))
+        self.assertTrue(isinstance(loop_calls[0]["metadata"].get("turn_id"), str))
+        self.assertTrue(isinstance(loop_calls[-1]["metadata"].get("assistant_message_id"), str))
+        self.assertTrue(isinstance(loop_calls[-1]["metadata"].get("turn_id"), str))
 
     async def test_dispatch_team_group_followups_emits_synthetic_progress_without_real_delta(self):
         fake_manager = FakeSessionManager()

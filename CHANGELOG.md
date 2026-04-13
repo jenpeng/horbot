@@ -10,6 +10,8 @@ This file summarizes notable Horbot product and documentation changes. For fine-
 - Once the team relay finishes and the mirrored final summary returns to the originating direct chat, the UI automatically switches back there
 - A short-lived baton navigation banner now appears at the top of chat for both transitions so users can see why the view changed and optionally jump back
 - Short-round baton guidance is now injected into both kickoff and relay handoff prompts, not only follow-up turns
+- Team relay bubbles now keep a compact baton/status strip visible while streaming content is already arriving, so the current handoff does not feel like a sudden final-only jump
+- When a relay stream emits the final `done` event, the current turn is now hard-reconciled against persisted history so stale pending/streaming rows are flushed without requiring a page refresh
 
 ## 2026-04-12
 

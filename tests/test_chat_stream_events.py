@@ -110,6 +110,54 @@ class ChatStreamCallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message_tool_contents, ["tool text"])
         self.assertEqual(content_state["content"], "tool text")
 
+    async def test_callbacks_emit_synthetic_progress_when_enabled_without_real_delta(self):
+        queue: asyncio.Queue = asyncio.Queue()
+        callbacks = _create_chat_stream_callbacks(
+            queue=queue,
+            stream_manager=FakeStreamManager(),
+            request_id="req-synth",
+            agent_id="main",
+            agent_name="Main Agent",
+            turn_id="turn-1",
+            message_id="msg-1",
+            execution_steps=[],
+            content_state={"content": ""},
+            enable_synthetic_progress=True,
+        )
+
+        await callbacks["on_step_start"]("step-1", "thinking", "思考中")
+        progress_event = await queue.get()
+        step_start_event = await queue.get()
+
+        self.assertEqual(progress_event["event"], "progress")
+        self.assertTrue(progress_event["synthetic_progress"])
+        self.assertIn("正在分析任务与约束", progress_event["content"])
+        self.assertEqual(step_start_event["event"], "step_start")
+
+    async def test_callbacks_stop_emitting_synthetic_progress_after_real_delta(self):
+        queue: asyncio.Queue = asyncio.Queue()
+        callbacks = _create_chat_stream_callbacks(
+            queue=queue,
+            stream_manager=FakeStreamManager(),
+            request_id="req-synth-real",
+            agent_id="main",
+            agent_name="Main Agent",
+            turn_id="turn-1",
+            message_id="msg-1",
+            execution_steps=[],
+            content_state={"content": ""},
+            enable_synthetic_progress=True,
+        )
+
+        await callbacks["on_progress"]("real delta")
+        first_event = await queue.get()
+        await callbacks["on_step_start"]("step-1", "thinking", "思考中")
+        second_event = await queue.get()
+
+        self.assertEqual(first_event["event"], "progress")
+        self.assertFalse(first_event.get("synthetic_progress", False))
+        self.assertEqual(second_event["event"], "step_start")
+
     async def test_callbacks_cancel_when_stream_is_stopped(self):
         callbacks = _create_chat_stream_callbacks(
             queue=asyncio.Queue(),
