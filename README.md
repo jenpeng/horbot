@@ -73,6 +73,7 @@ Horbot does not attempt to be a giant framework. The emphasis is:
 - Drag-and-drop, paste upload, and retry flows
 - Group chat history merge and recovery across legacy and current session paths
 - Team relay timeline now shows clearer baton status such as who handed work to whom and whether the next turn is a continuation or a final summary
+- When a direct-message agent dispatches work into a team relay, the Web UI now auto-switches into the team chat and then returns to the original direct chat once the final mirrored summary is ready, with a short-lived baton navigation banner at the top
 
 ### Providers, Tools, And Channels
 

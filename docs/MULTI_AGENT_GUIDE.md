@@ -39,6 +39,8 @@ Current relay behavior in the Web UI is ordered and baton-oriented:
 - every baton appears as its own relay step in chat history
 - pending turns can show who handed off the work plus a short task preview
 - return-to-user summary turns are treated differently from normal teammate continuation turns
+- if a direct-message agent dispatches a relay into a team chat, the UI can jump into that team conversation automatically and then jump back to the original direct chat when the mirrored final summary arrives
+- those relay-driven view switches also show a short-lived top banner so users can tell why the page changed and optionally jump back
 
 Agent-to-agent prompts are also biased toward shorter subtask replies so long relay chains remain readable in chat.
 

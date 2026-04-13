@@ -83,6 +83,7 @@ The Web UI currently covers:
 - configuration and providers
 - agents and teams
 - chat and relay conversations
+- baton-aware relay navigation between direct chat and team chat during DM-initiated team dispatch flows
 - skills import/edit/compatibility
 - channels and runtime status, including WeCom endpoint testing
 - dashboard and token usage

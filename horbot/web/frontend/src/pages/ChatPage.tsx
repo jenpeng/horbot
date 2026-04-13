@@ -25,7 +25,7 @@ import TypingIndicator from '../components/TypingIndicator';
 import { useToast } from '../contexts/ToastContext';
 import { resolveApiBase } from '../services/api';
 import { useConversationStore } from '../stores/conversationStore';
-import { ConversationType } from '../types/conversation';
+import { ConversationType, conversationIdToSessionKey, sessionKeyToConversationId } from '../types/conversation';
 import type { ExecutionStep, MessageFile } from '../types/conversation';
 import { chatService, ChatStreamError } from '../services/chat';
 import type { StreamState, UploadedFile } from '../services/chat';
@@ -126,6 +126,13 @@ interface MessageTurnAccumulator extends MessageTurn {
 interface InterruptNotice {
   tone: 'info' | 'warning' | 'success';
   message: string;
+}
+
+interface BatonNavigationNotice {
+  tone: 'team' | 'dm';
+  message: string;
+  actionLabel?: string;
+  actionConversationId?: string;
 }
 
 interface RelayStatusSnapshot {
@@ -399,6 +406,22 @@ const toAbsoluteApiUrl = (value?: string): string | undefined => {
   return `${apiBase}${value.startsWith('/') ? value : `/${value}`}`;
 };
 
+const resolveChatWebSocketUrl = (): string => {
+  const apiBase = resolveApiBase();
+  if (apiBase) {
+    const url = new URL(apiBase);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.pathname = '/ws/chat';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  }
+
+  const url = new URL('/ws/chat', window.location.origin);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.toString();
+};
+
 const normalizeMessageFile = (value: unknown): MessageFile | null => {
   if (!value || typeof value !== 'object') {
     return null;
@@ -506,7 +529,12 @@ const groupMessagesBySpeaker = (messages: UIMessage[]): UIMessage[][] => {
   for (let i = 1; i < messages.length; i += 1) {
     const current = messages[i];
     const previous = currentGroup[currentGroup.length - 1];
-    if (current.role === previous.role && current.agentId === previous.agentId) {
+    const sameRole = current.role === previous.role;
+    const sameAgent = current.agentId === previous.agentId;
+    const currentRequestId = current.requestId || '';
+    const previousRequestId = previous.requestId || '';
+    const sameRequest = !currentRequestId || !previousRequestId || currentRequestId === previousRequestId;
+    if (sameRole && sameAgent && sameRequest) {
       currentGroup.push(current);
     } else {
       groups.push(currentGroup);
@@ -1163,12 +1191,22 @@ const ChatPage: React.FC = () => {
   const currentRequestIdRef = useRef<string | null>(null);
   const activeStreamPromiseRef = useRef<Promise<void> | null>(null);
   const interruptNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const batonNavigationNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeRequestPayloadRef = useRef<RetryRequest | null>(null);
   const activeTurnIdRef = useRef<string | null>(null);
   const relayGroupRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const historyResultRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const relayHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyLoadPromisesRef = useRef(new Map<string, Promise<void>>());
+  const relayHistoryRefreshIntervalsRef = useRef(new Map<string, ReturnType<typeof setInterval>>());
+  const relayHistoryRefreshStopTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const pendingInitialBottomScrollConversationIdRef = useRef<string | null>(null);
+  const chatWebSocketRef = useRef<WebSocket | null>(null);
+  const chatWebSocketReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const subscribedSessionKeysRef = useRef(new Set<string>());
+  const websocketEventHandlerRef = useRef<((eventData: Record<string, unknown>) => void) | null>(null);
+  const liveConversationStreamsRef = useRef(new Map<string, Map<string, StreamMessageEntry>>());
+  const activePrimarySessionKeyRef = useRef<string | null>(null);
   const relayStatusSnapshotRef = useRef<RelayStatusSnapshot>({
     pendingAgentNames: [],
     activeAgentNames: [],
@@ -1177,6 +1215,7 @@ const ChatPage: React.FC = () => {
   });
 
   const [interruptNotice, setInterruptNotice] = useState<InterruptNotice | null>(null);
+  const [batonNavigationNotice, setBatonNavigationNotice] = useState<BatonNavigationNotice | null>(null);
 
   const showInterruptNotice = useCallback((message: string, tone: InterruptNotice['tone'] = 'info') => {
     setInterruptNotice({ message, tone });
@@ -1195,6 +1234,25 @@ const ChatPage: React.FC = () => {
       clearTimeout(interruptNoticeTimerRef.current);
       interruptNoticeTimerRef.current = null;
     }
+  }, []);
+
+  const dismissBatonNavigationNotice = useCallback(() => {
+    setBatonNavigationNotice(null);
+    if (batonNavigationNoticeTimerRef.current) {
+      clearTimeout(batonNavigationNoticeTimerRef.current);
+      batonNavigationNoticeTimerRef.current = null;
+    }
+  }, []);
+
+  const showBatonNavigationNotice = useCallback((notice: BatonNavigationNotice) => {
+    setBatonNavigationNotice(notice);
+    if (batonNavigationNoticeTimerRef.current) {
+      clearTimeout(batonNavigationNoticeTimerRef.current);
+    }
+    batonNavigationNoticeTimerRef.current = setTimeout(() => {
+      setBatonNavigationNotice(null);
+      batonNavigationNoticeTimerRef.current = null;
+    }, 4200);
   }, []);
 
   const requestInputFocus = useCallback(() => {
@@ -1300,9 +1358,23 @@ const ChatPage: React.FC = () => {
       if (interruptNoticeTimerRef.current) {
         clearTimeout(interruptNoticeTimerRef.current);
       }
+      if (batonNavigationNoticeTimerRef.current) {
+        clearTimeout(batonNavigationNoticeTimerRef.current);
+      }
       if (relayHighlightTimerRef.current) {
         clearTimeout(relayHighlightTimerRef.current);
       }
+      if (chatWebSocketReconnectTimerRef.current) {
+        clearTimeout(chatWebSocketReconnectTimerRef.current);
+      }
+      if (chatWebSocketRef.current) {
+        chatWebSocketRef.current.close();
+        chatWebSocketRef.current = null;
+      }
+      relayHistoryRefreshIntervalsRef.current.forEach((intervalId) => clearInterval(intervalId));
+      relayHistoryRefreshIntervalsRef.current.clear();
+      relayHistoryRefreshStopTimersRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+      relayHistoryRefreshStopTimersRef.current.clear();
     };
   }, []);
 
@@ -1334,6 +1406,25 @@ const ChatPage: React.FC = () => {
   }, [conversations, currentConversationId]);
   const messages = currentConversationId ? (messageMap[currentConversationId] || EMPTY_MESSAGES) : EMPTY_MESSAGES;
   const typingAgents = currentConversationId ? (typingAgentMap[currentConversationId] || EMPTY_TYPING_AGENTS) : EMPTY_TYPING_AGENTS;
+
+  useEffect(() => {
+    if (!currentConversation) {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    if (currentConversation.type === ConversationType.TEAM) {
+      params.set('team', currentConversation.targetId);
+      params.delete('agent');
+    } else {
+      params.set('agent', currentConversation.targetId);
+      params.delete('team');
+    }
+
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}`;
+    window.history.replaceState(null, '', nextUrl);
+  }, [currentConversation]);
   
   const isHistoryLoading = !!currentConversationId && historyLoadingConversationId === currentConversationId;
   
@@ -1357,6 +1448,12 @@ const ChatPage: React.FC = () => {
         const nextMessage = {
           ...mergedMessages[existingIndex],
           ...message,
+          turnId: message.turnId ?? mergedMessages[existingIndex].turnId,
+          requestId: message.requestId ?? mergedMessages[existingIndex].requestId,
+          agentId: message.agentId ?? mergedMessages[existingIndex].agentId,
+          agentName: message.agentName ?? mergedMessages[existingIndex].agentName,
+          timestamp: message.timestamp ?? mergedMessages[existingIndex].timestamp,
+          metadata: message.metadata ?? mergedMessages[existingIndex].metadata,
           files: message.files ?? mergedMessages[existingIndex].files,
           executionSteps: mergeExecutionSteps(
             mergedMessages[existingIndex].executionSteps,
@@ -1398,6 +1495,24 @@ const ChatPage: React.FC = () => {
       })
       .map((entry) => entry.message);
   }, []);
+
+  const getConversationStreamRegistry = useCallback((conversationId: string) => {
+    let registry = liveConversationStreamsRef.current.get(conversationId);
+    if (!registry) {
+      registry = new Map<string, StreamMessageEntry>();
+      liveConversationStreamsRef.current.set(conversationId, registry);
+    }
+    return registry;
+  }, []);
+
+  const findPendingStreamEntry = useCallback((registry: Map<string, StreamMessageEntry>, targetAgentId: string) => {
+    for (const [key, entry] of registry.entries()) {
+      if (entry.agentId === targetAgentId && entry.phase === 'pending') {
+        return [key, entry] as const;
+      }
+    }
+    return undefined;
+  }, []);
   
   const formatTime = (timestamp?: string) => {
     if (!timestamp) return '';
@@ -1421,8 +1536,17 @@ const ChatPage: React.FC = () => {
     return isSameYear ? `${month}月${day}日 ${timeStr}` : `${date.getFullYear()}年${month}月${day}日 ${timeStr}`;
   };
   
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const container = chatContainerRef.current;
+    if (container) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior,
+      });
+      return;
+    }
+
+    messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
   }, []);
 
   useEffect(() => {
@@ -1439,6 +1563,15 @@ const ChatPage: React.FC = () => {
     updateScrollState();
     container.addEventListener('scroll', updateScrollState, { passive: true });
     return () => container.removeEventListener('scroll', updateScrollState);
+  }, [currentConversationId]);
+
+  useEffect(() => {
+    if (!currentConversationId) {
+      return;
+    }
+
+    pendingInitialBottomScrollConversationIdRef.current = currentConversationId;
+    setIsNearBottom(true);
   }, [currentConversationId]);
 
   const refreshAgents = useCallback(async () => {
@@ -1627,12 +1760,695 @@ const ChatPage: React.FC = () => {
         setHistoryLoadingConversationId((currentLoadingConvId) => (
           currentLoadingConvId === convId ? null : currentLoadingConvId
         ));
+        if (pendingInitialBottomScrollConversationIdRef.current === convId) {
+          pendingInitialBottomScrollConversationIdRef.current = null;
+          window.requestAnimationFrame(() => {
+            scrollToBottom('auto');
+          });
+        }
       }
     })();
 
     historyLoadPromisesRef.current.set(convId, request);
     return request;
-  }, [setMessages, agents, getMessages, mergeConversationHistory]);
+  }, [setMessages, agents, getMessages, mergeConversationHistory, scrollToBottom]);
+
+  const clearRelayHistoryRefresh = useCallback((convId: string) => {
+    const intervalId = relayHistoryRefreshIntervalsRef.current.get(convId);
+    if (intervalId) {
+      clearInterval(intervalId);
+      relayHistoryRefreshIntervalsRef.current.delete(convId);
+    }
+
+    const timeoutId = relayHistoryRefreshStopTimersRef.current.get(convId);
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      relayHistoryRefreshStopTimersRef.current.delete(convId);
+    }
+  }, []);
+
+  const ensureRelayHistoryRefresh = useCallback((convId: string) => {
+    const existingStopTimer = relayHistoryRefreshStopTimersRef.current.get(convId);
+    if (existingStopTimer) {
+      clearTimeout(existingStopTimer);
+    }
+
+    if (!relayHistoryRefreshIntervalsRef.current.has(convId)) {
+      const intervalId = window.setInterval(() => {
+        void loadConversationHistory(convId);
+      }, 1200);
+      relayHistoryRefreshIntervalsRef.current.set(convId, intervalId);
+    }
+
+    const stopTimerId = window.setTimeout(() => {
+      clearRelayHistoryRefresh(convId);
+    }, 90000);
+    relayHistoryRefreshStopTimersRef.current.set(convId, stopTimerId);
+  }, [clearRelayHistoryRefresh, loadConversationHistory]);
+
+  const openDispatchedWebConversation = useCallback((
+    dispatchArgs?: Record<string, unknown>,
+    options?: { activate?: boolean },
+  ) => {
+    if (!dispatchArgs) {
+      return;
+    }
+    const activate = options?.activate ?? false;
+
+    const channel = typeof dispatchArgs.channel === 'string' ? dispatchArgs.channel.trim() : '';
+    const targetChatId = typeof dispatchArgs.chat_id === 'string' ? dispatchArgs.chat_id.trim() : '';
+    if (channel !== 'web' || !targetChatId) {
+      return;
+    }
+
+    const normalizedConversationId = targetChatId.startsWith('web:')
+      ? targetChatId.slice(4)
+      : targetChatId;
+    if (!normalizedConversationId || normalizedConversationId === currentConversation?.id) {
+      return;
+    }
+
+    let conversationIdToOpen: string | null = null;
+
+    if (normalizedConversationId.startsWith('team_')) {
+      const resolvedTeamId = typeof dispatchArgs.team_id === 'string' && dispatchArgs.team_id.trim()
+        ? dispatchArgs.team_id.trim()
+        : normalizedConversationId.slice('team_'.length);
+      const team = teams.find((item) => item.id === resolvedTeamId);
+      if (!team) {
+        return;
+      }
+      const conversation = getOrCreateTeamConversation(
+        team.id,
+        team.name,
+        team.members,
+        team.description,
+      );
+      conversationIdToOpen = conversation.id;
+    } else if (normalizedConversationId.startsWith('dm_')) {
+      const targetAgentId = normalizedConversationId.slice('dm_'.length);
+      const agent = agents.find((item) => item.id === targetAgentId);
+      if (!agent) {
+        return;
+      }
+      const conversation = getOrCreateDMConversation(agent.id, agent.name);
+      conversationIdToOpen = conversation.id;
+    }
+
+    if (!conversationIdToOpen) {
+      return;
+    }
+
+    const sessionKey = conversationIdToSessionKey(conversationIdToOpen);
+    subscribedSessionKeysRef.current.add(sessionKey);
+    if (chatWebSocketRef.current?.readyState === WebSocket.OPEN) {
+      chatWebSocketRef.current.send(JSON.stringify({
+        type: 'subscribe',
+        session_key: sessionKey,
+      }));
+    }
+
+    void loadConversationHistory(conversationIdToOpen);
+    ensureRelayHistoryRefresh(conversationIdToOpen);
+    if (activate) {
+      setCurrentConversation(conversationIdToOpen);
+      const sourceConversationName = currentConversation?.name?.trim() || '当前单聊';
+      const destinationConversationName = (
+        teams.find((team) => `team_${team.id}` === conversationIdToOpen)?.name
+        || agents.find((agent) => `dm_${agent.id}` === conversationIdToOpen)?.name
+        || conversationIdToOpen
+      ).trim();
+      showBatonNavigationNotice({
+        tone: normalizedConversationId.startsWith('team_') ? 'team' : 'dm',
+        message: normalizedConversationId.startsWith('team_')
+          ? `已切换到 ${destinationConversationName}，正在查看由 ${sourceConversationName} 发起的团队接力。`
+          : `已切换到 ${destinationConversationName}，继续查看当前对话。`,
+        actionLabel: currentConversation ? `回到 ${sourceConversationName}` : undefined,
+        actionConversationId: currentConversation?.id,
+      });
+    }
+  }, [
+    agents,
+    currentConversation,
+    ensureRelayHistoryRefresh,
+    getOrCreateDMConversation,
+    getOrCreateTeamConversation,
+    loadConversationHistory,
+    setCurrentConversation,
+    showBatonNavigationNotice,
+    teams,
+  ]);
+
+  const applyRealtimeEventToConversation = useCallback((
+    conversationId: string,
+    eventData: Record<string, unknown>,
+  ) => {
+    const registry = getConversationStreamRegistry(conversationId);
+    const eventType = (eventData.event as string) || (eventData.type as string);
+    const agentId = eventData.agent_id as string | undefined;
+    const agentName = eventData.agent_name as string | undefined;
+    const turnId = eventData.turn_id as string | undefined;
+    const messageIdFromEvent = eventData.message_id as string | undefined;
+    const incomingExecutionSteps = Array.isArray(eventData.execution_steps)
+      ? mergeExecutionSteps([], eventData.execution_steps as ExecutionStep[])
+      : [];
+    const streamKey = messageIdFromEvent || turnId || (agentId ? `${agentId}:${String(eventData.agent_index ?? '0')}` : 'main');
+    const streamEntry = registry.get(streamKey);
+    const matchedStreamEntry = streamEntry
+      || (messageIdFromEvent ? Array.from(registry.values()).find((entry) => entry.messageId === messageIdFromEvent) : undefined)
+      || (turnId ? Array.from(registry.values()).find((entry) => entry.turnId === turnId) : undefined)
+      || (agentId ? Array.from(registry.values()).find((entry) => entry.agentId === agentId && entry.phase !== 'done') : undefined);
+    const existingMessage = (messageId?: string) => (
+      messageId ? getMessages(conversationId).find((message) => message.id === messageId) : undefined
+    );
+
+    if (eventType === 'agent_start' || eventType === 'request_start') {
+      if (!agentId) {
+        return;
+      }
+      const pendingEntryMatch = findPendingStreamEntry(registry, agentId);
+      if (streamEntry) {
+        streamEntry.phase = 'active';
+        if (turnId) {
+          streamEntry.turnId = turnId;
+        }
+        updateMessage(conversationId, streamEntry.messageId, {
+          turnId,
+          requestId: (eventData.request_id as string | undefined) || undefined,
+          agentId,
+          agentName,
+          isStreaming: true,
+          statusMessage: streamEntry.content ? '正在输入...' : '已接棒，开始处理...',
+        });
+      } else if (pendingEntryMatch) {
+        const [pendingKey, pendingEntry] = pendingEntryMatch;
+        pendingEntry.phase = 'active';
+        pendingEntry.turnId = turnId;
+        if (pendingKey !== streamKey) {
+          registry.delete(pendingKey);
+        }
+        registry.set(streamKey, pendingEntry);
+        updateMessage(conversationId, pendingEntry.messageId, {
+          turnId,
+          requestId: (eventData.request_id as string | undefined) || undefined,
+          agentId,
+          agentName,
+          isStreaming: true,
+          statusMessage: pendingEntry.content ? '正在输入...' : '已接棒，开始处理...',
+        });
+      } else {
+        const messageId = messageIdFromEvent || Math.random().toString(36).substring(2, 15);
+        registry.set(streamKey, {
+          messageId,
+          content: '',
+          turnId,
+          agentId,
+          phase: 'active',
+          executionSteps: [],
+        });
+        if (!existingMessage(messageId)) {
+          addMessage(conversationId, {
+            id: messageId,
+            role: 'assistant',
+            content: '',
+            turnId,
+            requestId: (eventData.request_id as string | undefined) || undefined,
+            agentId,
+            agentName,
+            isStreaming: true,
+            statusMessage: '正在输入...',
+            executionSteps: [],
+            metadata: {},
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+      addTypingAgent(conversationId, agentId);
+      return;
+    }
+
+    if (eventType === 'agent_mentioned') {
+      const mentionedAgentId = eventData.agent_id as string | undefined;
+      const mentionedAgentName = eventData.agent_name as string | undefined;
+      if (!mentionedAgentId) {
+        return;
+      }
+      const pendingEntryMatch = findPendingStreamEntry(registry, mentionedAgentId);
+      if (!pendingEntryMatch) {
+        const pendingKey = `pending:${mentionedAgentId}:${Math.random().toString(36).substring(2, 15)}`;
+        const messageId = messageIdFromEvent || Math.random().toString(36).substring(2, 15);
+        const handoffMode = eventData.handoff_mode as string | undefined;
+        const waitingStatus = handoffMode === 'summary'
+          ? '已收到交棒，等待回来总结'
+          : handoffMode === 'continue'
+            ? '已收到交棒，等待继续下一轮'
+            : '已被提及，等待响应...';
+        registry.set(pendingKey, {
+          messageId,
+          content: '',
+          turnId,
+          agentId: mentionedAgentId,
+          phase: 'pending',
+          executionSteps: [],
+        });
+        if (!existingMessage(messageId)) {
+          addMessage(conversationId, {
+            id: messageId,
+            role: 'assistant',
+            content: '',
+            turnId,
+            requestId: (eventData.request_id as string | undefined) || undefined,
+            agentId: mentionedAgentId,
+            agentName: mentionedAgentName,
+            isStreaming: true,
+            statusMessage: waitingStatus,
+            executionSteps: [],
+            metadata: {
+              ...((eventData.mentioned_by_name as string | undefined) ? { handoff_from_name: eventData.mentioned_by_name } : {}),
+              ...(mentionedAgentName ? { handoff_to_name: mentionedAgentName } : {}),
+              ...((eventData.handoff_mode as string | undefined) ? { handoff_mode: eventData.handoff_mode } : {}),
+              ...((eventData.handoff_preview as string | undefined) ? { handoff_preview: eventData.handoff_preview } : {}),
+            },
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+      addTypingAgent(conversationId, mentionedAgentId);
+      return;
+    }
+
+    if (!matchedStreamEntry) {
+      if (eventType === 'agent_done' && agentId) {
+        const messageId = messageIdFromEvent || Math.random().toString(36).substring(2, 15);
+        const normalizedError = normalizeAssistantErrorContent(eventData.content as string);
+        const providerError = normalizeProviderErrorPayload(eventData.provider_error);
+        registry.set(streamKey, {
+          messageId,
+          content: normalizedError.content || '',
+          turnId,
+          agentId,
+          phase: 'done',
+          executionSteps: incomingExecutionSteps,
+        });
+        if (!existingMessage(messageId)) {
+          addMessage(conversationId, {
+            id: messageId,
+            role: 'assistant',
+            content: normalizedError.content || '',
+            turnId,
+            requestId: (eventData.request_id as string | undefined) || undefined,
+            agentId,
+            agentName,
+            isStreaming: false,
+            isThinking: false,
+            executionSteps: incomingExecutionSteps,
+            metadata: {
+              ...(providerError ? { _provider_error: providerError } : {}),
+              ...(Array.isArray(eventData.memory_sources) && eventData.memory_sources.length > 0
+                ? { _memory_sources: eventData.memory_sources }
+                : {}),
+              ...(eventData.memory_recall && typeof eventData.memory_recall === 'object'
+                ? { _memory_recall: eventData.memory_recall }
+                : {}),
+            },
+            isError: Boolean(providerError) || normalizedError.isProviderError,
+            errorKind: (Boolean(providerError) || normalizedError.isProviderError) ? 'provider' : undefined,
+            retryable: providerError?.retryable ?? normalizedError.isProviderError,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        removeTypingAgent(conversationId, agentId);
+        void loadConversationHistory(conversationId);
+      }
+      return;
+    }
+
+    if (eventType === 'thinking') {
+      updateMessage(conversationId, matchedStreamEntry.messageId, {
+        executionSteps: matchedStreamEntry.executionSteps,
+        isThinking: true,
+        statusMessage: '正在思考...',
+      });
+      return;
+    }
+
+    if (eventType === 'status') {
+      updateMessage(conversationId, matchedStreamEntry.messageId, {
+        statusMessage: eventData.message as string,
+      });
+      return;
+    }
+
+    if (eventType === 'progress' || eventType === 'content') {
+      if (eventData.tool_hint) {
+        return;
+      }
+      const isSyntheticProgress = Boolean(eventData.synthetic_progress);
+      matchedStreamEntry.content = (eventData.content as string) || '';
+      matchedStreamEntry.phase = 'active';
+      matchedStreamEntry.executionSteps = updateLatestRunningExecutionStep(
+        matchedStreamEntry.executionSteps,
+        (step) => (step.type || '').toLowerCase().includes('thinking'),
+        {
+          reasoning_content: matchedStreamEntry.content,
+          content: matchedStreamEntry.content,
+        },
+      );
+      updateMessage(conversationId, matchedStreamEntry.messageId, {
+        content: matchedStreamEntry.content,
+        isThinking: isSyntheticProgress,
+        executionSteps: matchedStreamEntry.executionSteps,
+      });
+      return;
+    }
+
+    if (eventType === 'tool_start') {
+      const toolName = eventData.tool_name as string | undefined;
+      const argumentsPayload = eventData.arguments as Record<string, unknown> | undefined;
+      if (toolName === 'message' && argumentsPayload) {
+        openDispatchedWebConversation(argumentsPayload);
+      }
+      matchedStreamEntry.executionSteps = updateLatestRunningExecutionStep(
+        matchedStreamEntry.executionSteps,
+        (step) => (step.type || '').toLowerCase().includes('tool'),
+        {
+          toolName,
+          arguments: argumentsPayload,
+        },
+      );
+      updateMessage(conversationId, matchedStreamEntry.messageId, {
+        executionSteps: matchedStreamEntry.executionSteps,
+        isThinking: false,
+        statusMessage: toolName ? `正在执行工具: ${toolName}` : '正在执行工具...',
+      });
+      return;
+    }
+
+    if (eventType === 'tool_result') {
+      const toolName = eventData.tool_name as string | undefined;
+      matchedStreamEntry.executionSteps = updateLatestRunningExecutionStep(
+        matchedStreamEntry.executionSteps,
+        (step) => (step.type || '').toLowerCase().includes('tool'),
+        {
+          toolName,
+          result: eventData.result,
+          executionTime: eventData.execution_time,
+        },
+      );
+      updateMessage(conversationId, matchedStreamEntry.messageId, {
+        executionSteps: matchedStreamEntry.executionSteps,
+        statusMessage: toolName ? `${toolName} 已返回结果` : '工具执行已返回结果',
+      });
+      return;
+    }
+
+    if (eventType === 'step_start') {
+      const stepId = (eventData.step_id as string) || Math.random().toString(36).substring(2, 15);
+      const stepType = (eventData.step_type as string) || 'step';
+      const title = (eventData.title as string) || inferExecutionStepTitle(stepType);
+      let statusText: string | undefined;
+      if (stepType === 'thinking') {
+        statusText = '正在思考...';
+      } else if (stepType === 'response') {
+        statusText = '正在回复...';
+      } else if (stepType === 'tool_call') {
+        statusText = '正在执行工具...';
+      } else if (stepType === 'compression') {
+        statusText = '正在压缩上下文...';
+      }
+      matchedStreamEntry.executionSteps = upsertExecutionStep(matchedStreamEntry.executionSteps, {
+        id: stepId,
+        type: stepType,
+        title,
+        status: 'running',
+        timestamp: new Date().toISOString(),
+      });
+      updateMessage(conversationId, matchedStreamEntry.messageId, {
+        executionSteps: matchedStreamEntry.executionSteps,
+        isThinking: stepType === 'thinking',
+        statusMessage: statusText,
+      });
+      return;
+    }
+
+    if (eventType === 'step_complete') {
+      const stepId = eventData.step_id as string | undefined;
+      const status = normalizeExecutionStepStatus(eventData.status as string | undefined);
+      const details = eventData.details as Record<string, unknown> | undefined;
+      const existingStep = stepId
+        ? matchedStreamEntry.executionSteps.find((step) => step.id === stepId)
+        : undefined;
+      const mergedDetails = existingStep?.details
+        ? { ...existingStep.details, ...(details || {}) }
+        : details;
+      const resolvedType = inferExecutionStepType(existingStep?.type, mergedDetails);
+      const resolvedTitle = inferExecutionStepTitle(resolvedType, existingStep?.title, mergedDetails);
+      matchedStreamEntry.executionSteps = upsertExecutionStep(matchedStreamEntry.executionSteps, {
+        id: stepId || Math.random().toString(36).substring(2, 15),
+        type: resolvedType,
+        title: resolvedTitle,
+        status,
+        timestamp: existingStep?.timestamp || new Date().toISOString(),
+        details: mergedDetails,
+      });
+
+      let statusMessage: string | undefined;
+      let isThinking = false;
+      if (resolvedType === 'thinking') {
+        statusMessage = status === 'error' || status === 'failed' ? '思考阶段失败' : '思考完成，准备回复...';
+      } else if (resolvedType === 'tool_call') {
+        statusMessage = status === 'error' || status === 'failed' ? '工具执行失败' : '工具执行完成';
+      } else if (resolvedType === 'response') {
+        statusMessage = status === 'error' || status === 'failed' ? '回复生成失败' : '回复已生成';
+      }
+
+      const responseContent = resolvedType === 'response' && typeof mergedDetails?.content === 'string'
+        ? mergedDetails.content
+        : undefined;
+      if (responseContent) {
+        matchedStreamEntry.content = responseContent;
+      }
+
+      updateMessage(conversationId, matchedStreamEntry.messageId, {
+        content: responseContent || matchedStreamEntry.content,
+        executionSteps: matchedStreamEntry.executionSteps,
+        isThinking,
+        statusMessage,
+      });
+      return;
+    }
+
+    if (eventType === 'agent_done' || eventType === 'request_end') {
+      const currentMessage = existingMessage(matchedStreamEntry.messageId);
+      const normalizedError = normalizeAssistantErrorContent(
+        (eventData.content as string) || matchedStreamEntry.content,
+      );
+      const providerError = normalizeProviderErrorPayload(eventData.provider_error);
+      matchedStreamEntry.phase = 'done';
+      if (normalizedError.content) {
+        matchedStreamEntry.content = normalizedError.content;
+      }
+      matchedStreamEntry.executionSteps = mergeExecutionSteps(
+        matchedStreamEntry.executionSteps,
+        incomingExecutionSteps,
+      );
+      updateMessage(conversationId, matchedStreamEntry.messageId, {
+        content: matchedStreamEntry.content,
+        isStreaming: false,
+        isThinking: false,
+        statusMessage: undefined,
+        executionSteps: matchedStreamEntry.executionSteps,
+        metadata: {
+          ...(currentMessage?.metadata || {}),
+          ...(providerError ? { _provider_error: providerError } : {}),
+          ...(Array.isArray(eventData.memory_sources) && eventData.memory_sources.length > 0
+            ? { _memory_sources: eventData.memory_sources }
+            : {}),
+          ...(eventData.memory_recall && typeof eventData.memory_recall === 'object'
+            ? { _memory_recall: eventData.memory_recall }
+            : {}),
+        },
+        isError: Boolean(providerError) || normalizedError.isProviderError,
+        errorKind: (Boolean(providerError) || normalizedError.isProviderError) ? 'provider' : undefined,
+        retryable: providerError?.retryable ?? normalizedError.isProviderError,
+      });
+      if (agentId || matchedStreamEntry.agentId) {
+        removeTypingAgent(conversationId, agentId || matchedStreamEntry.agentId);
+      }
+      void loadConversationHistory(conversationId);
+      return;
+    }
+
+    if (eventType === 'error' || eventType === 'agent_error') {
+      const normalizedError = normalizeAssistantErrorContent(
+        (eventData.content as string) || (eventData.error as string) || '抱歉，发生了错误。请重试。',
+      );
+      matchedStreamEntry.content = normalizedError.content || '抱歉，发生了错误。请重试。';
+      matchedStreamEntry.phase = 'done';
+      matchedStreamEntry.executionSteps = finalizeRunningExecutionSteps(
+        matchedStreamEntry.executionSteps,
+        'error',
+        { error: matchedStreamEntry.content },
+      );
+      updateMessage(conversationId, matchedStreamEntry.messageId, {
+        content: matchedStreamEntry.content,
+        isStreaming: false,
+        isThinking: false,
+        statusMessage: undefined,
+        executionSteps: matchedStreamEntry.executionSteps,
+        isError: true,
+        errorKind: normalizedError.isProviderError ? 'provider' : 'stream',
+        retryable: normalizedError.isProviderError,
+      });
+      if (agentId || matchedStreamEntry.agentId) {
+        removeTypingAgent(conversationId, agentId || matchedStreamEntry.agentId);
+      }
+      return;
+    }
+
+    if (eventType === 'stopped') {
+      matchedStreamEntry.phase = 'done';
+      matchedStreamEntry.executionSteps = finalizeRunningExecutionSteps(
+        matchedStreamEntry.executionSteps,
+        'stopped',
+        { stopped: true },
+      );
+      updateMessage(conversationId, matchedStreamEntry.messageId, {
+        content: matchedStreamEntry.content || '已停止生成。',
+        isStreaming: false,
+        isThinking: false,
+        statusMessage: undefined,
+        executionSteps: matchedStreamEntry.executionSteps,
+      });
+      if (agentId || matchedStreamEntry.agentId) {
+        removeTypingAgent(conversationId, agentId || matchedStreamEntry.agentId);
+      }
+    }
+  }, [
+    addMessage,
+    addTypingAgent,
+    findPendingStreamEntry,
+    getConversationStreamRegistry,
+    getMessages,
+    loadConversationHistory,
+    openDispatchedWebConversation,
+    removeTypingAgent,
+    updateMessage,
+  ]);
+
+  useEffect(() => {
+    websocketEventHandlerRef.current = (eventData: Record<string, unknown>) => {
+      const sessionKey = typeof eventData.session_key === 'string' ? eventData.session_key : '';
+      const dispatchOrigin = typeof eventData.dispatch_origin === 'string' ? eventData.dispatch_origin : '';
+      const isSummaryMirror = dispatchOrigin === 'message_tool_summary_mirror';
+      if (!sessionKey || (sessionKey === activePrimarySessionKeyRef.current && !isSummaryMirror)) {
+        return;
+      }
+
+      const conversationId = sessionKeyToConversationId(sessionKey);
+      if (!conversationId) {
+        return;
+      }
+
+      applyRealtimeEventToConversation(conversationId, eventData);
+      const sourceSessionKey = typeof eventData.source_session_key === 'string' ? eventData.source_session_key : '';
+      if (
+        isSummaryMirror
+        && sourceSessionKey
+        && sourceSessionKey === activePrimarySessionKeyRef.current
+      ) {
+        const sourceConversationId = sessionKeyToConversationId(sourceSessionKey);
+        const sourceConversationName = conversations.find((conversation) => conversation.id === sourceConversationId)?.name || '团队会话';
+        const destinationConversationName = conversations.find((conversation) => conversation.id === conversationId)?.name || '原单聊';
+        setCurrentConversation(conversationId);
+        showBatonNavigationNotice({
+          tone: 'dm',
+          message: `团队接力已完成，已返回 ${destinationConversationName} 查看最终汇报。`,
+          actionLabel: `回看 ${sourceConversationName}`,
+          actionConversationId: sourceConversationId,
+        });
+      }
+    };
+  }, [applyRealtimeEventToConversation, conversations, setCurrentConversation, showBatonNavigationNotice]);
+
+  useEffect(() => {
+    let disposed = false;
+
+    const connect = () => {
+      if (disposed || chatWebSocketRef.current) {
+        return;
+      }
+
+      const ws = new WebSocket(resolveChatWebSocketUrl());
+      chatWebSocketRef.current = ws;
+
+      ws.onopen = () => {
+        subscribedSessionKeysRef.current.forEach((sessionKey) => {
+          ws.send(JSON.stringify({
+            type: 'subscribe',
+            session_key: sessionKey,
+          }));
+        });
+      };
+
+      ws.onmessage = (messageEvent) => {
+        try {
+          const payload = JSON.parse(messageEvent.data) as Record<string, unknown>;
+          if (payload.type === 'subscribed' || payload.type === 'unsubscribed' || payload.type === 'error') {
+            return;
+          }
+          websocketEventHandlerRef.current?.(payload);
+        } catch (error) {
+          console.error('Failed to parse chat websocket event:', error);
+        }
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+
+      ws.onclose = () => {
+        if (chatWebSocketRef.current === ws) {
+          chatWebSocketRef.current = null;
+        }
+        if (disposed) {
+          return;
+        }
+        chatWebSocketReconnectTimerRef.current = window.setTimeout(() => {
+          chatWebSocketReconnectTimerRef.current = null;
+          connect();
+        }, 1200);
+      };
+    };
+
+    connect();
+
+    return () => {
+      disposed = true;
+      if (chatWebSocketReconnectTimerRef.current) {
+        clearTimeout(chatWebSocketReconnectTimerRef.current);
+        chatWebSocketReconnectTimerRef.current = null;
+      }
+      if (chatWebSocketRef.current) {
+        chatWebSocketRef.current.close();
+        chatWebSocketRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentConversationId) {
+      return;
+    }
+    const sessionKey = conversationIdToSessionKey(currentConversationId);
+    subscribedSessionKeysRef.current.add(sessionKey);
+    if (chatWebSocketRef.current?.readyState === WebSocket.OPEN) {
+      chatWebSocketRef.current.send(JSON.stringify({
+        type: 'subscribe',
+        session_key: sessionKey,
+      }));
+    }
+  }, [currentConversationId]);
   
   useEffect(() => {
     if (currentConversationId) {
@@ -1744,6 +2560,14 @@ const ChatPage: React.FC = () => {
     const streamPromise = (async () => {
       try {
         const sessionKey = `web:${currentConversation.id}`;
+        activePrimarySessionKeyRef.current = sessionKey;
+        subscribedSessionKeysRef.current.add(sessionKey);
+        if (chatWebSocketRef.current?.readyState === WebSocket.OPEN) {
+          chatWebSocketRef.current.send(JSON.stringify({
+            type: 'subscribe',
+            session_key: sessionKey,
+          }));
+        }
         
         await chatService.streamChat({
           message: trimmedContent,
@@ -1916,6 +2740,7 @@ const ChatPage: React.FC = () => {
           else if (eventType === 'progress' || eventType === 'content') {
             const isToolHint = eventData.tool_hint as boolean;
             const content = eventData.content as string;
+            const isSyntheticProgress = Boolean(eventData.synthetic_progress);
             // 如果是 tool_hint，不直接显示在消息内容中
             if (matchedStreamEntry && !isToolHint) {
               const agentMsg = matchedStreamEntry;
@@ -1931,7 +2756,7 @@ const ChatPage: React.FC = () => {
               );
               updateMessage(currentConversation.id, agentMsg.messageId, {
                 content: agentMsg.content,
-                isThinking: false,
+                isThinking: isSyntheticProgress,
                 executionSteps: agentMsg.executionSteps,
               });
             }
@@ -1940,6 +2765,16 @@ const ChatPage: React.FC = () => {
           else if (eventType === 'tool_start') {
             const toolName = eventData.tool_name as string | undefined;
             const argumentsPayload = eventData.arguments as Record<string, unknown> | undefined;
+            if (toolName === 'message' && argumentsPayload) {
+              const targetChatId = typeof argumentsPayload.chat_id === 'string' ? argumentsPayload.chat_id.trim() : '';
+              const shouldActivateRelayConversation = (
+                currentConversation.type === ConversationType.DM
+                && targetChatId.startsWith('team_')
+              );
+              openDispatchedWebConversation(argumentsPayload, {
+                activate: shouldActivateRelayConversation,
+              });
+            }
             if (agentId && matchedStreamEntry) {
               const agentMsg = matchedStreamEntry;
               agentMsg.executionSteps = updateLatestRunningExecutionStep(
@@ -2314,6 +3149,9 @@ const ChatPage: React.FC = () => {
         if (!requestRef.id || currentRequestIdRef.current === requestRef.id) {
           currentRequestIdRef.current = null;
         }
+        if (activePrimarySessionKeyRef.current === `web:${currentConversation.id}`) {
+          activePrimarySessionKeyRef.current = null;
+        }
       }
     })();
 
@@ -2331,7 +3169,7 @@ const ChatPage: React.FC = () => {
         void refreshAgents();
       }
     }
-  }, [currentConversation, agents, addMessage, updateMessage, addTypingAgent, removeTypingAgent, isOnline, requestStopGeneration, waitForActiveStreamToSettle, toast, showInterruptNotice, refreshAgents]);
+  }, [currentConversation, agents, addMessage, updateMessage, addTypingAgent, removeTypingAgent, isOnline, requestStopGeneration, waitForActiveStreamToSettle, toast, showInterruptNotice, refreshAgents, openDispatchedWebConversation]);
 
   const handleRetryLastRequest = useCallback(async () => {
     if (!currentConversation || !lastFailedRequest || isLoading) return;
@@ -3123,6 +3961,48 @@ const ChatPage: React.FC = () => {
                 )}
               </div>
             </div>
+            {batonNavigationNotice && (
+              <div className={`shrink-0 border-b px-4 py-2.5 ${
+                batonNavigationNotice.tone === 'team'
+                  ? 'border-violet-200 bg-violet-50/80'
+                  : 'border-sky-200 bg-sky-50/80'
+              }`}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                      batonNavigationNotice.tone === 'team'
+                        ? 'bg-violet-100 text-violet-700'
+                        : 'bg-sky-100 text-sky-700'
+                    }`}>
+                      {batonNavigationNotice.tone === 'team' ? '已切到团队接力' : '已回到单聊'}
+                    </span>
+                    <p className="min-w-0 text-sm text-slate-700">{batonNavigationNotice.message}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {batonNavigationNotice.actionLabel && batonNavigationNotice.actionConversationId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCurrentConversation(batonNavigationNotice.actionConversationId as string);
+                          dismissBatonNavigationNotice();
+                        }}
+                        className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
+                      >
+                        {batonNavigationNotice.actionLabel}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={dismissBatonNavigationNotice}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-white hover:text-slate-600"
+                      aria-label="关闭接力导航提示"
+                    >
+                      <X className="h-3.5 w-3.5" strokeWidth={2} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             
             <div className="relative min-h-0 flex-1">
               <div
@@ -3307,6 +4187,26 @@ const ChatPage: React.FC = () => {
                     const relayTimelineActiveCount = relayTimelineSteps.filter((step) => step.state === 'active').length;
                     const relayTimelineWaitingCount = relayTimelineSteps.filter((step) => step.state === 'waiting').length;
                     const relayTimelineFailedCount = relayTimelineSteps.filter((step) => step.state === 'error').length;
+                    const finalResponseGroup = turn.responseGroups.at(-1);
+                    const finalResponderName = finalResponseGroup?.[0]
+                      ? (finalResponseGroup[0].agentName || getAgentName(finalResponseGroup[0].agentId) || '助手')
+                      : undefined;
+                    const activeRelayStep = relayTimelineSteps.find((step) => step.state === 'active');
+                    const waitingRelayStep = relayTimelineSteps.find((step) => step.state === 'waiting');
+                    const batonHeadline = activeRelayStep
+                      ? `当前接棒: ${activeRelayStep.label}`
+                      : waitingRelayStep
+                        ? `等待下一棒: ${waitingRelayStep.label}`
+                        : finalResponderName
+                          ? `最终输出: ${finalResponderName}`
+                          : '本轮接力已完成';
+                    const batonDetail = activeRelayStep
+                      ? activeRelayStep.detail
+                      : waitingRelayStep
+                        ? waitingRelayStep.detail
+                        : relayTimelineFailedCount > 0
+                          ? '本轮存在失败棒次，建议展开时间线查看详情。'
+                          : '当前没有正在处理的棒次。';
                     const isCollapsibleRelay = isTeamTurn && turn.relayCount > 1;
                     const allowRelayCollapse = turn.relayCount > MAX_VISIBLE_RELAY_GROUPS_WITHOUT_COLLAPSE;
                     const isExpanded = isCollapsibleRelay
@@ -3349,10 +4249,6 @@ const ChatPage: React.FC = () => {
                       (total, item) => total + (item.type === 'summary' ? item.hiddenCount : 0),
                       0,
                     );
-                    const finalResponseGroup = turn.responseGroups.at(-1);
-                    const finalResponderName = finalResponseGroup?.[0]
-                      ? (finalResponseGroup[0].agentName || getAgentName(finalResponseGroup[0].agentId) || '助手')
-                      : undefined;
                     const inspectedStep = highlightedGroupIndex !== null && highlightedGroupIndex >= 0
                       ? relayTimelineSteps.find((step) => step.groupIndex === highlightedGroupIndex)
                       : null;
@@ -3450,38 +4346,115 @@ const ChatPage: React.FC = () => {
                             </div>
                             {!isTimelineExpanded ? (
                               <div
-                                className="mt-3 flex flex-wrap items-center gap-2"
+                                className="mt-3 space-y-3"
                                 data-testid="chat-turn-timeline"
                                 data-collapsed="true"
                               >
-                                <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm">
-                                  共 {relayTimelineSteps.length} 棒
-                                </span>
-                                {relayTimelineCompletedCount > 0 && (
-                                  <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                                    已完成 {relayTimelineCompletedCount}
-                                  </span>
-                                )}
-                                {relayTimelineActiveCount > 0 && (
-                                  <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">
-                                    处理中 {relayTimelineActiveCount}
-                                  </span>
-                                )}
-                                {relayTimelineWaitingCount > 0 && (
-                                  <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
-                                    等待中 {relayTimelineWaitingCount}
-                                  </span>
-                                )}
-                                {relayTimelineFailedCount > 0 && (
-                                  <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">
-                                    失败 {relayTimelineFailedCount}
-                                  </span>
-                                )}
-                                {finalResponderName && (
-                                  <span className="text-xs text-slate-500">
-                                    最终输出: {finalResponderName}
-                                  </span>
-                                )}
+                                <div className={`rounded-2xl border px-3 py-3 shadow-sm ${
+                                  activeRelayStep
+                                    ? 'border-sky-200 bg-sky-50/90'
+                                    : waitingRelayStep
+                                      ? 'border-amber-200 bg-amber-50/90'
+                                      : relayTimelineFailedCount > 0
+                                        ? 'border-red-200 bg-red-50/90'
+                                        : 'border-emerald-200 bg-emerald-50/90'
+                                }`}>
+                                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                                    <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-slate-700 shadow-sm">
+                                      Live Baton
+                                    </span>
+                                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 font-medium ${
+                                      activeRelayStep
+                                        ? 'bg-sky-100 text-sky-700'
+                                        : waitingRelayStep
+                                          ? 'bg-amber-100 text-amber-700'
+                                          : relayTimelineFailedCount > 0
+                                            ? 'bg-red-100 text-red-700'
+                                            : 'bg-emerald-100 text-emerald-700'
+                                    }`}>
+                                      {activeRelayStep
+                                        ? '处理中'
+                                        : waitingRelayStep
+                                          ? '等待中'
+                                          : relayTimelineFailedCount > 0
+                                            ? '有失败'
+                                            : '已完成'}
+                                    </span>
+                                    <span className="inline-flex items-center rounded-full bg-white/80 px-2.5 py-1 font-medium text-slate-600">
+                                      共 {relayTimelineSteps.length} 棒
+                                    </span>
+                                    {activeRelayStep && waitingRelayStep && (
+                                      <span className="inline-flex items-center rounded-full bg-white/80 px-2.5 py-1 font-medium text-slate-600">
+                                        下一棒: {waitingRelayStep.label}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="mt-2 text-sm font-semibold text-slate-800">
+                                    {batonHeadline}
+                                  </p>
+                                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                                    {batonDetail}
+                                  </p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {relayTimelineSteps.map((step, timelineIdx) => (
+                                    <button
+                                      key={`${step.key}:collapsed`}
+                                      type="button"
+                                      title={`定位到第 ${timelineIdx + 1} 棒：${step.label}`}
+                                      aria-label={`定位到第 ${timelineIdx + 1} 棒：${step.label}`}
+                                      onClick={() => jumpToRelayStep(turn.id, step.groupIndex)}
+                                      className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${
+                                        step.state === 'error'
+                                          ? 'border-red-200 bg-red-50 text-red-700'
+                                          : step.state === 'active'
+                                            ? 'border-sky-200 bg-sky-50 text-sky-700'
+                                            : step.state === 'waiting'
+                                              ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                      }`}
+                                    >
+                                      <span className={`inline-block h-2 w-2 rounded-full ${
+                                        step.state === 'error'
+                                          ? 'bg-red-500'
+                                          : step.state === 'active'
+                                            ? 'animate-pulse bg-sky-500'
+                                            : step.state === 'waiting'
+                                              ? 'bg-amber-500'
+                                              : 'bg-emerald-500'
+                                      }`} />
+                                      <span>第 {timelineIdx + 1} 棒</span>
+                                      <span className="max-w-[14rem] truncate">{step.label}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {relayTimelineCompletedCount > 0 && (
+                                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                                      已完成 {relayTimelineCompletedCount}
+                                    </span>
+                                  )}
+                                  {relayTimelineActiveCount > 0 && (
+                                    <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">
+                                      处理中 {relayTimelineActiveCount}
+                                    </span>
+                                  )}
+                                  {relayTimelineWaitingCount > 0 && (
+                                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
+                                      等待中 {relayTimelineWaitingCount}
+                                    </span>
+                                  )}
+                                  {relayTimelineFailedCount > 0 && (
+                                    <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">
+                                      失败 {relayTimelineFailedCount}
+                                    </span>
+                                  )}
+                                  {finalResponderName && (
+                                    <span className="text-xs text-slate-500">
+                                      最终输出: {finalResponderName}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             ) : (
                               <div
@@ -3769,7 +4742,7 @@ const ChatPage: React.FC = () => {
               {!isNearBottom && (
                 <button
                   type="button"
-                  onClick={scrollToBottom}
+                  onClick={() => scrollToBottom()}
                   className="absolute bottom-4 right-4 inline-flex items-center gap-1 rounded-full border border-sky-200 bg-white/95 px-3 py-2 text-xs font-medium text-sky-700 shadow-lg backdrop-blur transition hover:-translate-y-0.5 hover:bg-sky-50"
                 >
                   <ArrowDown className="h-3.5 w-3.5" strokeWidth={2} />

@@ -379,23 +379,16 @@ class GroupChatStreamTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(done_event["event"], "done")
             self.assertEqual(done_event["total_agents"], 2)
 
-            self.assertEqual(
-                loop_calls,
-                [
-                    {
-                        "agent_id": "alpha",
-                        "content": "@Alpha 请开始讨论",
-                        "speaking_to": "用户",
-                        "conversation_type": "user_to_agent",
-                    },
-                    {
-                        "agent_id": "beta",
-                        "content": "Alpha 响应并提到 @Beta",
-                        "speaking_to": "Alpha",
-                        "conversation_type": "agent_to_agent",
-                    },
-                ],
-            )
+            self.assertEqual([call["agent_id"] for call in loop_calls], ["alpha", "beta"])
+            self.assertEqual(loop_calls[0]["speaking_to"], "用户")
+            self.assertEqual(loop_calls[0]["conversation_type"], "user_to_agent")
+            self.assertIn("你正在团队接力模式中，当前是首棒/当前主棒", loop_calls[0]["content"])
+            self.assertIn("原始用户问题：@Alpha 请开始讨论", loop_calls[0]["content"])
+            self.assertEqual(loop_calls[1]["speaking_to"], "Alpha")
+            self.assertEqual(loop_calls[1]["conversation_type"], "agent_to_agent")
+            self.assertIn("你正在团队接力中，请保持短回合 baton", loop_calls[1]["content"])
+            self.assertIn("当前接力关系：Alpha -> Beta。", loop_calls[1]["content"])
+            self.assertIn("当前交接任务：Alpha 响应并提到 @Beta", loop_calls[1]["content"])
 
             session = session_manager.get_or_create("web:test_group_chat_once")
             assistant_messages = [msg for msg in session.messages if msg.get("role") == "assistant"]
@@ -451,7 +444,8 @@ class GroupChatStreamTests(unittest.IsolatedAsyncioTestCase):
             agent_done_events = [e for e in events if e["event"] == "agent_done"]
             self.assertEqual([e["content"] for e in agent_done_events], [outputs["alpha"], outputs["beta"]])
             self.assertEqual(loop_calls[1]["agent_id"], "beta")
-            self.assertEqual(loop_calls[1]["content"], "请只回复自己的名字，不要添加任何其他内容")
+            self.assertIn("当前接力关系：Alpha -> Beta。", loop_calls[1]["content"])
+            self.assertIn("当前交接任务：请只回复自己的名字，不要添加任何其他内容", loop_calls[1]["content"])
 
     async def test_group_chat_requeues_previously_processed_agent(self):
         fake_agent_manager = FakeAgentManager()
@@ -572,6 +566,10 @@ class GroupChatStreamTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertEqual([call["agent_id"] for call in loop_calls], ["alpha", "beta"])
+        self.assertIn("你正在团队接力模式中，当前是首棒/当前主棒", loop_calls[0]["content"])
+        self.assertIn("原始用户问题：请开始接力", loop_calls[0]["content"])
+        self.assertIn("你正在团队接力中，请保持短回合 baton", loop_calls[1]["content"])
+        self.assertIn("当前交接任务：我先把这个问题交给下一位继续拆解。", loop_calls[1]["content"])
 
     async def test_group_chat_auto_returns_to_originator_after_agent_reply(self):
         fake_agent_manager = FakeAgentManager()
@@ -632,6 +630,9 @@ class GroupChatStreamTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertEqual([call["agent_id"] for call in loop_calls], ["alpha", "beta", "alpha"])
+        self.assertIn("你正在团队接力模式中，当前是首棒/当前主棒", loop_calls[0]["content"])
+        self.assertIn("当前接力关系：Alpha -> Beta。", loop_calls[1]["content"])
+        self.assertIn("当前交接任务：请你先从风险角度拆一下，等你拆完我来总结。", loop_calls[1]["content"])
         self.assertIn("请基于当前团队对话历史", loop_calls[2]["content"])
         self.assertIn("原始用户问题：请开始讨论并最后总结", loop_calls[2]["content"])
         self.assertEqual(loop_calls[2]["speaking_to"], "用户")

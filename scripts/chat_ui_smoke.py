@@ -16,7 +16,7 @@ import sys
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, Callable
 from zipfile import ZIP_DEFLATED, ZipFile
 import zlib
 
@@ -246,11 +246,14 @@ def find_last_group(
     *,
     text_includes: str | None = None,
     is_user: bool | None = None,
+    predicate: Callable[[dict[str, Any]], bool] | None = None,
 ) -> dict[str, Any] | None:
     for group in reversed(groups):
         if is_user is not None and bool(group.get("isUser")) != is_user:
             continue
         if text_includes and text_includes not in str(group.get("text", "")):
+            continue
+        if predicate and not predicate(group):
             continue
         return group
     return None
@@ -1150,12 +1153,18 @@ async def run_dm_team_dispatch_smoke(
         "expected_final": expected_final,
         "team_selected": False,
         "dm_selected": False,
+        "auto_switched_to_team": False,
+        "auto_switched_back_to_dm": False,
         "dm_confirmation_visible": False,
         "team_dispatch_visible": False,
         "team_final_visible": False,
         "tail_groups_dm": [],
+        "tail_groups_dm_after_team": [],
         "tail_groups_team": [],
         "dm_group": None,
+        "dm_group_after_team": None,
+        "dm_summary_group": None,
+        "dm_summary_visible": False,
         "team_dispatch_group": None,
         "team_final_group": None,
         "team_relay_summary_visible": False,
@@ -1185,6 +1194,13 @@ async def run_dm_team_dispatch_smoke(
     )
     await wait_for_generation_idle(page)
     await page.wait_for_timeout(1500)
+    auto_switched_to_team = False
+    try:
+        await page.locator("h2").filter(has_text=resolved_team_name).first.wait_for(timeout=10000)
+        auto_switched_to_team = True
+    except PlaywrightTimeoutError:
+        auto_switched_to_team = False
+    result["auto_switched_to_team"] = auto_switched_to_team
 
     tail_groups_dm = await collect_tail_groups(page)
     result["tail_groups_dm"] = tail_groups_dm
@@ -1192,6 +1208,11 @@ async def run_dm_team_dispatch_smoke(
     dm_group = find_last_group(
         tail_groups_dm,
         is_user=False,
+        predicate=lambda group: (
+            str(group.get("agentName", "") or "") == resolved_dm_agent_name
+            and "执行过程" in str(group.get("text", ""))
+            and "message" in str(group.get("text", ""))
+        ),
     )
     result["dm_group"] = dm_group
     result["dm_confirmation_visible"] = bool(
@@ -1219,6 +1240,28 @@ async def run_dm_team_dispatch_smoke(
         timeout=120000,
     )
     result["team_api_messages"] = team_messages[-8:]
+
+    auto_switched_back_to_dm = False
+    try:
+        await page.locator("h2").filter(has_text=resolved_dm_agent_name).first.wait_for(timeout=30000)
+        auto_switched_back_to_dm = True
+    except PlaywrightTimeoutError:
+        auto_switched_back_to_dm = False
+    result["auto_switched_back_to_dm"] = auto_switched_back_to_dm
+
+    if not auto_switched_back_to_dm:
+        await select_conversation(page, resolved_dm_agent_name)
+    await wait_for_assistant_group_text_exact_agent(
+        page,
+        expected_final,
+        agent_name=resolved_dm_agent_name,
+        timeout=30000,
+    )
+    await wait_for_generation_idle(page)
+    await page.wait_for_timeout(1500)
+    tail_groups_dm_after_team = await collect_tail_groups(page)
+    result["tail_groups_dm_after_team"] = tail_groups_dm_after_team
+
     await reload_chat(page)
     await select_conversation(page, resolved_team_name)
     await wait_for_relay_summary_or_agent(page, agent_name=resolved_dm_agent_name, timeout=30000)
@@ -1265,11 +1308,50 @@ async def run_dm_team_dispatch_smoke(
     )
     result["team_dispatch_visible"] = dispatch_group is not None
     result["team_final_visible"] = final_group is not None
+    dm_group_after_team = find_last_group(
+        tail_groups_dm_after_team,
+        is_user=False,
+        predicate=lambda group: (
+            str(group.get("agentName", "") or "") == resolved_dm_agent_name
+            and "执行过程" in str(group.get("text", ""))
+            and "message" in str(group.get("text", ""))
+        ),
+    )
+    result["dm_group_after_team"] = dm_group_after_team
+    if dm_group_after_team and not result["dm_confirmation_visible"]:
+        result["dm_confirmation_visible"] = True
+    dm_summary_group = next(
+        (
+            group
+            for group in reversed(tail_groups_dm_after_team)
+            if not group.get("isUser")
+            and str(group.get("agentName", "") or "") == resolved_dm_agent_name
+            and expected_final in str(group.get("text", ""))
+            and "@小项" not in str(group.get("text", ""))
+            and "工具 1" not in str(group.get("text", ""))
+            and "message" not in str(group.get("text", ""))
+        ),
+        None,
+    )
+    result["dm_summary_group"] = dm_summary_group
+    result["dm_summary_visible"] = dm_summary_group is not None
 
-    if not dm_group:
+    if not dm_group and not result["auto_switched_to_team"] and not dm_group_after_team:
         result["errors"].append("dm_confirmation_missing")
     elif not result["dm_confirmation_visible"]:
         result["errors"].append("dm_confirmation_unexpected_content")
+    if not result["auto_switched_to_team"]:
+        result["errors"].append("team_auto_switch_missing")
+    if not result["auto_switched_back_to_dm"]:
+        result["errors"].append("dm_auto_return_missing")
+    if not dm_summary_group:
+        result["errors"].append("dm_summary_group_missing")
+    else:
+        dm_summary_agent_name = str(dm_summary_group.get("agentName", "") or "")
+        if dm_summary_agent_name and dm_summary_agent_name != resolved_dm_agent_name:
+            result["errors"].append(f"dm_summary_agent_mismatch={dm_summary_agent_name}")
+        if expected_final not in str(dm_summary_group.get("text", "")):
+            result["errors"].append("dm_summary_expected_content_missing")
     if result["reasoning_leak_marker_dm"]:
         result["errors"].append(f"reasoning_leak_detected_dm={result['reasoning_leak_marker_dm']}")
     dispatch_found_in_api = any(

@@ -13,6 +13,7 @@ Horbot is a lightweight multi-agent assistant stack with:
 - Web UI for operations and configuration
 - chat, attachments, and relay-style team conversations
 - compact chat layout plus baton-aware relay status in team conversations
+- automatic DM -> team -> DM baton navigation in Web Chat, with a temporary top banner so relay-driven view changes are explicit
 - MCP and external channel integration
 - background skill distillation from reusable work
 - validated `.skill` / `.zip` imports with compatibility checks

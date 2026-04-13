@@ -268,6 +268,273 @@ async def _dispatch_team_group_followups(
     from horbot.agent.manager import get_agent_manager
     from horbot.web.websocket import broadcast_to_session
 
+    async def mirror_summary_to_source_chat(
+        content: str,
+        *,
+        agent_id: str,
+        agent_name: str,
+    ) -> None:
+        source_chat_id = str((msg.metadata or {}).get("_source_chat_id") or "").strip()
+        source_channel = str((msg.metadata or {}).get("_source_channel") or "").strip()
+        if source_channel != "web" or not source_chat_id:
+            return
+
+        source_session_key = _normalize_web_session_key(source_chat_id)
+        if source_session_key == session_key:
+            return
+
+        source_session_manager, normalized_source_session_key = await _resolve_chat_session_manager(source_session_key)
+        source_session = source_session_manager.get_or_create(normalized_source_session_key)
+        assistant_message_id = str(uuid.uuid4())[:8]
+        request_id = str(uuid.uuid4())
+        source_session.add_message(
+            "assistant",
+            content,
+            dedup=True,
+            message_id=assistant_message_id,
+            metadata={
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "conversation_type": "user_to_agent",
+                "dispatch_origin": "message_tool_summary_mirror",
+                "source_team_id": team_id,
+                "source_session_key": session_key,
+                "request_id": request_id,
+            },
+        )
+        await source_session_manager.async_save(source_session)
+        await broadcast_to_session(
+            normalized_source_session_key,
+            _build_chat_stream_event(
+                "agent_done",
+                agent_id=agent_id,
+                agent_name=agent_name,
+                content=content,
+                message_id=assistant_message_id,
+                request_id=request_id,
+                dispatch_origin="message_tool_summary_mirror",
+                source_team_id=team_id,
+                source_session_key=session_key,
+            ),
+        )
+
+    async def run_followup_turn(
+        *,
+        loop: AgentLoop,
+        agent_id: str,
+        agent_name: str,
+        inbound_content: str,
+        conversation_ctx,
+        source_id: str,
+        source_name_value: str,
+    ) -> str:
+        request_id = str(uuid.uuid4())
+        turn_id = str(uuid.uuid4())[:8]
+        assistant_message_id = str(uuid.uuid4())[:8]
+        content_state = {"content": ""}
+        last_persist_at = 0.0
+        has_real_progress = False
+        last_synthetic_progress = ""
+        execution_steps: list[dict[str, Any]] = []
+        session = session_manager.get_or_create(session_key)
+
+        async def emit(event: str, **payload: Any) -> None:
+            await broadcast_to_session(
+                session_key,
+                _build_chat_stream_event(
+                    event,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    turn_id=turn_id,
+                    message_id=assistant_message_id,
+                    request_id=request_id,
+                    **payload,
+                ),
+            )
+
+        async def persist_content(
+            content: str | None,
+            *,
+            memory_sources: list[dict[str, Any]] | None = None,
+            memory_recall: dict[str, Any] | None = None,
+            execution_steps_to_save: list[dict[str, Any]] | None = None,
+        ) -> None:
+            cleaned = clean_message_content(content or "")
+            if not cleaned:
+                return
+
+            message_metadata = {
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "team_id": team_id,
+                "source": source_id,
+                "source_name": source_name_value,
+                "target": agent_id,
+                "target_name": agent_name,
+                "conversation_type": conversation_ctx.conversation_type.value,
+                "dispatch_origin": "message_tool_followup",
+                "turn_id": turn_id,
+                "request_id": request_id,
+                **({"_memory_sources": memory_sources} if memory_sources else {}),
+                **({"_memory_recall": memory_recall} if memory_recall else {}),
+            }
+
+            existing_idx = _find_session_message_index(
+                session,
+                message_id=assistant_message_id,
+                turn_id=turn_id,
+                role="assistant",
+            )
+            if existing_idx >= 0:
+                session.messages[existing_idx]["content"] = cleaned
+                if execution_steps_to_save:
+                    session.messages[existing_idx]["execution_steps"] = execution_steps_to_save
+                session.messages[existing_idx].setdefault("metadata", {}).update(message_metadata)
+            else:
+                session.add_message(
+                    "assistant",
+                    cleaned,
+                    dedup=True,
+                    message_id=assistant_message_id,
+                    execution_steps=execution_steps_to_save,
+                    metadata=message_metadata,
+                )
+            session.updated_at = datetime.now()
+            await session_manager.async_save(session)
+
+        async def on_progress(content: str, **kwargs: Any) -> None:
+            nonlocal last_persist_at, has_real_progress, last_synthetic_progress
+            tool_hint = bool(kwargs.get("tool_hint"))
+            synthetic_progress = bool(kwargs.get("synthetic_progress"))
+            if not tool_hint:
+                if synthetic_progress:
+                    if has_real_progress:
+                        return
+                    cleaned_synthetic = clean_message_content(content or "").strip()
+                    if not cleaned_synthetic or cleaned_synthetic == last_synthetic_progress:
+                        return
+                    last_synthetic_progress = cleaned_synthetic
+                else:
+                    has_real_progress = True
+                content_state["content"] = content
+                now = time.monotonic()
+                if now - last_persist_at >= 0.35:
+                    last_persist_at = now
+                    await persist_content(content)
+            await emit(
+                "progress",
+                content=content,
+                tool_hint=tool_hint,
+                synthetic_progress=synthetic_progress,
+            )
+
+        async def emit_synthetic_progress(message: str) -> None:
+            await on_progress(message, synthetic_progress=True)
+
+        async def on_status(message: str) -> None:
+            await emit("status", message=message)
+
+        async def on_thinking(content: str) -> None:
+            await emit("thinking")
+
+        async def on_step_start(step_id: str, step_type: str, title: str) -> None:
+            execution_steps.append({
+                "id": step_id,
+                "type": step_type,
+                "title": title,
+                "status": "running",
+                "timestamp": datetime.now().isoformat(),
+            })
+            if step_type == "thinking":
+                await emit_synthetic_progress(f"{agent_name} 正在分析任务与约束...")
+            elif step_type == "response":
+                await emit_synthetic_progress(f"{agent_name} 正在整理回复...")
+            await emit("step_start", step_id=step_id, step_type=step_type, title=title)
+
+        async def on_step_complete(step_id: str, status: str, details: dict) -> None:
+            safe_details = sanitize_execution_step_details(
+                next((step.get("type") for step in execution_steps if step.get("id") == step_id), ""),
+                details,
+            )
+            step_type = next((step.get("type") for step in execution_steps if step.get("id") == step_id), "")
+            for step in execution_steps:
+                if step.get("id") == step_id:
+                    step["status"] = status
+                    step["details"] = safe_details
+                    break
+            if step_type == "thinking" and status not in {"error", "failed"}:
+                await emit_synthetic_progress(f"{agent_name} 正在收束思路，准备给出结论...")
+            await emit("step_complete", step_id=step_id, status=status, details=safe_details)
+
+        async def on_tool_start(tool_name: str, arguments: dict) -> None:
+            label = str(tool_name or "").strip()
+            if label:
+                await emit_synthetic_progress(f"{agent_name} 正在调用 {label}...")
+            await emit("tool_start", tool_name=tool_name, arguments=arguments)
+
+        async def on_tool_result(tool_name: str, result: str, execution_time: float) -> None:
+            label = str(tool_name or "").strip()
+            if label:
+                await emit_synthetic_progress(f"{agent_name} 已拿到 {label} 结果，继续整理中...")
+            await emit("tool_result", tool_name=tool_name, result=result, execution_time=execution_time)
+
+        await emit("agent_start")
+        response = await loop.process_message(
+            InboundMessage(
+                channel="web",
+                sender_id="web_user",
+                chat_id=session_key[4:] if session_key.startswith("web:") else session_key,
+                content=inbound_content,
+                metadata={
+                    "group_chat": True,
+                    "team_id": team_id,
+                    "conversation_context": conversation_ctx.to_dict(),
+                    "mentioned_agents": target_agent_ids,
+                    "request_id": request_id,
+                    "triggered_via": "message_tool_dispatch",
+                },
+            ),
+            session_key=session_key,
+            on_progress=on_progress,
+            on_status=on_status,
+            on_thinking=on_thinking,
+            on_step_start=on_step_start,
+            on_step_complete=on_step_complete,
+            on_tool_start=on_tool_start,
+            on_tool_result=on_tool_result,
+            speaking_to=conversation_ctx.get_speaking_to(),
+            conversation_type=conversation_ctx.conversation_type.value,
+        )
+        final_content = _resolve_final_agent_display_content(
+            response.content if response else "",
+            content_state["content"],
+        )
+        if not final_content:
+            logger.info(
+                "[TeamDispatch] followup produced no direct assistant content: team={}, source={}, target={}",
+                team_id,
+                source_agent_id,
+                agent_id,
+            )
+            return ""
+
+        memory_sources = list((response.metadata or {}).get("_memory_sources") or []) if response else []
+        memory_recall = dict((response.metadata or {}).get("_memory_recall") or {}) if response else {}
+        await persist_content(
+            final_content,
+            memory_sources=memory_sources,
+            memory_recall=memory_recall,
+            execution_steps_to_save=sanitize_execution_steps(execution_steps),
+        )
+        await emit(
+            "agent_done",
+            content=final_content,
+            execution_steps=sanitize_execution_steps(execution_steps),
+            memory_sources=memory_sources,
+            memory_recall=memory_recall,
+        )
+        return final_content
+
     explicit_mentions = list((msg.metadata or {}).get("mentioned_agents") or [])
     trigger_group_chat = bool((msg.metadata or {}).get("trigger_group_chat"))
     target_agent_ids = _resolve_team_dispatch_targets(
@@ -290,8 +557,8 @@ async def _dispatch_team_group_followups(
         return
 
     agent_manager = get_agent_manager()
-    session = session_manager.get_or_create(session_key)
     source_name = source_agent_name or source_agent_id or "Agent"
+    produced_followup_content = False
 
     for target_agent_id in target_agent_ids:
         target_agent = agent_manager.get_agent(target_agent_id)
@@ -306,79 +573,60 @@ async def _dispatch_team_group_followups(
             )
             or clean_message_content(msg.content)
         )
+        relay_trigger_message = _build_team_baton_trigger_message(
+            trigger_message,
+            mode="relay",
+            source_name=source_name,
+            target_name=target_agent.name,
+        )
         conversation_ctx = build_conversation_context(
             conversation_type=ConversationType.AGENT_TO_AGENT,
             source_id=source_agent_id or "agent_dispatch",
             source_name=source_name,
             target_id=target_agent_id,
             target_name=target_agent.name,
-            trigger_message=trigger_message,
+            trigger_message=relay_trigger_message,
         )
         target_loop = await get_agent_loop_with_session_manager(target_agent_id, session_manager)
-        response = await target_loop.process_message(
-            InboundMessage(
-                channel="web",
-                sender_id="web_user",
-                chat_id=session_key[4:] if session_key.startswith("web:") else session_key,
-                content=trigger_message,
-                metadata={
-                    "group_chat": True,
-                    "team_id": team_id,
-                    "conversation_context": conversation_ctx.to_dict(),
-                    "mentioned_agents": target_agent_ids,
-                    "request_id": str(uuid.uuid4()),
-                    "triggered_via": "message_tool_dispatch",
-                },
-            ),
-            session_key=session_key,
-            speaking_to=source_name,
-            conversation_type=conversation_ctx.conversation_type.value,
+        final_content = await run_followup_turn(
+            loop=target_loop,
+            agent_id=target_agent_id,
+            agent_name=target_agent.name,
+            inbound_content=relay_trigger_message,
+            conversation_ctx=conversation_ctx,
+            source_id=source_agent_id or "agent_dispatch",
+            source_name_value=source_name,
         )
-        final_content = clean_message_content(response.content if response else "")
-        if not final_content:
-            logger.info(
-                "[TeamDispatch] followup produced no direct assistant content: team={}, source={}, target={}",
-                team_id,
-                source_agent_id,
-                target_agent_id,
-            )
-            continue
+        if final_content:
+            produced_followup_content = True
 
-        assistant_message_id = str(uuid.uuid4())[:8]
-        memory_sources = list((response.metadata or {}).get("_memory_sources") or []) if response else []
-        memory_recall = dict((response.metadata or {}).get("_memory_recall") or {}) if response else {}
-        session.add_message(
-            "assistant",
-            final_content,
-            dedup=True,
-            message_id=assistant_message_id,
-            metadata={
-                "agent_id": target_agent_id,
-                "agent_name": target_agent.name,
-                "team_id": team_id,
-                "source": source_agent_id or "agent_dispatch",
-                "source_name": source_name,
-                "target": target_agent_id,
-                "target_name": target_agent.name,
-                "conversation_type": conversation_ctx.conversation_type.value,
-                "dispatch_origin": "message_tool_followup",
-                **({"_memory_sources": memory_sources} if memory_sources else {}),
-                **({"_memory_recall": memory_recall} if memory_recall else {}),
-            },
-        )
-        await session_manager.async_save(session)
-        await broadcast_to_session(
-            session_key,
-            _build_chat_stream_event(
-                "agent_done",
-                agent_id=target_agent_id,
-                agent_name=target_agent.name,
-                content=final_content,
-                message_id=assistant_message_id,
-                memory_sources=memory_sources,
-                memory_recall=memory_recall,
-            ),
-        )
+    if source_agent_id and produced_followup_content:
+        source_agent = agent_manager.get_agent(source_agent_id)
+        if source_agent:
+            source_summary_ctx = build_conversation_context(
+                conversation_type=ConversationType.USER_TO_AGENT,
+                source_id="user",
+                source_name="用户",
+                target_id=source_agent_id,
+                target_name=source_agent.name,
+                trigger_message=_build_user_summary_trigger_message(msg.content),
+            )
+            source_summary_loop = await get_agent_loop_with_session_manager(source_agent_id, session_manager)
+            source_summary_content = await run_followup_turn(
+                loop=source_summary_loop,
+                agent_id=source_agent_id,
+                agent_name=source_agent.name,
+                inbound_content=source_summary_ctx.trigger_message or _build_user_summary_trigger_message(msg.content),
+                conversation_ctx=source_summary_ctx,
+                source_id="user",
+                source_name_value="用户",
+            )
+            if source_summary_content:
+                await mirror_summary_to_source_chat(
+                    source_summary_content,
+                    agent_id=source_agent_id,
+                    agent_name=source_agent.name,
+                )
 
 
 async def _dispatch_internal_web_outbound(source_loop: AgentLoop, msg: OutboundMessage) -> None:
@@ -476,7 +724,9 @@ def _configure_web_agent_loop_message_routing(agent_loop: AgentLoop, bus: Messag
                 return
             if target_team_id or target_session_key != current_session_key:
                 msg.metadata.setdefault("outbound_via", "internal_web_dispatch")
-                await _dispatch_internal_web_outbound(agent_loop, msg)
+                # Keep cross-session web dispatch alive even if the originating
+                # SSE request is cancelled by a page refresh or conversation switch.
+                await asyncio.shield(_dispatch_internal_web_outbound(agent_loop, msg))
                 return
         route_externally = bool(msg.channel_instance_id) or msg.channel not in {"web", "cli", "system"}
         if route_externally:
@@ -1226,6 +1476,43 @@ def _build_user_summary_trigger_message(original_request: str) -> str:
         "现在直接面向用户输出最终总结。不要再次点名或 @ 其他 agent，"
         "也不要把任务再分派出去。\n\n"
         f"原始用户问题：{cleaned_request}"
+    )
+
+
+def _build_team_baton_trigger_message(
+    original_request: str,
+    *,
+    mode: str,
+    source_name: str | None = None,
+    target_name: str | None = None,
+) -> str:
+    cleaned_request = clean_message_content(original_request or "").strip()
+    if not cleaned_request:
+        cleaned_request = "请基于当前上下文继续推进团队接力。"
+
+    if mode == "kickoff":
+        return (
+            "你正在团队接力模式中，当前是首棒/当前主棒。请用更短回合推进：\n"
+            "1. 先用 2-4 句快速锁定任务、目标和拆分思路；\n"
+            "2. 如果需要其他 agent 参与，尽快把任务拆成一个明确子问题并交给下一棒；\n"
+            "3. 每一棒优先只解决一个核心问题，不要一开始就写成长篇最终方案；\n"
+            "4. 只有在明确轮到你做最终汇总时，才输出完整终稿。\n\n"
+            f"原始用户问题：{cleaned_request}"
+        )
+
+    relay_hint = (
+        f"当前接力关系：{source_name or '上一棒'} -> {target_name or '当前棒'}。\n"
+        if source_name or target_name
+        else ""
+    )
+    return (
+        "你正在团队接力中，请保持短回合 baton：\n"
+        "1. 只回答当前交给你的一个核心子问题；\n"
+        "2. 优先给简短判断、关键风险和下一步建议，不要直接写成长篇总稿；\n"
+        "3. 如果需要继续交棒，只交给下一棒一个明确问题；\n"
+        "4. 只有明确轮到你回到发起人/用户做总结时，才输出完整汇总。\n\n"
+        f"{relay_hint}"
+        f"当前交接任务：{cleaned_request}"
     )
 
 
@@ -4177,13 +4464,18 @@ async def _group_chat_stream_generator(
     for agent_id in originally_mentioned:
         agent_instance = agent_manager.get_agent(agent_id)
         agent_name = agent_instance.name if agent_instance else agent_id
+        kickoff_trigger_message = _build_team_baton_trigger_message(
+            request.content,
+            mode="kickoff",
+            target_name=agent_name,
+        )
         conversation_contexts[agent_id] = build_conversation_context(
             conversation_type=ConversationType.USER_TO_AGENT,
             source_id="user",
             source_name="用户",
             target_id=agent_id,
             target_name=agent_name,
-            trigger_message=request.content,
+            trigger_message=kickoff_trigger_message,
         )
         logger.info(f"[ChatAPI][{request_id}] Created user_to_agent context for {agent_name}")
 
@@ -4419,7 +4711,12 @@ async def _group_chat_stream_generator(
                     source_name=source_name,
                     target_id=agent_id,
                     target_name=agent_name,
-                    trigger_message=request.content,
+                    trigger_message=_build_team_baton_trigger_message(
+                        request.content,
+                        mode="kickoff" if source_id == "user" else "relay",
+                        source_name=None if source_id == "user" else source_name,
+                        target_name=agent_name,
+                    ),
                 )
                 conversation_contexts[agent_id] = conv_ctx
                 logger.info(f"[ConversationContext] Created agent_to_agent context: {source_name} -> {agent_name}")
@@ -4602,13 +4899,19 @@ async def _group_chat_stream_generator(
                                             or resp["content"]
                                         )
                                         handoff_preview = _build_relay_handoff_preview(handoff_payload)
+                                        relay_trigger_message = _build_team_baton_trigger_message(
+                                            handoff_payload,
+                                            mode="relay",
+                                            source_name=resp["agent_name"],
+                                            target_name=target_name,
+                                        )
                                         new_conv_ctx = build_conversation_context(
                                             conversation_type=ConversationType.AGENT_TO_AGENT,
                                             source_id=resp["agent_id"],
                                             source_name=resp["agent_name"],
                                             target_id=a,
                                             target_name=target_name,
-                                            trigger_message=handoff_payload,
+                                            trigger_message=relay_trigger_message,
                                         )
                                         handoff_mode = (
                                             "continue"
