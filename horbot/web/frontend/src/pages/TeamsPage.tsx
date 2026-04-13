@@ -6,6 +6,7 @@ import AgentOverviewCard from '../components/teams/AgentOverviewCard';
 import TeamDetailView from '../components/teams/TeamDetailView';
 import TeamFormModal from '../components/teams/TeamFormModal';
 import TeamsSidebar from '../components/teams/TeamsSidebar';
+import { useI18n } from '../contexts/I18nContext';
 import { PageLoadingState } from '../components/state';
 import {
   getAgentPermissionPreset,
@@ -14,11 +15,11 @@ import {
 import { useTeamAgentAssets, useTeamsDirectoryData, useTeamsMutations } from '../hooks';
 import { getStorageItem, removeStorageItem, setStorageItem } from '../utils/storage';
 import {
-  AGENT_CAPABILITY_OPTIONS,
+  getAgentCapabilityOptions,
+  getMemoryReasoningStyleOptions,
   getTeamPriorityMeta,
   getTeamRoleMeta,
-  MEMORY_REASONING_STYLE_OPTIONS,
-  TEAM_TEMPLATE_OPTIONS,
+  getTeamTemplateOptions,
 } from './teams/formOptions';
 import type { TeamTemplateId } from './teams/formOptions';
 import { readSelectionFromUrl, writeSelectionToUrl } from './teams/selection';
@@ -50,77 +51,40 @@ type TeamsPageFocusTarget =
 type BadgeTone = 'neutral' | 'warning' | 'pending' | 'success' | 'primary' | 'slate';
 type BadgeSize = 'sm' | 'md';
 type NoticeTone = 'warning' | 'pending' | 'success';
+type TranslateFn = (key: string, values?: Record<string, number | string>) => string;
 
 const TEAMS_PAGE_SELECTION_STORAGE_KEY = 'horbot.teams.selection';
-const SUMMARY_SECTION_DEFS: Array<{ key: SummarySectionKey; label: string; placeholder: string }> = [
-  { key: 'identity', label: '身份定位', placeholder: '每行一条，例如：定位：负责复杂任务拆解' },
-  { key: 'role_focus', label: '职责重点', placeholder: '每行一条，例如：负责需求梳理' },
-  { key: 'communication_style', label: '沟通风格', placeholder: '每行一条，例如：先结论后细节' },
-  { key: 'boundaries', label: '边界约束', placeholder: '每行一条，例如：未经确认不修改生产配置' },
-  { key: 'user_preferences', label: '用户偏好', placeholder: '每行一条，例如：默认使用中文' },
+const getSummarySectionDefs = (t: (key: string, values?: Record<string, number | string>) => string): Array<{ key: SummarySectionKey; label: string; placeholder: string }> => [
+  { key: 'identity', label: t('teams.summarySection.identityLabel'), placeholder: t('teams.summarySection.identityPlaceholder') },
+  { key: 'role_focus', label: t('teams.summarySection.roleFocusLabel'), placeholder: t('teams.summarySection.roleFocusPlaceholder') },
+  { key: 'communication_style', label: t('teams.summarySection.communicationStyleLabel'), placeholder: t('teams.summarySection.communicationStylePlaceholder') },
+  { key: 'boundaries', label: t('teams.summarySection.boundariesLabel'), placeholder: t('teams.summarySection.boundariesPlaceholder') },
+  { key: 'user_preferences', label: t('teams.summarySection.userPreferencesLabel'), placeholder: t('teams.summarySection.userPreferencesPlaceholder') },
 ];
 
 const MEMORY_PROFILE_RECOMMENDATIONS: Record<string, {
-  label: string;
-  summary: string;
+  keyPrefix: string;
   reasoningStyle: string;
-  mission: string;
-  directives: string[];
 }> = {
   generalist: {
-    label: '默认平衡',
-    summary: '优先保留长期协作背景、用户偏好和可复用工作习惯，适合作为通用默认策略。',
+    keyPrefix: 'teams.memoryProfile.generalist',
     reasoningStyle: 'balanced',
-    mission: '优先沉淀与用户长期协作相关的背景、偏好、稳定约束和可复用策略。',
-    directives: [
-      '优先召回当前任务直接相关的事实、偏好和约束',
-      '当记忆很多时优先保留最近仍然有效的稳定信息',
-      '反思时记录可复用的处理方法，而不是重复保存短期细节',
-    ],
   },
   builder: {
-    label: '工程沉淀',
-    summary: '更强调工程上下文、排障经验、回归风险和实现约束。',
+    keyPrefix: 'teams.memoryProfile.builder',
     reasoningStyle: 'structured',
-    mission: '优先沉淀工程实现上下文、回归风险、排障经验和关键技术约束。',
-    directives: [
-      '优先召回与当前代码、缺陷、验证结论相关的事实和决策',
-      '遇到冲突记忆时优先相信较新的实现约束和回归结果',
-      '反思时记录可复用的排障路径、验证方式和风险清单',
-    ],
   },
   researcher: {
-    label: '研究归纳',
-    summary: '更适合资料梳理、证据链沉淀和结论演化。',
+    keyPrefix: 'teams.memoryProfile.researcher',
     reasoningStyle: 'exploratory',
-    mission: '优先沉淀研究主题、证据线索、对比维度和阶段性结论。',
-    directives: [
-      '优先召回和当前议题相关的证据、对比维度和开放问题',
-      '保留事实与推断边界，避免把未验证结论当成长期记忆',
-      '反思时记录哪些分析框架和检索路径值得下次复用',
-    ],
   },
   coordinator: {
-    label: '协作调度',
-    summary: '更适合多 Agent 协作中的角色分工、接力约束和未完成事项。',
+    keyPrefix: 'teams.memoryProfile.coordinator',
     reasoningStyle: 'strict',
-    mission: '优先沉淀协作分工、接力状态、关键约束和待确认事项。',
-    directives: [
-      '优先召回团队决策、共享约束、未完成接力和阻塞项',
-      '冲突信息出现时先保留最新的团队分工和显式边界',
-      '反思时记录哪些接力路径和分工方式最稳定有效',
-    ],
   },
   companion: {
-    label: '陪伴偏好',
-    summary: '更强调用户长期偏好、沟通习惯和陪伴式协作连续性。',
+    keyPrefix: 'teams.memoryProfile.companion',
     reasoningStyle: 'strict',
-    mission: '优先沉淀用户长期偏好、沟通习惯、边界和连续性需求。',
-    directives: [
-      '优先召回用户偏好、禁忌和长期目标，不要被短期噪声覆盖',
-      '遇到冲突记忆时优先保留用户最近明确表达的边界和偏好',
-      '反思时记录更适合这个用户的沟通方式和引导节奏',
-    ],
   },
 };
 
@@ -152,26 +116,29 @@ const getNoticeClassName = (tone: NoticeTone): string => (
   `rounded-2xl border px-4 py-4 text-sm ${NOTICE_TONE_CLASSES[tone]}`
 );
 
-const getAgentStatusMeta = (agent?: Pick<AgentInfo, 'setup_required' | 'bootstrap_setup_pending'> | null) => {
+const getAgentStatusMeta = (
+  agent: Pick<AgentInfo, 'setup_required' | 'bootstrap_setup_pending'> | null | undefined,
+  t: (key: string, values?: Record<string, number | string>) => string,
+) => {
   if (agent?.setup_required) {
     return {
-      shortLabel: '待配置',
-      detailLabel: '等待首次配置',
+      shortLabel: t('teams.agentStatus.setupShort'),
+      detailLabel: t('teams.agentStatus.setupDetail'),
       tone: 'warning' as const,
     };
   }
 
   if (agent?.bootstrap_setup_pending) {
     return {
-      shortLabel: '待引导',
-      detailLabel: '待完成首次引导',
+      shortLabel: t('teams.agentStatus.onboardingShort'),
+      detailLabel: t('teams.agentStatus.onboardingDetail'),
       tone: 'pending' as const,
     };
   }
 
   return {
-    shortLabel: '已完成',
-    detailLabel: '已完成个性化配置',
+    shortLabel: t('teams.agentStatus.readyShort'),
+    detailLabel: t('teams.agentStatus.readyDetail'),
     tone: 'success' as const,
   };
 };
@@ -198,18 +165,37 @@ const inferMemoryProfilePresetId = (profileId?: string, capabilities: string[] =
   return 'generalist';
 };
 
-const buildRecommendedMemoryBankProfile = (profileId?: string, capabilities: string[] = []): MemoryBankProfileDraft => {
+const getRecommendedMemoryProfileMeta = (
+  t: TranslateFn,
+  profileId?: string,
+  capabilities: string[] = [],
+) => {
   const recommendation = MEMORY_PROFILE_RECOMMENDATIONS[inferMemoryProfilePresetId(profileId, capabilities)];
+  return {
+    label: t(`${recommendation.keyPrefix}.label`),
+    summary: t(`${recommendation.keyPrefix}.summary`),
+    reasoningStyle: recommendation.reasoningStyle,
+    mission: t(`${recommendation.keyPrefix}.mission`),
+    directives: [
+      t(`${recommendation.keyPrefix}.directive1`),
+      t(`${recommendation.keyPrefix}.directive2`),
+      t(`${recommendation.keyPrefix}.directive3`),
+    ],
+  };
+};
+
+const buildRecommendedMemoryBankProfile = (
+  t: TranslateFn,
+  profileId?: string,
+  capabilities: string[] = [],
+): MemoryBankProfileDraft => {
+  const recommendation = getRecommendedMemoryProfileMeta(t, profileId, capabilities);
   return {
     mission: recommendation.mission,
     directives: recommendation.directives,
     reasoning_style: recommendation.reasoningStyle,
   };
 };
-
-const getRecommendedMemoryProfileMeta = (profileId?: string, capabilities: string[] = []) => (
-  MEMORY_PROFILE_RECOMMENDATIONS[inferMemoryProfilePresetId(profileId, capabilities)]
-);
 
 const memoryProfilesEqual = (left?: Partial<MemoryBankProfileDraft> | null, right?: Partial<MemoryBankProfileDraft> | null): boolean => {
   const normalizedLeft = normalizeMemoryProfileDraft(left);
@@ -297,6 +283,7 @@ const applyLeadToProfiles = (profiles: Record<string, TeamMemberProfile>, leadAg
 );
 
 const buildTeamProfilesFromTemplate = (
+  t: TranslateFn,
   memberIds: string[],
   currentProfiles: Record<string, TeamMemberProfile>,
   templateId: TeamTemplateId,
@@ -317,26 +304,26 @@ const buildTeamProfilesFromTemplate = (
 
   const rolePlanByTemplate: Record<Exclude<TeamTemplateId, 'custom'>, Array<Pick<TeamMemberProfile, 'role' | 'priority' | 'responsibility' | 'isLead'>>> = {
     delivery: [
-      { role: 'coordinator', priority: 10, responsibility: '负责需求拆解、分派下一棒并同步进度', isLead: true },
-      { role: 'builder', priority: 50, responsibility: '负责主要实现、修复和结果产出', isLead: false },
-      { role: 'reviewer', priority: 200, responsibility: '负责验收结果、补充风险和最终收尾', isLead: false },
+      { role: 'coordinator', priority: 10, responsibility: t('teams.template.delivery.coordinator'), isLead: true },
+      { role: 'builder', priority: 50, responsibility: t('teams.template.delivery.builder'), isLead: false },
+      { role: 'reviewer', priority: 200, responsibility: t('teams.template.delivery.reviewer'), isLead: false },
     ],
     research: [
-      { role: 'coordinator', priority: 10, responsibility: '负责明确研究问题、范围和输出结构', isLead: true },
-      { role: 'researcher', priority: 50, responsibility: '负责检索资料、梳理信息并形成结论草案', isLead: false },
-      { role: 'reviewer', priority: 200, responsibility: '负责校验证据链、对比维度与结论严谨性', isLead: false },
+      { role: 'coordinator', priority: 10, responsibility: t('teams.template.research.coordinator'), isLead: true },
+      { role: 'researcher', priority: 50, responsibility: t('teams.template.research.researcher'), isLead: false },
+      { role: 'reviewer', priority: 200, responsibility: t('teams.template.research.reviewer'), isLead: false },
     ],
     support: [
-      { role: 'coordinator', priority: 10, responsibility: '负责先接单、澄清问题并判断处理路径', isLead: true },
-      { role: 'support', priority: 50, responsibility: '负责补位响应、收集上下文并辅助推进', isLead: false },
-      { role: 'builder', priority: 100, responsibility: '负责实际处理问题并给出可执行结果', isLead: false },
+      { role: 'coordinator', priority: 10, responsibility: t('teams.template.support.coordinator'), isLead: true },
+      { role: 'support', priority: 50, responsibility: t('teams.template.support.support'), isLead: false },
+      { role: 'builder', priority: 100, responsibility: t('teams.template.support.builder'), isLead: false },
     ],
   };
 
   const fallbackByTemplate: Record<Exclude<TeamTemplateId, 'custom'>, Pick<TeamMemberProfile, 'role' | 'priority' | 'responsibility' | 'isLead'>> = {
-    delivery: { role: 'support', priority: 100, responsibility: '负责补位处理临时任务与辅助协作', isLead: false },
-    research: { role: 'support', priority: 100, responsibility: '负责补充检索、整理材料与辅助总结', isLead: false },
-    support: { role: 'support', priority: 100, responsibility: '负责承接补位任务并保持响应连续性', isLead: false },
+    delivery: { role: 'support', priority: 100, responsibility: t('teams.template.delivery.fallback'), isLead: false },
+    research: { role: 'support', priority: 100, responsibility: t('teams.template.research.fallback'), isLead: false },
+    support: { role: 'support', priority: 100, responsibility: t('teams.template.support.fallback'), isLead: false },
   };
 
   const plan = rolePlanByTemplate[templateId];
@@ -358,7 +345,7 @@ const buildTeamProfilesFromTemplate = (
   );
 };
 
-const createEmptyAgentForm = (): AgentFormState => ({
+const createEmptyAgentForm = (t: TranslateFn): AgentFormState => ({
   id: '',
   name: '',
   description: '',
@@ -376,7 +363,7 @@ const createEmptyAgentForm = (): AgentFormState => ({
   avatar: '',
   evolution_enabled: true,
   learning_enabled: true,
-  memory_bank_profile: buildRecommendedMemoryBankProfile(),
+  memory_bank_profile: buildRecommendedMemoryBankProfile(t),
 });
 
 const normalizeAgentId = (value: string): string => value.trim().toLowerCase();
@@ -420,6 +407,10 @@ const readFocusFromUrl = (): TeamsPageFocusTarget | null => {
 
 
 const TeamsPage: React.FC = () => {
+  const { t } = useI18n();
+  const baseCapabilityOptions = getAgentCapabilityOptions(t);
+  const memoryReasoningStyleOptions = getMemoryReasoningStyleOptions(t);
+  const teamTemplateOptions = getTeamTemplateOptions(t);
   const [selectedTeam, setSelectedTeam] = useState<TeamInfo | null>(null);
   const [focusTarget] = useState<TeamsPageFocusTarget | null>(() => readFocusFromUrl());
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(() => {
@@ -436,7 +427,7 @@ const TeamsPage: React.FC = () => {
   const [selectedTeamTemplateId, setSelectedTeamTemplateId] = useState<TeamTemplateId>('delivery');
   const [teamRecommendationAutoApply, setTeamRecommendationAutoApply] = useState(true);
   
-  const [agentForm, setAgentForm] = useState<AgentFormState>(createEmptyAgentForm);
+  const [agentForm, setAgentForm] = useState<AgentFormState>(() => createEmptyAgentForm(t));
   
   const [teamForm, setTeamForm] = useState<TeamFormState>(createEmptyTeamForm);
 
@@ -472,7 +463,7 @@ const TeamsPage: React.FC = () => {
   });
 
   const resetAgentForm = () => {
-    setAgentForm(createEmptyAgentForm());
+    setAgentForm(createEmptyAgentForm(t));
   };
 
   const openCreateAgentModal = () => {
@@ -513,13 +504,13 @@ const TeamsPage: React.FC = () => {
     && normalizedCreateAgentId.length > 0
     && agents.some((agent) => normalizeAgentId(agent.id) === normalizedCreateAgentId);
   const createAgentIdError = createAgentIdRequired
-    ? '请输入 Agent ID。'
+    ? t('teams.validation.agentIdRequired')
     : createAgentIdExists
-      ? `Agent ID "${agentForm.id.trim()}" 已存在，请使用新的唯一 ID。`
+      ? t('teams.validation.agentIdExists', { id: agentForm.id.trim() })
       : '';
-  const createAgentNameError = createAgentNameRequired ? '请输入 Agent 名称。' : '';
-  const createAgentProviderError = createAgentProviderRequired ? '请选择 provider。' : '';
-  const createAgentModelError = createAgentModelRequired ? '请输入 model。' : '';
+  const createAgentNameError = createAgentNameRequired ? t('teams.validation.agentNameRequired') : '';
+  const createAgentProviderError = createAgentProviderRequired ? t('teams.validation.agentProviderRequired') : '';
+  const createAgentModelError = createAgentModelRequired ? t('teams.validation.agentModelRequired') : '';
   const createAgentSubmitDisabled = modalType === 'create-agent'
     && (
       !agentForm.id.trim()
@@ -535,21 +526,21 @@ const TeamsPage: React.FC = () => {
     && normalizedCreateTeamId.length > 0
     && teams.some((team) => normalizeTeamId(team.id) === normalizedCreateTeamId);
   const createTeamIdError = createTeamIdRequired
-    ? '请输入 Team ID。'
+    ? t('teams.validation.teamIdRequired')
     : createTeamIdExists
-      ? `Team ID "${teamForm.id.trim()}" 已存在，请使用新的唯一 ID。`
+      ? t('teams.validation.teamIdExists', { id: teamForm.id.trim() })
       : '';
-  const createTeamNameError = createTeamNameRequired ? '请输入团队名称。' : '';
+  const createTeamNameError = createTeamNameRequired ? t('teams.validation.teamNameRequired') : '';
   const createTeamSubmitDisabled = modalType === 'create-team'
     && (!teamForm.id.trim() || !teamForm.name.trim() || createTeamIdExists);
-  const recommendedMemoryProfile = buildRecommendedMemoryBankProfile(agentForm.profile, agentForm.capabilities);
-  const recommendedMemoryProfileMeta = getRecommendedMemoryProfileMeta(agentForm.profile, agentForm.capabilities);
+  const recommendedMemoryProfile = buildRecommendedMemoryBankProfile(t, agentForm.profile, agentForm.capabilities);
+  const recommendedMemoryProfileMeta = getRecommendedMemoryProfileMeta(t, agentForm.profile, agentForm.capabilities);
   const isUsingRecommendedMemoryProfile = memoryProfilesEqual(agentForm.memory_bank_profile, recommendedMemoryProfile);
   const agentAdvancedSummaryItems = [
-    agentForm.capabilities.length ? `${agentForm.capabilities.length} 个能力标签` : '未选能力标签',
-    agentForm.teams.length ? `${agentForm.teams.length} 个团队` : '未绑定团队',
-    agentForm.workspace.trim() ? '自定义工作区' : '默认工作区',
-    isUsingRecommendedMemoryProfile ? '系统默认记忆画像' : '已手动调整记忆画像',
+    agentForm.capabilities.length ? t('teams.summary.capabilities', { count: agentForm.capabilities.length }) : t('teams.summary.noCapabilities'),
+    agentForm.teams.length ? t('teams.summary.teams', { count: agentForm.teams.length }) : t('teams.summary.noTeams'),
+    agentForm.workspace.trim() ? t('teams.summary.customWorkspace') : t('teams.summary.defaultWorkspace'),
+    isUsingRecommendedMemoryProfile ? t('teams.summary.defaultMemoryProfile') : t('teams.summary.customizedMemoryProfile'),
   ];
   const teamLeadAssigned = teamForm.members.some((agentId) => Boolean(teamForm.member_profiles[agentId]?.isLead));
   const teamConfiguredResponsibilitiesCount = teamForm.members.filter((agentId) => {
@@ -557,19 +548,19 @@ const TeamsPage: React.FC = () => {
     return Boolean(profile?.role || profile?.responsibility || (profile?.priority ?? 100) !== 100);
   }).length;
   const teamAdvancedSummaryItems = [
-    teamForm.members.length ? `${teamForm.members.length} 个成员` : '未选择成员',
-    teamLeadAssigned ? '已指定负责人' : '未指定负责人',
-    teamConfiguredResponsibilitiesCount ? `${teamConfiguredResponsibilitiesCount} 个成员已设分工` : '未设团队分工',
-    teamForm.workspace.trim() ? '自定义工作区' : '默认工作区',
+    teamForm.members.length ? t('teams.summary.members', { count: teamForm.members.length }) : t('teams.summary.noMembers'),
+    teamLeadAssigned ? t('teams.summary.leadAssigned') : t('teams.summary.noLeadAssigned'),
+    teamConfiguredResponsibilitiesCount ? t('teams.summary.configuredResponsibilities', { count: teamConfiguredResponsibilitiesCount }) : t('teams.summary.noResponsibilities'),
+    teamForm.workspace.trim() ? t('teams.summary.customWorkspace') : t('teams.summary.defaultWorkspace'),
   ];
-  const teamAssignmentGuide = '角色表示它在团队里扮演什么类型；接力顺序表示多 Agent 协作时谁更早参与；负责内容用一句话写清楚它具体负责什么。';
-  const selectedTeamTemplate = TEAM_TEMPLATE_OPTIONS.find((item) => item.id === selectedTeamTemplateId) || TEAM_TEMPLATE_OPTIONS[0];
+  const teamAssignmentGuide = t('teams.summary.assignmentGuide');
+  const selectedTeamTemplate = teamTemplateOptions.find((item) => item.id === selectedTeamTemplateId) || teamTemplateOptions[0];
   const recommendedTeamTemplateId = recommendTeamTemplateId(
     teamForm.members
       .map((agentId) => agents.find((agent) => agent.id === agentId))
       .filter(Boolean) as AgentInfo[],
   );
-  const recommendedTeamTemplate = TEAM_TEMPLATE_OPTIONS.find((item) => item.id === recommendedTeamTemplateId) || TEAM_TEMPLATE_OPTIONS[0];
+  const recommendedTeamTemplate = teamTemplateOptions.find((item) => item.id === recommendedTeamTemplateId) || teamTemplateOptions[0];
   const recommendedTeamLeadId = recommendTeamLeadId(
     teamForm.members
       .map((agentId) => agents.find((agent) => agent.id === agentId))
@@ -579,14 +570,15 @@ const TeamsPage: React.FC = () => {
   const recommendedTeamLead = recommendedTeamLeadId
     ? agents.find((agent) => agent.id === recommendedTeamLeadId) || null
     : null;
+  const summarySectionDefs = getSummarySectionDefs(t);
 
   const capabilityOptions = Array.from(new Set([
-    ...AGENT_CAPABILITY_OPTIONS.map((item) => item.id),
+    ...baseCapabilityOptions.map((item) => item.id),
     ...agentForm.capabilities,
-  ])).map((id) => AGENT_CAPABILITY_OPTIONS.find((item) => item.id === id) || {
+  ])).map((id) => baseCapabilityOptions.find((item) => item.id === id) || {
     id,
     label: id,
-    description: '历史标签',
+    description: t('teams.capabilityHistoryLabel'),
   });
 
   const getAgentById = (agentId: string): AgentInfo | undefined => {
@@ -633,17 +625,17 @@ const TeamsPage: React.FC = () => {
 
   const selectedAgent = selectedAgentId ? getAgentById(selectedAgentId) : undefined;
   const selectedTeamAgents = selectedTeam ? getAgentsByTeam(selectedTeam.id) : [];
-  const selectedAgentProfilePreset = getAgentProfilePreset(selectedAgent?.profile);
-  const selectedAgentPermissionPreset = getAgentPermissionPreset(selectedAgent?.permission_profile || selectedAgent?.tool_permission_profile || 'inherit');
+  const selectedAgentProfilePreset = getAgentProfilePreset(t, selectedAgent?.profile);
+  const selectedAgentPermissionPreset = getAgentPermissionPreset(t, selectedAgent?.permission_profile || selectedAgent?.tool_permission_profile || 'inherit');
   const selectedAgentReasoningStyleLabel = selectedAgent?.memory_bank_profile?.reasoning_style
-    ? MEMORY_REASONING_STYLE_OPTIONS.find((item) => item.id === selectedAgent.memory_bank_profile?.reasoning_style)?.label
+    ? memoryReasoningStyleOptions.find((item) => item.id === selectedAgent.memory_bank_profile?.reasoning_style)?.label
       || selectedAgent.memory_bank_profile.reasoning_style
     : null;
   const selectedTeamLead = selectedTeam
     ? selectedTeamAgents.find((agent) => getTeamMemberProfile(selectedTeam, agent.id).isLead)
     : undefined;
   const selectedTeamCapabilitiesCount = Array.from(new Set(selectedTeamAgents.flatMap((agent) => agent.capabilities))).length;
-  const selectedAgentStatusMeta = getAgentStatusMeta(selectedAgent);
+  const selectedAgentStatusMeta = getAgentStatusMeta(selectedAgent, t);
 
   const upsertTeamMemberProfile = (agentId: string, patch: Partial<TeamMemberProfile>) => {
     setTeamRecommendationAutoApply(false);
@@ -667,7 +659,7 @@ const TeamsPage: React.FC = () => {
     setTeamRecommendationAutoApply(false);
     setTeamForm((prev) => ({
       ...prev,
-      member_profiles: buildTeamProfilesFromTemplate(prev.members, prev.member_profiles, templateId),
+      member_profiles: buildTeamProfilesFromTemplate(t, prev.members, prev.member_profiles, templateId),
     }));
   };
 
@@ -675,7 +667,7 @@ const TeamsPage: React.FC = () => {
     setSelectedTeamTemplateId(recommendedTeamTemplateId);
     setTeamRecommendationAutoApply(true);
     setTeamForm((prev) => {
-      const profiles = buildTeamProfilesFromTemplate(prev.members, prev.member_profiles, recommendedTeamTemplateId);
+      const profiles = buildTeamProfilesFromTemplate(t, prev.members, prev.member_profiles, recommendedTeamTemplateId);
       return {
         ...prev,
         member_profiles: applyLeadToProfiles(profiles, recommendedTeamLeadId),
@@ -705,7 +697,7 @@ const TeamsPage: React.FC = () => {
       const nextLeadId = teamRecommendationAutoApply ? recommendTeamLeadId(nextAgents, nextTemplateId) : null;
       const resolvedProfiles = nextTemplateId === 'custom'
         ? nextProfiles
-        : buildTeamProfilesFromTemplate(nextMembers, nextProfiles, nextTemplateId);
+        : buildTeamProfilesFromTemplate(t, nextMembers, nextProfiles, nextTemplateId);
 
       if (teamRecommendationAutoApply) {
         setSelectedTeamTemplateId(nextTemplateId);
@@ -812,9 +804,9 @@ const TeamsPage: React.FC = () => {
   };
 
   const applyAgentProfilePreset = (profileId: string) => {
-    const preset = getAgentProfilePreset(profileId);
+    const preset = getAgentProfilePreset(t, profileId);
     setAgentForm((prev) => {
-      const previousRecommendation = buildRecommendedMemoryBankProfile(prev.profile, prev.capabilities);
+      const previousRecommendation = buildRecommendedMemoryBankProfile(t, prev.profile, prev.capabilities);
       const nextCapabilities = Array.from(new Set([
         ...prev.capabilities,
         ...(preset?.suggestedCapabilities || []),
@@ -826,7 +818,7 @@ const TeamsPage: React.FC = () => {
         profile: nextProfileId,
         capabilities: resolvedCapabilities,
         memory_bank_profile: memoryProfilesEqual(prev.memory_bank_profile, previousRecommendation)
-          ? buildRecommendedMemoryBankProfile(nextProfileId, resolvedCapabilities)
+          ? buildRecommendedMemoryBankProfile(t, nextProfileId, resolvedCapabilities)
           : prev.memory_bank_profile,
       };
     });
@@ -835,7 +827,7 @@ const TeamsPage: React.FC = () => {
   const restoreRecommendedMemoryProfile = () => {
     setAgentForm((prev) => ({
       ...prev,
-      memory_bank_profile: buildRecommendedMemoryBankProfile(prev.profile, prev.capabilities),
+      memory_bank_profile: buildRecommendedMemoryBankProfile(t, prev.profile, prev.capabilities),
     }));
   };
 
@@ -873,7 +865,7 @@ const TeamsPage: React.FC = () => {
   const handleEditAgent = (agent: AgentInfo) => {
     setEditAgentAdvancedOpen(false);
     const normalizedMemoryProfile = normalizeMemoryProfileDraft(agent.memory_bank_profile);
-    const fallbackMemoryProfile = buildRecommendedMemoryBankProfile(agent.profile, agent.capabilities || []);
+    const fallbackMemoryProfile = buildRecommendedMemoryBankProfile(t, agent.profile, agent.capabilities || []);
     setAgentForm({
       id: agent.id,
       name: agent.name,
@@ -933,7 +925,7 @@ const TeamsPage: React.FC = () => {
   };
 
   const handleDeleteAgent = async (agentId: string) => {
-    if (!confirm(`确定要删除 Agent "${agentId}" 吗？`)) return;
+    if (!confirm(t('teams.confirmDeleteAgent', { id: agentId }))) return;
     
     try {
       await deleteAgent(agentId);
@@ -946,7 +938,7 @@ const TeamsPage: React.FC = () => {
   };
 
   const handleDeleteTeam = async (teamId: string) => {
-    if (!confirm(`确定要删除团队 "${teamId}" 吗？`)) return;
+    if (!confirm(t('teams.confirmDeleteTeam', { id: teamId }))) return;
     
     try {
       await deleteTeam(teamId);
@@ -968,8 +960,8 @@ const TeamsPage: React.FC = () => {
     <div className="h-full flex flex-col bg-surface-100">
       <div className="px-6 py-4 border-b border-surface-200 bg-white flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-surface-900">团队管理</h1>
-          <p className="text-sm text-surface-500 mt-1">管理多 Agent 团队和协作</p>
+          <h1 className="text-xl font-semibold text-surface-900">{t('teams.pageTitle')}</h1>
+          <p className="text-sm text-surface-500 mt-1">{t('teams.pageSubtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -979,7 +971,7 @@ const TeamsPage: React.FC = () => {
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            创建 Agent
+            {t('teams.createAgent')}
           </button>
               <button
                 onClick={openCreateTeamModal}
@@ -988,7 +980,7 @@ const TeamsPage: React.FC = () => {
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            创建团队
+            {t('teams.createTeam')}
           </button>
           <button
             onClick={startGroupChat}
@@ -997,7 +989,7 @@ const TeamsPage: React.FC = () => {
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
             </svg>
-            群聊
+            {t('teams.groupChat')}
           </button>
         </div>
       </div>
@@ -1021,15 +1013,15 @@ const TeamsPage: React.FC = () => {
             if (!profileId) {
               return null;
             }
-            return getAgentProfilePreset(profileId)?.label || profileId;
+            return getAgentProfilePreset(t, profileId)?.label || profileId;
           }}
           getAgentPermissionLabel={(permissionId) => {
             if (!permissionId) {
               return null;
             }
-            return getAgentPermissionPreset(permissionId)?.label || permissionId;
+            return getAgentPermissionPreset(t, permissionId)?.label || permissionId;
           }}
-          getAgentStatusMeta={getAgentStatusMeta}
+          getAgentStatusMeta={(agent) => getAgentStatusMeta(agent, t)}
         />
 
         <div className="flex-1 overflow-y-auto p-6">
@@ -1043,7 +1035,7 @@ const TeamsPage: React.FC = () => {
                 selectedAgentPermissionLabel={selectedAgentPermissionPreset?.label || null}
                 selectedAgentPermissionSummary={selectedAgentPermissionPreset?.summary || null}
                 memoryReasoningStyleLabel={selectedAgentReasoningStyleLabel}
-                workspacePath={agentAssets?.workspace_path || selectedAgent.effective_workspace || selectedAgent.workspace || '默认工作区'}
+                workspacePath={agentAssets?.workspace_path || selectedAgent.effective_workspace || selectedAgent.workspace || t('teams.summary.defaultWorkspace')}
                 getBadgeClassName={(tone, size = 'md') => getBadgeClassName(tone as BadgeTone, size)}
                 getNoticeClassName={getNoticeClassName}
                 onEditAgent={() => handleEditAgent(selectedAgent)}
@@ -1073,7 +1065,7 @@ const TeamsPage: React.FC = () => {
                 assetDrafts={assetDrafts}
                 summaryDrafts={summaryDrafts}
                 summarySaving={summarySaving}
-                summarySectionDefs={SUMMARY_SECTION_DEFS}
+                summarySectionDefs={summarySectionDefs}
                 noticeToneClasses={{
                   pending: NOTICE_TONE_CLASSES.pending,
                   success: NOTICE_TONE_CLASSES.success,
@@ -1092,8 +1084,8 @@ const TeamsPage: React.FC = () => {
               selectedTeamCapabilitiesCount={selectedTeamCapabilitiesCount}
               getBadgeClassName={(tone, size = 'md') => getBadgeClassName(tone as BadgeTone, size)}
               getTeamMemberProfile={getTeamMemberProfile}
-              getTeamRoleLabel={(role) => getTeamRoleMeta(role).label}
-              getTeamPriorityLabel={(priority) => getTeamPriorityMeta(priority).label}
+              getTeamRoleLabel={(role) => getTeamRoleMeta(t, role).label}
+              getTeamPriorityLabel={(priority) => getTeamPriorityMeta(t, priority).label}
               onEditTeam={() => handleEditTeam(selectedTeam)}
               onSelectAgent={handleSelectAgent}
               onEditAgent={handleEditAgent}
@@ -1105,8 +1097,8 @@ const TeamsPage: React.FC = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                 </svg>
               </div>
-              <h3 className="text-lg font-medium text-surface-900 mb-2">选择一个团队</h3>
-              <p className="text-surface-500">从左侧列表中选择团队查看详情</p>
+              <h3 className="text-lg font-medium text-surface-900 mb-2">{t('teams.selectTeamTitle')}</h3>
+              <p className="text-surface-500">{t('teams.selectTeamDescription')}</p>
             </div>
           )}
         </div>
@@ -1202,8 +1194,8 @@ const TeamsPage: React.FC = () => {
             setTeamForm((prev) => ({ ...prev, member_profiles: nextProfiles }));
           }}
           getAgentById={getAgentById}
-          getTeamRoleDescription={(role) => getTeamRoleMeta(role).description}
-          getTeamPriorityDescription={(priority) => getTeamPriorityMeta(priority).description}
+          getTeamRoleDescription={(role) => getTeamRoleMeta(t, role).description}
+          getTeamPriorityDescription={(priority) => getTeamPriorityMeta(t, priority).description}
           onClose={closeTeamModal}
           onSubmit={handleCreateTeam}
         />
@@ -1247,8 +1239,8 @@ const TeamsPage: React.FC = () => {
             setTeamForm((prev) => ({ ...prev, member_profiles: nextProfiles }));
           }}
           getAgentById={getAgentById}
-          getTeamRoleDescription={(role) => getTeamRoleMeta(role).description}
-          getTeamPriorityDescription={(priority) => getTeamPriorityMeta(priority).description}
+          getTeamRoleDescription={(role) => getTeamRoleMeta(t, role).description}
+          getTeamPriorityDescription={(priority) => getTeamPriorityMeta(t, priority).description}
           onClose={closeTeamModal}
           onSubmit={handleUpdateTeam}
         />

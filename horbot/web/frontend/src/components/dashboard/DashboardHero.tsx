@@ -1,12 +1,16 @@
 import type { SystemStatus } from '../../types';
+import { useI18n } from '../../contexts/I18nContext';
 import { formatUptime } from './utils';
 
 interface DashboardHeroProps {
   systemStatus: SystemStatus | null;
 }
 
-const DashboardHero = ({ systemStatus }: DashboardHeroProps) => (
-  <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-primary-600 via-primary-500 to-accent-indigo p-8 shadow-lg shadow-primary-500/20 -mx-8 px-8 mb-6">
+const DashboardHero = ({ systemStatus }: DashboardHeroProps) => {
+  const { t } = useI18n();
+
+  return (
+    <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-primary-600 via-primary-500 to-accent-indigo p-8 shadow-lg shadow-primary-500/20 -mx-8 px-8 mb-6">
     <div className="absolute top-0 right-0 w-96 h-96 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
     <div className="absolute bottom-0 left-0 w-64 h-64 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2" />
     <div className="absolute top-1/2 right-1/4 w-32 h-32 bg-white/5 rounded-full" />
@@ -18,8 +22,8 @@ const DashboardHero = ({ systemStatus }: DashboardHeroProps) => (
             <img src="/logo.png" alt="Logo" className="w-14 h-14 object-contain" />
           </div>
           <div>
-            <h1 className="text-[32px] font-bold text-white tracking-tight">Dashboard</h1>
-            <p className="text-white/70 text-sm mt-1">horbot Dashboard</p>
+            <h1 className="text-[32px] font-bold text-white tracking-tight">{t('dashboard.hero.title')}</h1>
+            <p className="text-white/70 text-sm mt-1">{t('dashboard.hero.subtitle')}</p>
           </div>
         </div>
       </div>
@@ -30,7 +34,7 @@ const DashboardHero = ({ systemStatus }: DashboardHeroProps) => (
               <div className="w-3 h-3 bg-white rounded-full animate-ping opacity-75" />
               <div className="absolute inset-0 w-3 h-3 bg-white rounded-full" />
             </div>
-            <span className="tracking-wide">Running</span>
+            <span className="tracking-wide">{t('dashboard.hero.running')}</span>
             <span className="text-xs text-white/70 ml-1">• {formatUptime(systemStatus.uptime_seconds)}</span>
           </div>
         ) : (
@@ -38,12 +42,13 @@ const DashboardHero = ({ systemStatus }: DashboardHeroProps) => (
             <div className="flex items-center justify-center">
               <div className="w-3 h-3 bg-white rounded-full" />
             </div>
-            <span className="tracking-wide">Stopped</span>
+            <span className="tracking-wide">{t('dashboard.hero.stopped')}</span>
           </div>
         )}
       </div>
     </div>
   </div>
-);
+  );
+};
 
 export default DashboardHero;

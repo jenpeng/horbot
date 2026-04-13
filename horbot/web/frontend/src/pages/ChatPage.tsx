@@ -22,6 +22,7 @@ import MessageInput from '../components/MessageInput';
 import type { SessionStatus } from '../components/MessageInput';
 import { getAgentPermissionPreset, getAgentProfilePreset } from '../constants';
 import TypingIndicator from '../components/TypingIndicator';
+import { useI18n } from '../contexts/I18nContext';
 import { useToast } from '../contexts/ToastContext';
 import { resolveApiBase } from '../services/api';
 import { useConversationStore } from '../stores/conversationStore';
@@ -189,19 +190,10 @@ interface RelayRenderSummaryItem {
 }
 
 type RelayRenderItem = RelayRenderGroupItem | RelayRenderSummaryItem;
+type TranslateFn = (key: string, values?: Record<string, number | string>) => string;
 
 const EMPTY_MESSAGES: UIMessage[] = [];
 const EMPTY_TYPING_AGENTS: string[] = [];
-
-const FRIENDLY_PROVIDER_ERROR_MESSAGES = new Set([
-  '模型服务鉴权失败，请检查配置。',
-  '当前模型或接口不存在，请检查配置。',
-  '模型服务当前负载较高，请稍后重试。',
-  '模型服务响应超时，请稍后重试。',
-  '模型服务连接失败，请稍后重试。',
-  '模型服务返回异常，请稍后重试。',
-  '模型服务暂时不可用，请稍后重试。',
-]);
 
 const getCapabilityIcon = (capabilityId: string) => {
   switch (capabilityId) {
@@ -245,25 +237,52 @@ const getCapabilityTone = (capabilityId: string): string => {
   }
 };
 
-const DEFAULT_DM_ONBOARDING_CHECKLIST = [
-  '主要职责和适用场景',
-  '默认输出结构与语气',
-  '风险边界与需要确认的事项',
-  '与其他 Agent 的协作方式',
-];
-
-const DEFAULT_DM_STARTER_PROMPTS = [
-  '请先介绍一下你之后会负责什么、默认会如何组织回答，以及哪些事情需要我先明确。',
-  '先和我约定你的工作边界：什么事情你会直接执行，什么事情你会先回来确认。',
-  '请先总结你的默认协作方式，包括收到任务后如何理解需求、如何输出结果、如何暴露不确定性。',
-];
-
-const isFriendlyProviderErrorMessage = (content?: string): boolean => {
-  const normalized = content?.trim();
-  return !!normalized && FRIENDLY_PROVIDER_ERROR_MESSAGES.has(normalized);
+const getCapabilityLabel = (t: TranslateFn, capability: ToolCapability): string => {
+  switch (capability.id) {
+    case 'files':
+      return t('chat.capability.files');
+    case 'terminal':
+      return t('chat.capability.terminal');
+    case 'web':
+      return t('chat.capability.web');
+    case 'browser':
+      return t('chat.capability.browser');
+    case 'tasks':
+      return t('chat.capability.tasks');
+    case 'relay':
+      return t('chat.capability.relay');
+    case 'mcp':
+      return t('chat.capability.mcp');
+    default:
+      return capability.label;
+  }
 };
 
-const normalizeAssistantErrorContent = (content?: string): {
+const isFriendlyProviderErrorMessage = (
+  t: TranslateFn,
+  content?: string,
+): boolean => {
+  const normalized = content?.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  const friendlyMessages = new Set([
+    t('chat.providerAuthError'),
+    t('chat.providerModelMissing'),
+    t('chat.providerBusy'),
+    t('chat.providerTimeout'),
+    t('chat.providerConnectionFailed'),
+    t('chat.providerResponseInvalid'),
+    t('chat.providerUnavailable'),
+  ]);
+  return friendlyMessages.has(normalized);
+};
+
+const normalizeAssistantErrorContent = (
+  t: TranslateFn,
+  content?: string,
+): {
   content: string;
   isProviderError: boolean;
 } => {
@@ -271,7 +290,7 @@ const normalizeAssistantErrorContent = (content?: string): {
   if (!normalized) {
     return { content: '', isProviderError: false };
   }
-  if (isFriendlyProviderErrorMessage(normalized)) {
+  if (isFriendlyProviderErrorMessage(t, normalized)) {
     return { content: normalized, isProviderError: true };
   }
 
@@ -284,7 +303,7 @@ const normalizeAssistantErrorContent = (content?: string): {
     lower.includes('error calling llm') ||
     lower.includes('litellm.')
   ) {
-    return { content: '模型服务返回异常，请稍后重试。', isProviderError: true };
+    return { content: t('chat.providerResponseInvalid'), isProviderError: true };
   }
   if (
     lower.includes('unauthorized') ||
@@ -292,10 +311,10 @@ const normalizeAssistantErrorContent = (content?: string): {
     lower.includes('incorrect api key') ||
     lower.includes('forbidden')
   ) {
-    return { content: '模型服务鉴权失败，请检查配置。', isProviderError: true };
+    return { content: t('chat.providerAuthError'), isProviderError: true };
   }
   if (lower.includes('model not found') || lower.includes('404')) {
-    return { content: '当前模型或接口不存在，请检查配置。', isProviderError: true };
+    return { content: t('chat.providerModelMissing'), isProviderError: true };
   }
   if (
     lower.includes('rate limit') ||
@@ -303,7 +322,7 @@ const normalizeAssistantErrorContent = (content?: string): {
     lower.includes('overloaded') ||
     lower.includes('负载较高')
   ) {
-    return { content: '模型服务当前负载较高，请稍后重试。', isProviderError: true };
+    return { content: t('chat.providerBusy'), isProviderError: true };
   }
   if (
     lower.includes('timeout') ||
@@ -311,7 +330,7 @@ const normalizeAssistantErrorContent = (content?: string): {
     lower.includes('readtimeout') ||
     lower.includes('connecttimeout')
   ) {
-    return { content: '模型服务响应超时，请稍后重试。', isProviderError: true };
+    return { content: t('chat.providerTimeout'), isProviderError: true };
   }
 
   return { content: normalized, isProviderError: false };
@@ -332,27 +351,30 @@ const normalizeProviderErrorPayload = (value: unknown): ProviderErrorInfo | null
   };
 };
 
-const resolveStreamFailureMessage = (error: unknown): {
+const resolveStreamFailureMessage = (
+  t: TranslateFn,
+  error: unknown,
+): {
   content: string;
   errorKind: 'network' | 'timeout' | 'stream';
 } => {
   if (error instanceof ChatStreamError) {
     if (error.code === 'timeout') {
       return {
-        content: '请求超时，模型暂时没有返回结果，请重试。',
+        content: t('chat.streamTimeoutMessage'),
         errorKind: 'timeout',
       };
     }
     if (error.code === 'http') {
       return {
-        content: '服务请求失败，请稍后重试。',
+        content: t('chat.streamHttpErrorMessage'),
         errorKind: 'stream',
       };
     }
   }
 
   return {
-    content: '网络或服务连接异常，请重试。',
+    content: t('chat.streamNetworkErrorMessage'),
     errorKind: 'network',
   };
 };
@@ -694,7 +716,7 @@ const getRelayGroupState = (group: UIMessage[]): RelayGroupState => {
   if (group.some((message) => message.isError)) {
     return 'error';
   }
-  if (group.some((message) => !!message.statusMessage?.includes('等待响应'))) {
+  if (group.some((message) => message.metadata?._relay_phase === 'pending')) {
     return 'waiting';
   }
   if (group.some((message) => message.isStreaming || message.isThinking)) {
@@ -728,67 +750,6 @@ const getRelayGroupTransition = (
     conversationType: getMessageMetadataString(firstMessage, 'conversation_type'),
     handoffMode: getMessageMetadataString(firstMessage, 'handoff_mode'),
   };
-};
-
-const getRelayGroupStateDetail = (group: UIMessage[]): string => {
-  const lastMessage = group[group.length - 1];
-  const state = getRelayGroupState(group);
-  const { sourceName, targetName, conversationType, handoffMode } = getRelayGroupTransition(group, () => undefined);
-
-  if (state === 'error') {
-    return lastMessage.errorKind === 'provider'
-      ? '模型异常'
-      : lastMessage.errorKind === 'timeout'
-        ? '请求超时'
-        : lastMessage.errorKind === 'network'
-          ? '网络异常'
-          : '请求失败';
-  }
-  if (state === 'waiting') {
-    if (handoffMode === 'summary' && sourceName && targetName) {
-      return `等待 ${targetName} 接棒并回到用户总结`;
-    }
-    if (handoffMode === 'continue' && sourceName && targetName) {
-      return `等待 ${targetName} 承接 ${sourceName} 的下一轮讨论`;
-    }
-    return lastMessage.statusMessage || '等待接力';
-  }
-  if (state === 'active') {
-    if (handoffMode === 'summary' && targetName) {
-      return `${targetName} 正在汇总结论`;
-    }
-    if (sourceName && targetName && sourceName !== targetName) {
-      return `${targetName} 正在承接 ${sourceName} 的上一棒`;
-    }
-    return lastMessage.isThinking
-      ? '思考中'
-      : (lastMessage.statusMessage || '处理中');
-  }
-  if (conversationType === 'user_to_agent') {
-    return targetName ? `${targetName} 已面向用户完成输出` : '已面向用户完成输出';
-  }
-  if (sourceName && targetName && sourceName !== targetName) {
-    return `${targetName} 已完成对 ${sourceName} 的交接回复`;
-  }
-  return '已完成回复';
-};
-
-const getRelayGroupLabel = (
-  group: UIMessage[],
-  index: number,
-  getAgentName: (agentId?: string) => string | undefined,
-): string => {
-  const { sourceName, targetName, conversationType, handoffMode } = getRelayGroupTransition(group, getAgentName);
-  if (conversationType === 'user_to_agent' && targetName) {
-    return `${targetName} -> 用户`;
-  }
-  if (handoffMode === 'summary' && sourceName && targetName) {
-    return `${sourceName} -> ${targetName}（总结）`;
-  }
-  if (sourceName && targetName && sourceName !== targetName) {
-    return `${sourceName} -> ${targetName}`;
-  }
-  return targetName || `助手 ${index + 1}`;
 };
 
 const MAX_VISIBLE_RELAY_GROUPS_WITHOUT_COLLAPSE = 4;
@@ -837,7 +798,7 @@ const getDefaultVisibleRelayGroupIndexes = (
 const buildRelayRenderItems = (
   groups: UIMessage[][],
   visibleIndexes: Set<number>,
-  getAgentName: (agentId?: string) => string | undefined,
+  getGroupLabel: (group: UIMessage[], index: number) => string,
 ): RelayRenderItem[] => {
   const items: RelayRenderItem[] = [];
 
@@ -858,7 +819,7 @@ const buildRelayRenderItems = (
     const labels: string[] = [];
 
     while (groupIndex < groups.length && !visibleIndexes.has(groupIndex)) {
-      const label = getRelayGroupLabel(groups[groupIndex], groupIndex, getAgentName);
+      const label = getGroupLabel(groups[groupIndex], groupIndex);
       if (!labels.includes(label)) {
         labels.push(label);
       }
@@ -886,71 +847,46 @@ const isRelaySegmentStart = (
   return segments.find((segment) => segment.startIndex === groupIndex) || null;
 };
 
-const formatCollapsedRelayLabels = (labels: string[]): string => {
-  if (labels.length === 0) {
-    return '这些棒次已稳定完成。';
-  }
-  if (labels.length === 1) {
-    return `由 ${labels[0]} 完成稳定转交。`;
-  }
-  if (labels.length === 2) {
-    return `由 ${labels[0]} 到 ${labels[1]} 完成稳定转交。`;
-  }
-  return `由 ${labels[0]}、${labels[1]} 等 ${labels.length} 棒完成稳定转交。`;
-};
-
-const getRelayTimelineSteps = (
-  turn: MessageTurn,
-  getAgentName: (agentId?: string) => string | undefined,
-): RelayTimelineStep[] => {
-  const assistantGroups = turn.responseGroups.filter((group) => group[0]?.role === 'assistant');
-
-  return assistantGroups.map((group, index) => {
-    const firstMessage = group[0];
-    const label = getRelayGroupLabel(group, index, getAgentName);
-    return {
-      key: `${turn.id}:${firstMessage.id}:${index}`,
-      label,
-      state: getRelayGroupState(group),
-      detail: getRelayGroupStateDetail(group),
-      isFinal: index === assistantGroups.length - 1,
-      groupIndex: index,
-    };
-  });
-};
-
-const STREAM_STATE_LABELS: Partial<Record<StreamState, string>> = {
-  connecting: '正在连接模型',
-  waiting: '等待首字返回',
-  receiving: '生成中',
-  timeout: '请求超时',
-  error: '请求失败',
-};
-
-const formatAgentNamesForStatus = (names: string[]): string => {
+const formatAgentNamesForStatus = (
+  t: TranslateFn,
+  names: string[],
+): string => {
   if (names.length === 0) return '';
   if (names.length === 1) return names[0];
-  if (names.length === 2) return `${names[0]} 和 ${names[1]}`;
-  return `${names[0]} 等 ${names.length} 个 Agent`;
+  if (names.length === 2) return t('chat.agentNamesTwo', { first: names[0], second: names[1] });
+  return t('chat.agentNamesMany', { first: names[0], count: names.length });
 };
 
-const buildInterruptSummary = (activeAgentName?: string, pendingAgentNames: string[] = []): string => {
+const buildInterruptSummary = (
+  t: TranslateFn,
+  activeAgentName?: string,
+  pendingAgentNames: string[] = [],
+): string => {
   if (activeAgentName && pendingAgentNames.length > 0) {
-    return `本轮已中断，停止于 ${activeAgentName}，原本准备交给 ${formatAgentNamesForStatus(pendingAgentNames)}。可继续发送新消息。`;
+    return t('chat.interruptSummaryActivePending', {
+      active: activeAgentName,
+      pending: formatAgentNamesForStatus(t, pendingAgentNames),
+    });
   }
   if (activeAgentName) {
-    return `本轮已中断，停止于 ${activeAgentName}。可继续发送新消息。`;
+    return t('chat.interruptSummaryActive', { active: activeAgentName });
   }
   if (pendingAgentNames.length > 0) {
-    return `本轮已中断，已取消发给 ${formatAgentNamesForStatus(pendingAgentNames)} 的后续接力。可继续发送新消息。`;
+    return t('chat.interruptSummaryPending', {
+      pending: formatAgentNamesForStatus(t, pendingAgentNames),
+    });
   }
-  return '本轮已中断，可继续发送新消息。';
+  return t('chat.interruptSummaryGeneric');
 };
 
-const buildRequestPreview = (content: string, maxLength = 18): string => {
+const buildRequestPreview = (
+  t: TranslateFn,
+  content: string,
+  maxLength = 18,
+): string => {
   const normalized = content.replace(/\s+/g, ' ').trim();
   if (!normalized) {
-    return '上一条';
+    return t('chat.requestPreviewFallback');
   }
   if (normalized.length <= maxLength) {
     return normalized;
@@ -994,6 +930,7 @@ const inferExecutionStepType = (
 };
 
 const inferExecutionStepTitle = (
+  t: TranslateFn,
   type?: string,
   title?: string,
   details?: Record<string, unknown>,
@@ -1008,23 +945,24 @@ const inferExecutionStepTitle = (
     : (typeof details?.tool_name === 'string' ? details.tool_name : '');
 
   if (normalizedType.includes('tool') && toolName) {
-    return `执行 ${toolName}`;
+    return t('chat.executionToolNamed', { name: toolName });
   }
   if (normalizedType.includes('thinking')) {
-    return '思考中...';
+    return t('chat.executionThinking');
   }
   if (normalizedType.includes('response')) {
-    return '生成回复';
+    return t('chat.executionResponding');
   }
   if (normalizedType.includes('compression')) {
-    return '上下文压缩中...';
+    return t('chat.executionCompressing');
   }
-  return '执行步骤';
+  return t('chat.executionStep');
 };
 
 const mergeExecutionSteps = (
   existingSteps: ExecutionStep[] = [],
   incomingSteps: ExecutionStep[] = [],
+  fallbackTitle = 'Step',
 ): ExecutionStep[] => {
   if (incomingSteps.length === 0) {
     return existingSteps;
@@ -1048,11 +986,11 @@ const mergeExecutionSteps = (
     }
 
     const previous = mergedSteps[existingIndex];
-    mergedSteps[existingIndex] = {
+      mergedSteps[existingIndex] = {
       ...previous,
       ...step,
       type: inferExecutionStepType(step.type || previous.type, step.details || previous.details),
-      title: inferExecutionStepTitle(step.type || previous.type, step.title || previous.title, step.details || previous.details),
+      title: step.title || previous.title || fallbackTitle,
       status: normalizeExecutionStepStatus(step.status || previous.status),
       timestamp: previous.timestamp || step.timestamp,
       details: step.details ?? previous.details,
@@ -1065,12 +1003,13 @@ const mergeExecutionSteps = (
 const upsertExecutionStep = (
   steps: ExecutionStep[] = [],
   step: ExecutionStep,
+  fallbackTitle = 'Step',
 ): ExecutionStep[] => mergeExecutionSteps(steps, [{
   ...step,
   type: inferExecutionStepType(step.type, step.details),
-  title: inferExecutionStepTitle(step.type, step.title, step.details),
+  title: step.title || fallbackTitle,
   status: normalizeExecutionStepStatus(step.status),
-}]);
+}], fallbackTitle);
 
 const updateLatestRunningExecutionStep = (
   steps: ExecutionStep[] = [],
@@ -1143,7 +1082,9 @@ const ChatIconButton: React.FC<{
 );
 
 const ChatPage: React.FC = () => {
+  const { intlLocale, t } = useI18n();
   const toast = useToast();
+  const executionStepFallbackTitle = t('chat.executionStep');
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [teams, setTeams] = useState<TeamInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -1302,6 +1243,7 @@ const ChatPage: React.FC = () => {
     const interruptedTurnId = activeTurnIdRef.current;
     const relayStatusSnapshot = relayStatusSnapshotRef.current;
     const interruptSummary = buildInterruptSummary(
+      t,
       relayStatusSnapshot.activeProcessingAgentName,
       relayStatusSnapshot.pendingAgentNames,
     );
@@ -1310,7 +1252,7 @@ const ChatPage: React.FC = () => {
     setLastInterruptedMessageId(relayStatusSnapshot.activeProcessingMessage?.id || null);
     await requestStopGeneration();
     await waitForActiveStreamToSettle();
-    toast.info('已停止当前接力。', 2200);
+    toast.info(t('chat.relayStoppedToast'), 2200);
     showInterruptNotice(interruptSummary, 'success');
     requestInputFocus();
   }, [
@@ -1319,6 +1261,7 @@ const ChatPage: React.FC = () => {
     toast,
     showInterruptNotice,
     requestInputFocus,
+    t,
   ]);
 
   useEffect(() => {
@@ -1433,6 +1376,16 @@ const ChatPage: React.FC = () => {
   
   const generateId = () => Math.random().toString(36).substring(2, 15);
 
+  const mergeLocalizedExecutionSteps = useCallback((
+    existingSteps: ExecutionStep[] = [],
+    incomingSteps: ExecutionStep[] = [],
+  ) => mergeExecutionSteps(existingSteps, incomingSteps, executionStepFallbackTitle), [executionStepFallbackTitle]);
+
+  const upsertLocalizedExecutionStep = useCallback((
+    steps: ExecutionStep[] = [],
+    step: ExecutionStep,
+  ) => upsertExecutionStep(steps, step, executionStepFallbackTitle), [executionStepFallbackTitle]);
+
   const mergeConversationHistory = useCallback((historyMessages: UIMessage[], existingMessages: UIMessage[]) => {
     const mergedMessages = [...historyMessages];
     const indexById = new Map<string, number>();
@@ -1458,7 +1411,7 @@ const ChatPage: React.FC = () => {
           timestamp: message.timestamp ?? mergedMessages[existingIndex].timestamp,
           metadata: message.metadata ?? mergedMessages[existingIndex].metadata,
           files: message.files ?? mergedMessages[existingIndex].files,
-          executionSteps: mergeExecutionSteps(
+          executionSteps: mergeLocalizedExecutionSteps(
             mergedMessages[existingIndex].executionSteps,
             message.executionSteps,
           ),
@@ -1497,7 +1450,7 @@ const ChatPage: React.FC = () => {
         return leftTimestamp - rightTimestamp;
       })
       .map((entry) => entry.message);
-  }, []);
+  }, [mergeLocalizedExecutionSteps]);
 
   const formatConversationHistoryMessages = useCallback((
     rawMessages: Array<{
@@ -1529,7 +1482,7 @@ const ChatPage: React.FC = () => {
       .map((msg) => {
         const agentId = msg.metadata?.agent_id;
         let agentName = msg.metadata?.agent_name;
-        if (!agentName || agentName === 'Assistant') {
+        if (!agentName || agentName === t('chat.assistantFallback')) {
           const agent = agents.find((a) => a.id === agentId);
           if (agent) {
             agentName = agent.name;
@@ -1537,7 +1490,7 @@ const ChatPage: React.FC = () => {
         }
         const cleanContent = cleanHistoryMessageContent(msg.content);
         const normalizedError = msg.role === 'assistant'
-          ? normalizeAssistantErrorContent(cleanContent)
+          ? normalizeAssistantErrorContent(t, cleanContent)
           : { content: cleanContent, isProviderError: false };
         const providerError = normalizeProviderErrorPayload(msg.metadata?._provider_error);
         return {
@@ -1550,14 +1503,14 @@ const ChatPage: React.FC = () => {
           agentId,
           agentName,
           files: normalizeMessageFiles(msg.files),
-          executionSteps: mergeExecutionSteps([], msg.execution_steps),
+          executionSteps: mergeLocalizedExecutionSteps([], msg.execution_steps),
           metadata: msg.metadata,
           isError: Boolean(providerError) || normalizedError.isProviderError,
           errorKind: (providerError || normalizedError.isProviderError) ? 'provider' : undefined,
           retryable: providerError?.retryable ?? normalizedError.isProviderError,
         };
       })
-  ), [agents]);
+  ), [agents, mergeLocalizedExecutionSteps, t]);
 
   const getConversationStreamRegistry = useCallback((conversationId: string) => {
     let registry = liveConversationStreamsRef.current.get(conversationId);
@@ -1629,7 +1582,7 @@ const ChatPage: React.FC = () => {
           if (message.turnId && streamTurnIds.has(message.turnId)) {
             return false;
           }
-          if (message.statusMessage?.includes('等待响应')) {
+          if (message.metadata?._relay_phase === 'pending') {
             return false;
           }
           if (message.agentId && streamAgentIds.has(message.agentId) && !message.content.trim()) {
@@ -1659,27 +1612,24 @@ const ChatPage: React.FC = () => {
     setMessages,
   ]);
   
-  const formatTime = (timestamp?: string) => {
+  const formatTime = useCallback((timestamp?: string) => {
     if (!timestamp) return '';
-    
+
     const date = new Date(timestamp);
     const now = new Date();
-    const isToday = date.getFullYear() === now.getFullYear() && 
-                    date.getMonth() === now.getMonth() && 
-                    date.getDate() === now.getDate();
-    
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    const timeStr = `${hours}:${minutes}`;
-    
-    if (isToday) return timeStr;
-    
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
+    const isToday = date.getFullYear() === now.getFullYear()
+      && date.getMonth() === now.getMonth()
+      && date.getDate() === now.getDate();
     const isSameYear = date.getFullYear() === now.getFullYear();
-    
-    return isSameYear ? `${month}月${day}日 ${timeStr}` : `${date.getFullYear()}年${month}月${day}日 ${timeStr}`;
-  };
+
+    const formatter = new Intl.DateTimeFormat(intlLocale, isToday
+      ? { hour: '2-digit', minute: '2-digit' }
+      : isSameYear
+        ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+        : { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    return formatter.format(date);
+  }, [intlLocale]);
   
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
     const container = chatContainerRef.current;
@@ -1978,7 +1928,7 @@ const ChatPage: React.FC = () => {
     ensureRelayHistoryRefresh(conversationIdToOpen);
     if (activate) {
       setCurrentConversation(conversationIdToOpen);
-      const sourceConversationName = currentConversation?.name?.trim() || '当前单聊';
+      const sourceConversationName = currentConversation?.name?.trim() || t('chat.currentDirectConversation');
       const destinationConversationName = (
         teams.find((team) => `team_${team.id}` === conversationIdToOpen)?.name
         || agents.find((agent) => `dm_${agent.id}` === conversationIdToOpen)?.name
@@ -1987,9 +1937,9 @@ const ChatPage: React.FC = () => {
       showBatonNavigationNotice({
         tone: normalizedConversationId.startsWith('team_') ? 'team' : 'dm',
         message: normalizedConversationId.startsWith('team_')
-          ? `已切换到 ${destinationConversationName}，正在查看由 ${sourceConversationName} 发起的团队接力。`
-          : `已切换到 ${destinationConversationName}，继续查看当前对话。`,
-        actionLabel: currentConversation ? `回到 ${sourceConversationName}` : undefined,
+          ? t('chat.switchedToTeamRelayFrom', { destination: destinationConversationName, source: sourceConversationName })
+          : t('chat.switchedToConversation', { destination: destinationConversationName }),
+        actionLabel: currentConversation ? t('chat.backToConversation', { source: sourceConversationName }) : undefined,
         actionConversationId: currentConversation?.id,
       });
     }
@@ -2002,6 +1952,7 @@ const ChatPage: React.FC = () => {
     loadConversationHistory,
     setCurrentConversation,
     showBatonNavigationNotice,
+    t,
     teams,
   ]);
 
@@ -2016,7 +1967,7 @@ const ChatPage: React.FC = () => {
     const turnId = eventData.turn_id as string | undefined;
     const messageIdFromEvent = eventData.message_id as string | undefined;
     const incomingExecutionSteps = Array.isArray(eventData.execution_steps)
-      ? mergeExecutionSteps([], eventData.execution_steps as ExecutionStep[])
+      ? mergeLocalizedExecutionSteps([], eventData.execution_steps as ExecutionStep[])
       : [];
     const streamKey = messageIdFromEvent || turnId || (agentId ? `${agentId}:${String(eventData.agent_index ?? '0')}` : 'main');
     const streamEntry = registry.get(streamKey);
@@ -2044,7 +1995,11 @@ const ChatPage: React.FC = () => {
           agentId,
           agentName,
           isStreaming: true,
-          statusMessage: streamEntry.content ? '正在输入...' : '已接棒，开始处理...',
+          statusMessage: streamEntry.content ? t('chat.streamingInput') : t('chat.batonStarted'),
+          metadata: {
+            ...(existingMessage(streamEntry.messageId)?.metadata || {}),
+            _relay_phase: 'active',
+          },
         });
       } else if (pendingEntryMatch) {
         const [pendingKey, pendingEntry] = pendingEntryMatch;
@@ -2060,7 +2015,11 @@ const ChatPage: React.FC = () => {
           agentId,
           agentName,
           isStreaming: true,
-          statusMessage: pendingEntry.content ? '正在输入...' : '已接棒，开始处理...',
+          statusMessage: pendingEntry.content ? t('chat.streamingInput') : t('chat.batonStarted'),
+          metadata: {
+            ...(existingMessage(pendingEntry.messageId)?.metadata || {}),
+            _relay_phase: 'active',
+          },
         });
       } else {
         const messageId = messageIdFromEvent || Math.random().toString(36).substring(2, 15);
@@ -2082,9 +2041,9 @@ const ChatPage: React.FC = () => {
             agentId,
             agentName,
             isStreaming: true,
-            statusMessage: '正在输入...',
+            statusMessage: t('chat.streamingInput'),
             executionSteps: [],
-            metadata: {},
+            metadata: { _relay_phase: 'active' },
             timestamp: new Date().toISOString(),
           });
         }
@@ -2105,10 +2064,10 @@ const ChatPage: React.FC = () => {
         const messageId = messageIdFromEvent || Math.random().toString(36).substring(2, 15);
         const handoffMode = eventData.handoff_mode as string | undefined;
         const waitingStatus = handoffMode === 'summary'
-          ? '已收到交棒，等待回来总结'
+          ? t('chat.handoffWaitSummary')
           : handoffMode === 'continue'
-            ? '已收到交棒，等待继续下一轮'
-            : '已被提及，等待响应...';
+            ? t('chat.handoffWaitContinue')
+            : t('chat.handoffWaitResponse');
         registry.set(pendingKey, {
           messageId,
           content: '',
@@ -2134,6 +2093,7 @@ const ChatPage: React.FC = () => {
               ...(mentionedAgentName ? { handoff_to_name: mentionedAgentName } : {}),
               ...((eventData.handoff_mode as string | undefined) ? { handoff_mode: eventData.handoff_mode } : {}),
               ...((eventData.handoff_preview as string | undefined) ? { handoff_preview: eventData.handoff_preview } : {}),
+              _relay_phase: 'pending',
             },
             timestamp: new Date().toISOString(),
           });
@@ -2146,7 +2106,7 @@ const ChatPage: React.FC = () => {
     if (!matchedStreamEntry) {
       if (eventType === 'agent_done' && agentId) {
         const messageId = messageIdFromEvent || Math.random().toString(36).substring(2, 15);
-        const normalizedError = normalizeAssistantErrorContent(eventData.content as string);
+        const normalizedError = normalizeAssistantErrorContent(t, eventData.content as string);
         const providerError = normalizeProviderErrorPayload(eventData.provider_error);
         registry.set(streamKey, {
           messageId,
@@ -2193,7 +2153,7 @@ const ChatPage: React.FC = () => {
       updateMessage(conversationId, matchedStreamEntry.messageId, {
         executionSteps: matchedStreamEntry.executionSteps,
         isThinking: true,
-        statusMessage: '正在思考...',
+        statusMessage: t('chat.thinking'),
       });
       return;
     }
@@ -2245,7 +2205,7 @@ const ChatPage: React.FC = () => {
       updateMessage(conversationId, matchedStreamEntry.messageId, {
         executionSteps: matchedStreamEntry.executionSteps,
         isThinking: false,
-        statusMessage: toolName ? `正在执行工具: ${toolName}` : '正在执行工具...',
+        statusMessage: toolName ? t('chat.toolRunningNamed', { name: toolName }) : t('chat.toolRunning'),
       });
       return;
     }
@@ -2263,7 +2223,7 @@ const ChatPage: React.FC = () => {
       );
       updateMessage(conversationId, matchedStreamEntry.messageId, {
         executionSteps: matchedStreamEntry.executionSteps,
-        statusMessage: toolName ? `${toolName} 已返回结果` : '工具执行已返回结果',
+        statusMessage: toolName ? t('chat.toolResultNamed', { name: toolName }) : t('chat.toolResult'),
       });
       return;
     }
@@ -2271,18 +2231,18 @@ const ChatPage: React.FC = () => {
     if (eventType === 'step_start') {
       const stepId = (eventData.step_id as string) || Math.random().toString(36).substring(2, 15);
       const stepType = (eventData.step_type as string) || 'step';
-      const title = (eventData.title as string) || inferExecutionStepTitle(stepType);
+      const title = (eventData.title as string) || inferExecutionStepTitle(t, stepType);
       let statusText: string | undefined;
       if (stepType === 'thinking') {
-        statusText = '正在思考...';
+        statusText = t('chat.thinking');
       } else if (stepType === 'response') {
-        statusText = '正在回复...';
+        statusText = t('chat.replying');
       } else if (stepType === 'tool_call') {
-        statusText = '正在执行工具...';
+        statusText = t('chat.toolRunning');
       } else if (stepType === 'compression') {
-        statusText = '正在压缩上下文...';
+        statusText = t('chat.compressingContext');
       }
-      matchedStreamEntry.executionSteps = upsertExecutionStep(matchedStreamEntry.executionSteps, {
+      matchedStreamEntry.executionSteps = upsertLocalizedExecutionStep(matchedStreamEntry.executionSteps, {
         id: stepId,
         type: stepType,
         title,
@@ -2308,8 +2268,8 @@ const ChatPage: React.FC = () => {
         ? { ...existingStep.details, ...(details || {}) }
         : details;
       const resolvedType = inferExecutionStepType(existingStep?.type, mergedDetails);
-      const resolvedTitle = inferExecutionStepTitle(resolvedType, existingStep?.title, mergedDetails);
-      matchedStreamEntry.executionSteps = upsertExecutionStep(matchedStreamEntry.executionSteps, {
+      const resolvedTitle = inferExecutionStepTitle(t, resolvedType, existingStep?.title, mergedDetails);
+      matchedStreamEntry.executionSteps = upsertLocalizedExecutionStep(matchedStreamEntry.executionSteps, {
         id: stepId || Math.random().toString(36).substring(2, 15),
         type: resolvedType,
         title: resolvedTitle,
@@ -2321,11 +2281,11 @@ const ChatPage: React.FC = () => {
       let statusMessage: string | undefined;
       let isThinking = false;
       if (resolvedType === 'thinking') {
-        statusMessage = status === 'error' || status === 'failed' ? '思考阶段失败' : '思考完成，准备回复...';
+        statusMessage = status === 'error' || status === 'failed' ? t('chat.thinkingFailed') : t('chat.thinkingDone');
       } else if (resolvedType === 'tool_call') {
-        statusMessage = status === 'error' || status === 'failed' ? '工具执行失败' : '工具执行完成';
+        statusMessage = status === 'error' || status === 'failed' ? t('chat.toolFailed') : t('chat.toolDone');
       } else if (resolvedType === 'response') {
-        statusMessage = status === 'error' || status === 'failed' ? '回复生成失败' : '回复已生成';
+        statusMessage = status === 'error' || status === 'failed' ? t('chat.responseFailed') : t('chat.responseDone');
       }
 
       const responseContent = resolvedType === 'response' && typeof mergedDetails?.content === 'string'
@@ -2347,6 +2307,7 @@ const ChatPage: React.FC = () => {
     if (eventType === 'agent_done' || eventType === 'request_end') {
       const currentMessage = existingMessage(matchedStreamEntry.messageId);
       const normalizedError = normalizeAssistantErrorContent(
+        t,
         (eventData.content as string) || matchedStreamEntry.content,
       );
       const providerError = normalizeProviderErrorPayload(eventData.provider_error);
@@ -2354,7 +2315,7 @@ const ChatPage: React.FC = () => {
       if (normalizedError.content) {
         matchedStreamEntry.content = normalizedError.content;
       }
-      matchedStreamEntry.executionSteps = mergeExecutionSteps(
+      matchedStreamEntry.executionSteps = mergeLocalizedExecutionSteps(
         matchedStreamEntry.executionSteps,
         incomingExecutionSteps,
       );
@@ -2366,6 +2327,7 @@ const ChatPage: React.FC = () => {
         executionSteps: matchedStreamEntry.executionSteps,
         metadata: {
           ...(currentMessage?.metadata || {}),
+          _relay_phase: 'done',
           ...(providerError ? { _provider_error: providerError } : {}),
           ...(Array.isArray(eventData.memory_sources) && eventData.memory_sources.length > 0
             ? { _memory_sources: eventData.memory_sources }
@@ -2395,9 +2357,10 @@ const ChatPage: React.FC = () => {
 
     if (eventType === 'error' || eventType === 'agent_error') {
       const normalizedError = normalizeAssistantErrorContent(
-        (eventData.content as string) || (eventData.error as string) || '抱歉，发生了错误。请重试。',
+        t,
+        (eventData.content as string) || (eventData.error as string) || t('chat.genericErrorRetry'),
       );
-      matchedStreamEntry.content = normalizedError.content || '抱歉，发生了错误。请重试。';
+      matchedStreamEntry.content = normalizedError.content || t('chat.genericErrorRetry');
       matchedStreamEntry.phase = 'done';
       matchedStreamEntry.executionSteps = finalizeRunningExecutionSteps(
         matchedStreamEntry.executionSteps,
@@ -2410,6 +2373,10 @@ const ChatPage: React.FC = () => {
         isThinking: false,
         statusMessage: undefined,
         executionSteps: matchedStreamEntry.executionSteps,
+        metadata: {
+          ...(existingMessage(matchedStreamEntry.messageId)?.metadata || {}),
+          _relay_phase: 'done',
+        },
         isError: true,
         errorKind: normalizedError.isProviderError ? 'provider' : 'stream',
         retryable: normalizedError.isProviderError,
@@ -2428,11 +2395,15 @@ const ChatPage: React.FC = () => {
         { stopped: true },
       );
       updateMessage(conversationId, matchedStreamEntry.messageId, {
-        content: matchedStreamEntry.content || '已停止生成。',
+        content: matchedStreamEntry.content || t('chat.stopped'),
         isStreaming: false,
         isThinking: false,
         statusMessage: undefined,
         executionSteps: matchedStreamEntry.executionSteps,
+        metadata: {
+          ...(existingMessage(matchedStreamEntry.messageId)?.metadata || {}),
+          _relay_phase: 'done',
+        },
       });
       if (agentId || matchedStreamEntry.agentId) {
         removeTypingAgent(conversationId, agentId || matchedStreamEntry.agentId);
@@ -2445,9 +2416,12 @@ const ChatPage: React.FC = () => {
     getConversationStreamRegistry,
     getMessages,
     loadConversationHistory,
+    mergeLocalizedExecutionSteps,
     openDispatchedWebConversation,
     reconcileConversationAfterDone,
     removeTypingAgent,
+    t,
+    upsertLocalizedExecutionStep,
     updateMessage,
   ]);
 
@@ -2473,13 +2447,13 @@ const ChatPage: React.FC = () => {
         && sourceSessionKey === activePrimarySessionKeyRef.current
       ) {
         const sourceConversationId = sessionKeyToConversationId(sourceSessionKey);
-        const sourceConversationName = conversations.find((conversation) => conversation.id === sourceConversationId)?.name || '团队会话';
-        const destinationConversationName = conversations.find((conversation) => conversation.id === conversationId)?.name || '原单聊';
+        const sourceConversationName = conversations.find((conversation) => conversation.id === sourceConversationId)?.name || t('chat.teamRelay');
+        const destinationConversationName = conversations.find((conversation) => conversation.id === conversationId)?.name || t('chat.directMessage');
         setCurrentConversation(conversationId);
         showBatonNavigationNotice({
           tone: 'dm',
-          message: `团队接力已完成，已返回 ${destinationConversationName} 查看最终汇报。`,
-          actionLabel: `回看 ${sourceConversationName}`,
+          message: t('chat.returnedToDirectNotice', { name: destinationConversationName }),
+          actionLabel: t('chat.reviewSourceConversation', { name: sourceConversationName }),
           actionConversationId: sourceConversationId,
         });
       }
@@ -2620,8 +2594,8 @@ const ChatPage: React.FC = () => {
     if (activeStreamPromiseRef.current) {
       await requestStopGeneration();
       await waitForActiveStreamToSettle();
-      toast.info('已停止上一轮接力，正在切换到新请求。', 2400);
-      showInterruptNotice('已停止上一轮接力，正在切换到新请求。', 'info');
+      toast.info(t('chat.requestStoppedSwitching'), 2400);
+      showInterruptNotice(t('chat.requestStoppedSwitching'), 'info');
     }
 
     const trimmedContent = content.trim();
@@ -2736,7 +2710,11 @@ const ChatPage: React.FC = () => {
                   agentId,
                   agentName,
                   isStreaming: true,
-                  statusMessage: streamEntry.content ? '正在输入...' : '已接棒，开始处理...',
+                  statusMessage: streamEntry.content ? t('chat.streamingInput') : t('chat.batonStarted'),
+                  metadata: {
+                    ...(getMessages(currentConversation.id).find((message) => message.id === streamEntry.messageId)?.metadata || {}),
+                    _relay_phase: 'active',
+                  },
                 });
               } else if (pendingEntryMatch) {
                 const [pendingKey, pendingEntry] = pendingEntryMatch;
@@ -2752,7 +2730,11 @@ const ChatPage: React.FC = () => {
                   agentId,
                   agentName,
                   isStreaming: true,
-                  statusMessage: pendingEntry.content ? '正在输入...' : '已接棒，开始处理...',
+                  statusMessage: pendingEntry.content ? t('chat.streamingInput') : t('chat.batonStarted'),
+                  metadata: {
+                    ...(getMessages(currentConversation.id).find((message) => message.id === pendingEntry.messageId)?.metadata || {}),
+                    _relay_phase: 'active',
+                  },
                 });
               } else {
                 const messageId = messageIdFromEvent || generateId();
@@ -2765,9 +2747,9 @@ const ChatPage: React.FC = () => {
                   agentId: agentId,
                   agentName: agentName,
                   isStreaming: true,
-                  statusMessage: '正在输入...',
+                  statusMessage: t('chat.streamingInput'),
                   executionSteps: [],
-                  metadata: {},
+                  metadata: { _relay_phase: 'active' },
                 };
                 agentMessages.set(streamKey, {
                   messageId,
@@ -2796,10 +2778,10 @@ const ChatPage: React.FC = () => {
               const pendingKey = `pending:${mentionedAgentId}:${generateId()}`;
               const messageId = messageIdFromEvent || generateId();
               const waitingStatus = handoffMode === 'summary'
-                ? '已收到交棒，等待回来总结'
+                ? t('chat.handoffWaitSummary')
                 : handoffMode === 'continue'
-                  ? '已收到交棒，等待继续下一轮'
-                  : '已被提及，等待响应...';
+                  ? t('chat.handoffWaitContinue')
+                  : t('chat.handoffWaitResponse');
               const newMessage: UIMessage = {
                 id: messageId,
                 role: 'assistant',
@@ -2816,6 +2798,7 @@ const ChatPage: React.FC = () => {
                   handoff_to_name: mentionedAgentName,
                   ...(handoffMode ? { handoff_mode: handoffMode } : {}),
                   ...(handoffPreview ? { handoff_preview: handoffPreview } : {}),
+                  _relay_phase: 'pending',
                 },
               };
               agentMessages.set(pendingKey, {
@@ -2837,7 +2820,7 @@ const ChatPage: React.FC = () => {
               updateMessage(currentConversation.id, agentMsg.messageId, {
                 executionSteps: agentMsg.executionSteps,
                 isThinking: true,
-                statusMessage: '正在思考...',
+                statusMessage: t('chat.thinking'),
               });
             }
           }
@@ -2903,7 +2886,7 @@ const ChatPage: React.FC = () => {
               updateMessage(currentConversation.id, agentMsg.messageId, {
                 executionSteps: agentMsg.executionSteps,
                 isThinking: false,
-                statusMessage: toolName ? `正在执行工具: ${toolName}` : '正在执行工具...',
+                statusMessage: toolName ? t('chat.toolRunningNamed', { name: toolName }) : t('chat.toolRunning'),
               });
             }
           }
@@ -2925,7 +2908,7 @@ const ChatPage: React.FC = () => {
               );
               updateMessage(currentConversation.id, agentMsg.messageId, {
                 executionSteps: agentMsg.executionSteps,
-                statusMessage: toolName ? `${toolName} 已返回结果` : '工具执行已返回结果',
+                statusMessage: toolName ? t('chat.toolResultNamed', { name: toolName }) : t('chat.toolResult'),
               });
             }
           }
@@ -2948,20 +2931,20 @@ const ChatPage: React.FC = () => {
           else if (eventType === 'step_start') {
             const stepId = (eventData.step_id as string) || generateId();
             const stepType = (eventData.step_type as string) || 'step';
-            const title = (eventData.title as string) || inferExecutionStepTitle(stepType);
+            const title = (eventData.title as string) || inferExecutionStepTitle(t, stepType);
             if (agentId && matchedStreamEntry) {
               const agentMsg = matchedStreamEntry;
               let statusText: string | undefined;
               if (stepType === 'thinking') {
-                statusText = '正在思考...';
+                statusText = t('chat.thinking');
               } else if (stepType === 'response') {
-                statusText = '正在回复...';
+                statusText = t('chat.replying');
               } else if (stepType === 'tool_call') {
-                statusText = '正在执行工具...';
+                statusText = t('chat.toolRunning');
               } else if (stepType === 'compression') {
-                statusText = '正在压缩上下文...';
+                statusText = t('chat.compressingContext');
               }
-              agentMsg.executionSteps = upsertExecutionStep(agentMsg.executionSteps, {
+              agentMsg.executionSteps = upsertLocalizedExecutionStep(agentMsg.executionSteps, {
                 id: stepId,
                 type: stepType,
                 title,
@@ -2989,8 +2972,8 @@ const ChatPage: React.FC = () => {
                 ? { ...existingStep.details, ...(details || {}) }
                 : details;
               const resolvedType = inferExecutionStepType(existingStep?.type, mergedDetails);
-              const resolvedTitle = inferExecutionStepTitle(resolvedType, existingStep?.title, mergedDetails);
-              agentMsg.executionSteps = upsertExecutionStep(agentMsg.executionSteps, {
+              const resolvedTitle = inferExecutionStepTitle(t, resolvedType, existingStep?.title, mergedDetails);
+              agentMsg.executionSteps = upsertLocalizedExecutionStep(agentMsg.executionSteps, {
                 id: stepId || generateId(),
                 type: resolvedType,
                 title: resolvedTitle,
@@ -3003,16 +2986,16 @@ const ChatPage: React.FC = () => {
               let isThinking = false;
               if (resolvedType === 'thinking') {
                 statusMessage = status === 'error' || status === 'failed'
-                  ? '思考阶段失败'
-                  : '思考完成，准备回复...';
+                  ? t('chat.thinkingFailed')
+                  : t('chat.thinkingDone');
               } else if (resolvedType === 'tool_call') {
                 statusMessage = status === 'error' || status === 'failed'
-                  ? '工具执行失败'
-                  : '工具执行完成';
+                  ? t('chat.toolFailed')
+                  : t('chat.toolDone');
               } else if (resolvedType === 'response') {
                 statusMessage = status === 'error' || status === 'failed'
-                  ? '回复生成失败'
-                  : '回复已生成';
+                  ? t('chat.responseFailed')
+                  : t('chat.responseDone');
               }
 
               const responseContent = resolvedType === 'response' && typeof mergedDetails?.content === 'string'
@@ -3036,7 +3019,7 @@ const ChatPage: React.FC = () => {
             if (matchedStreamEntry) {
               const agentMsg = matchedStreamEntry;
               const existingMessage = getMessages(currentConversation.id).find((message) => message.id === agentMsg.messageId);
-              const normalizedError = normalizeAssistantErrorContent(finalContentFromEvent || agentMsg.content);
+              const normalizedError = normalizeAssistantErrorContent(t, finalContentFromEvent || agentMsg.content);
               const finalContent = normalizedError.content;
               const providerError = normalizeProviderErrorPayload(eventData.provider_error);
               const isProviderError = Boolean(providerError) || normalizedError.isProviderError;
@@ -3090,9 +3073,10 @@ const ChatPage: React.FC = () => {
           // 后端处理失败
           else if (eventType === 'error' || eventType === 'agent_error') {
             const normalizedError = normalizeAssistantErrorContent(
-              (eventData.content as string) || (eventData.error as string) || '抱歉，发生了错误。请重试。',
+              t,
+              (eventData.content as string) || (eventData.error as string) || t('chat.genericErrorRetry'),
             );
-            const errorContent = normalizedError.content || '抱歉，发生了错误。请重试。';
+            const errorContent = normalizedError.content || t('chat.genericErrorRetry');
             const errorKind = normalizedError.isProviderError ? 'provider' : 'stream';
             const resolvedAgentId = agentId || 'main';
             if (!streamEntry) {
@@ -3164,7 +3148,7 @@ const ChatPage: React.FC = () => {
                 { stopped: true },
               );
               updateMessage(currentConversation.id, agentMsg.messageId, {
-                content: agentMsg.content || '已停止生成。',
+                content: agentMsg.content || t('chat.stopped'),
                 isStreaming: false,
                 isThinking: false,
                 statusMessage: undefined,
@@ -3178,7 +3162,7 @@ const ChatPage: React.FC = () => {
             const systemMessage: UIMessage = {
               id: generateId(),
               role: 'assistant',
-              content: (eventData.content as string) || '讨论已停止。你可以继续发送消息开始新的对话。',
+              content: (eventData.content as string) || t('chat.discussionStopped'),
               isStreaming: false,
               timestamp: new Date().toISOString(),
             };
@@ -3197,7 +3181,7 @@ const ChatPage: React.FC = () => {
               { stopped: true },
             );
             updateMessage(currentConversation.id, agentMsg.messageId, {
-              content: agentMsg.content || '已停止生成。',
+              content: agentMsg.content || t('chat.stopped'),
               isStreaming: false,
               isThinking: false,
               statusMessage: undefined,
@@ -3207,7 +3191,7 @@ const ChatPage: React.FC = () => {
           });
         } else {
           console.error('Chat error:', error);
-          const failure = resolveStreamFailureMessage(error);
+          const failure = resolveStreamFailureMessage(t, error);
           if (agentMessages.size === 0) {
             addMessage(currentConversation.id, {
               id: generateId(),
@@ -3289,7 +3273,7 @@ const ChatPage: React.FC = () => {
         void refreshAgents();
       }
     }
-  }, [currentConversation, agents, addMessage, updateMessage, addTypingAgent, removeTypingAgent, isOnline, requestStopGeneration, waitForActiveStreamToSettle, toast, showInterruptNotice, refreshAgents, openDispatchedWebConversation, reconcileConversationAfterDone]);
+  }, [currentConversation, agents, addMessage, updateMessage, addTypingAgent, removeTypingAgent, isOnline, requestStopGeneration, waitForActiveStreamToSettle, toast, showInterruptNotice, refreshAgents, openDispatchedWebConversation, reconcileConversationAfterDone, t]);
 
   const handleRetryLastRequest = useCallback(async () => {
     if (!currentConversation || !lastFailedRequest || isLoading) return;
@@ -3309,6 +3293,11 @@ const ChatPage: React.FC = () => {
     await handleSendMessage(lastInterruptedRequest.content, lastInterruptedRequest.mentionedAgents, lastInterruptedRequest.files);
   }, [currentConversation, lastInterruptedRequest, isLoading, dismissInterruptNotice, handleSendMessage]);
   
+  const getAgentName = (agentId?: string) => {
+    if (!agentId) return undefined;
+    return agents.find(a => a.id === agentId)?.name;
+  };
+
   const messageTurns = useMemo(() => buildMessageTurns(messages), [messages]);
   const historySearchMatches = useMemo<HistorySearchMatch[]>(() => {
     const query = normalizeSearchText(historySearchQuery);
@@ -3325,7 +3314,7 @@ const ChatPage: React.FC = () => {
             key: `user:${turn.id}`,
             turnId: turn.id,
             role: 'user',
-            label: `第 ${turnIndex + 1} 轮 · 你的消息`,
+            label: t('chat.historyTurnUserLabel', { turn: turnIndex + 1 }),
             preview: buildSearchPreview(turn.userMessage.content),
           });
         }
@@ -3345,14 +3334,17 @@ const ChatPage: React.FC = () => {
           turnId: turn.id,
           groupIndex,
           role: 'assistant',
-          label: `第 ${turnIndex + 1} 轮 · ${firstMessage?.agentName || getAgentName(firstMessage?.agentId) || '助手'}`,
+          label: t('chat.historyTurnAssistantLabel', {
+            turn: turnIndex + 1,
+            name: firstMessage?.agentName || getAgentName(firstMessage?.agentId) || t('chat.assistantFallback'),
+          }),
           preview: buildSearchPreview(content),
         });
       });
     });
 
     return matches;
-  }, [historySearchQuery, messageTurns]);
+  }, [getAgentName, historySearchQuery, messageTurns, t]);
 
   const activeHistoryMatch = historySearchMatches.length > 0
     ? historySearchMatches[Math.min(historySearchIndex, historySearchMatches.length - 1)]
@@ -3521,10 +3513,132 @@ const ChatPage: React.FC = () => {
     }, 2200);
   }, [pendingRelayJump, expandedTurnIds, messageTurns]);
   
-  const getAgentName = (agentId?: string) => {
-    if (!agentId) return undefined;
-    return agents.find(a => a.id === agentId)?.name;
-  };
+  const relayStateLabel = useCallback((state: RelayGroupState) => {
+    switch (state) {
+      case 'active':
+        return t('chat.statusActive');
+      case 'waiting':
+        return t('chat.statusWaiting');
+      case 'error':
+        return t('chat.statusFailed');
+      default:
+        return t('chat.statusDone');
+    }
+  }, [t]);
+
+  const getRelayGroupLabelLocalized = useCallback((group: UIMessage[], index: number): string => {
+    const { sourceName, targetName, conversationType, handoffMode } = getRelayGroupTransition(group, getAgentName);
+    if (conversationType === 'user_to_agent' && targetName) {
+      return t('chat.relayLabelToUser', { name: targetName });
+    }
+    if (handoffMode === 'summary' && sourceName && targetName) {
+      return t('chat.relayLabelSummary', { source: sourceName, target: targetName });
+    }
+    if (sourceName && targetName && sourceName !== targetName) {
+      return t('chat.relayLabelTransfer', { source: sourceName, target: targetName });
+    }
+    return targetName || t('chat.assistantIndexed', { index: index + 1 });
+  }, [getAgentName, t]);
+
+  const getRelayGroupStateDetailLocalized = useCallback((group: UIMessage[]): string => {
+    const lastMessage = group[group.length - 1];
+    const state = getRelayGroupState(group);
+    const { sourceName, targetName, conversationType, handoffMode } = getRelayGroupTransition(group, getAgentName);
+
+    if (state === 'error') {
+      return lastMessage.errorKind === 'provider'
+        ? t('chat.errorProvider')
+        : lastMessage.errorKind === 'timeout'
+          ? t('chat.errorTimeout')
+          : lastMessage.errorKind === 'network'
+            ? t('chat.errorNetwork')
+            : t('chat.errorRequestFailed');
+    }
+    if (state === 'waiting') {
+      if (handoffMode === 'summary' && sourceName && targetName) {
+        return t('chat.waitSummaryReturn', { name: targetName });
+      }
+      if (handoffMode === 'continue' && sourceName && targetName) {
+        return t('chat.waitContinueDiscussion', { source: sourceName, target: targetName });
+      }
+      return lastMessage.statusMessage || t('chat.waitRelay');
+    }
+    if (state === 'active') {
+      if (handoffMode === 'summary' && targetName) {
+        return t('chat.summaryInProgress', { name: targetName });
+      }
+      if (sourceName && targetName && sourceName !== targetName) {
+        return t('chat.takingPreviousBaton', { source: sourceName, target: targetName });
+      }
+      return lastMessage.isThinking
+        ? t('chat.thinkingShort')
+        : (lastMessage.statusMessage || t('chat.statusActive'));
+    }
+    if (conversationType === 'user_to_agent') {
+      return targetName ? t('chat.outputToUser', { name: targetName }) : t('chat.outputToUserFallback');
+    }
+    if (sourceName && targetName && sourceName !== targetName) {
+      return t('chat.handoffReplyDone', { source: sourceName, target: targetName });
+    }
+    return t('chat.replyDone');
+  }, [getAgentName, t]);
+
+  const getRelayTimelineStepsLocalized = useCallback((turn: MessageTurn): RelayTimelineStep[] => {
+    const assistantGroups = turn.responseGroups.filter((group) => group[0]?.role === 'assistant');
+    return assistantGroups.map((group, index) => {
+      const firstMessage = group[0];
+      return {
+        key: `${turn.id}:${firstMessage.id}:${index}`,
+        label: getRelayGroupLabelLocalized(group, index),
+        state: getRelayGroupState(group),
+        detail: getRelayGroupStateDetailLocalized(group),
+        isFinal: index === assistantGroups.length - 1,
+        groupIndex: index,
+      };
+    });
+  }, [getRelayGroupLabelLocalized, getRelayGroupStateDetailLocalized]);
+
+  const formatCollapsedRelayLabelsLocalized = useCallback((labels: string[]): string => {
+    if (labels.length === 0) {
+      return t('chat.collapsedRelayNone');
+    }
+    if (labels.length === 1) {
+      return t('chat.collapsedRelaySingle', { label: labels[0] });
+    }
+    if (labels.length === 2) {
+      return t('chat.collapsedRelayDouble', { first: labels[0], second: labels[1] });
+    }
+    return t('chat.collapsedRelayMany', { first: labels[0], second: labels[1], count: labels.length });
+  }, [t]);
+
+  const streamStateLabels = useMemo<Partial<Record<StreamState, string>>>(() => ({
+    connecting: t('chat.streamStateConnecting'),
+    waiting: t('chat.streamStateWaiting'),
+    receiving: t('chat.streamStateReceiving'),
+    timeout: t('chat.streamStateTimeout'),
+    error: t('chat.streamStateError'),
+  }), [t]);
+
+  const formatAgentNamesForStatusLocalized = useCallback((names: string[]): string => {
+    return formatAgentNamesForStatus(t, names);
+  }, [t]);
+
+  const buildRequestPreviewLocalized = useCallback((content: string, maxLength = 18) => (
+    buildRequestPreview(t, content, maxLength)
+  ), [t]);
+
+  const defaultOnboardingChecklist = useMemo(() => ([
+    t('chat.defaultChecklistResponsibility'),
+    t('chat.defaultChecklistOutputStyle'),
+    t('chat.defaultChecklistRiskBoundary'),
+    t('chat.defaultChecklistCollaboration'),
+  ]), [t]);
+
+  const defaultStarterPrompts = useMemo(() => ([
+    t('chat.defaultStarterPrompt1'),
+    t('chat.defaultStarterPrompt2'),
+    t('chat.defaultStarterPrompt3'),
+  ]), [t]);
 
   const currentDirectAgent = useMemo(() => {
     if (currentConversation?.type !== ConversationType.DM) {
@@ -3545,23 +3659,23 @@ const ChatPage: React.FC = () => {
   }, [agents, currentConversation, teams]);
 
   const currentDirectAgentProfilePreset = useMemo(
-    () => getAgentProfilePreset(currentDirectAgent?.profile),
-    [currentDirectAgent?.profile],
+    () => getAgentProfilePreset(t, currentDirectAgent?.profile),
+    [currentDirectAgent?.profile, t],
   );
 
   const currentDirectAgentPermissionPreset = useMemo(
-    () => getAgentPermissionPreset(currentDirectAgent?.tool_permission_profile),
-    [currentDirectAgent?.tool_permission_profile],
+    () => getAgentPermissionPreset(t, currentDirectAgent?.tool_permission_profile),
+    [currentDirectAgent?.tool_permission_profile, t],
   );
 
   const currentDirectOnboardingChecklist = useMemo(
-    () => currentDirectAgentProfilePreset?.onboardingChecklist || DEFAULT_DM_ONBOARDING_CHECKLIST,
-    [currentDirectAgentProfilePreset],
+    () => currentDirectAgentProfilePreset?.onboardingChecklist || defaultOnboardingChecklist,
+    [currentDirectAgentProfilePreset, defaultOnboardingChecklist],
   );
 
   const currentDirectStarterPrompts = useMemo(
-    () => currentDirectAgentProfilePreset?.starterPrompts || DEFAULT_DM_STARTER_PROMPTS,
-    [currentDirectAgentProfilePreset],
+    () => currentDirectAgentProfilePreset?.starterPrompts || defaultStarterPrompts,
+    [currentDirectAgentProfilePreset, defaultStarterPrompts],
   );
 
   const currentConversationCapabilities = useMemo<ToolCapability[]>(() => {
@@ -3613,10 +3727,10 @@ const ChatPage: React.FC = () => {
   );
 
   const currentConversationSummary = currentConversation?.type === ConversationType.TEAM
-    ? `当前为团队接力会话，共 ${currentTeamMembers.length} 个成员。`
+    ? t('chat.currentConversationSummaryTeam', { count: currentTeamMembers.length })
     : currentDirectAgentProfilePreset
-      ? `当前为单聊会话，已按“${currentDirectAgentProfilePreset.label}”画像进入对话。`
-      : '当前为单聊会话，消息会直接发给所选 Agent。';
+      ? t('chat.currentConversationSummaryDirectProfile', { label: currentDirectAgentProfilePreset.label })
+      : t('chat.currentConversationSummaryDirect');
 
   const handleHistorySearchMove = useCallback((direction: 'prev' | 'next') => {
     if (historySearchMatches.length === 0) {
@@ -3640,7 +3754,7 @@ const ChatPage: React.FC = () => {
     const pendingAgentNames: string[] = [];
 
     activeStreamingMessages.forEach((message) => {
-      if (!message.statusMessage?.includes('等待响应')) {
+      if (message.metadata?._relay_phase !== 'pending') {
         return;
       }
 
@@ -3695,15 +3809,15 @@ const ChatPage: React.FC = () => {
     if (!isOnline) {
       return {
         tone: 'error',
-        message: '网络已断开，当前无法发送消息。',
+        message: t('chat.sessionOffline'),
       };
     }
 
     if (showReconnect && canRetryCurrentConversation) {
       return {
         tone: 'warning',
-        message: '本次响应失败，可重试上一条。',
-        actionLabel: '重试上一条',
+        message: t('chat.sessionRetryLastMessage'),
+        actionLabel: t('chat.retryLastMessage'),
         onAction: handleRetryLastRequest,
         dismissible: true,
         onDismiss: () => setShowReconnect(false),
@@ -3713,7 +3827,7 @@ const ChatPage: React.FC = () => {
     if (showReconnect) {
       return {
         tone: 'warning',
-        message: '连接已中断。',
+        message: t('chat.sessionDisconnected'),
         dismissible: true,
         onDismiss: () => setShowReconnect(false),
       };
@@ -3721,34 +3835,37 @@ const ChatPage: React.FC = () => {
 
     if (interruptNotice) {
       const resumeActionLabel = canResumeInterruptedRequest && lastInterruptedRequest
-        ? `继续：${buildRequestPreview(lastInterruptedRequest.content)}`
+        ? t('chat.resumeRequest', { preview: buildRequestPreviewLocalized(lastInterruptedRequest.content) })
         : undefined;
       return {
         tone: interruptNotice.tone,
         message: interruptNotice.message,
         actionLabel: interruptNotice.tone === 'success' && canResumeInterruptedRequest
           ? resumeActionLabel
-          : (interruptNotice.tone === 'success' ? '继续输入' : undefined),
+          : (interruptNotice.tone === 'success' ? t('chat.continueInput') : undefined),
         onAction: interruptNotice.tone === 'success'
           ? (canResumeInterruptedRequest ? handleResumeInterruptedRequest : requestInputFocus)
           : undefined,
-        secondaryActionLabel: interruptNotice.tone === 'success' && canResumeInterruptedRequest ? '继续输入' : undefined,
+        secondaryActionLabel: interruptNotice.tone === 'success' && canResumeInterruptedRequest ? t('chat.continueInput') : undefined,
         onSecondaryAction: interruptNotice.tone === 'success' && canResumeInterruptedRequest ? requestInputFocus : undefined,
         dismissible: true,
         onDismiss: dismissInterruptNotice,
       };
     }
 
-    if (isLoading && streamState && STREAM_STATE_LABELS[streamState]) {
-      const pendingAgentLabel = formatAgentNamesForStatus(relayStatusSnapshot.pendingAgentNames);
+    if (isLoading && streamState && streamStateLabels[streamState]) {
+      const pendingAgentLabel = formatAgentNamesForStatusLocalized(relayStatusSnapshot.pendingAgentNames);
       const activeAgentLabel = relayStatusSnapshot.activeProcessingAgentName
-        || formatAgentNamesForStatus(relayStatusSnapshot.activeAgentNames);
+        || formatAgentNamesForStatusLocalized(relayStatusSnapshot.activeAgentNames);
+      const stopActionLabel = currentConversation?.type === ConversationType.TEAM
+        ? t('chat.stopRelay')
+        : t('chat.stopGeneration');
 
       if (pendingAgentLabel && activeAgentLabel) {
         return {
           tone: 'info',
-          message: `${activeAgentLabel} 正在处理，已唤起 ${pendingAgentLabel} 待接力。按 Esc 可停止。`,
-          actionLabel: currentConversation?.type === ConversationType.TEAM ? '停止接力' : '停止生成',
+          message: t('chat.sessionProcessingWithPending', { active: activeAgentLabel, pending: pendingAgentLabel }),
+          actionLabel: stopActionLabel,
           onAction: handleStopGeneration,
           actionTone: 'danger',
         };
@@ -3757,8 +3874,8 @@ const ChatPage: React.FC = () => {
       if (pendingAgentLabel) {
         return {
           tone: 'info',
-          message: `已唤起 ${pendingAgentLabel}，等待接力。按 Esc 可停止。`,
-          actionLabel: currentConversation?.type === ConversationType.TEAM ? '停止接力' : '停止生成',
+          message: t('chat.sessionPendingOnly', { pending: pendingAgentLabel }),
+          actionLabel: stopActionLabel,
           onAction: handleStopGeneration,
           actionTone: 'danger',
         };
@@ -3767,8 +3884,8 @@ const ChatPage: React.FC = () => {
       if (relayStatusSnapshot.activeProcessingMessage?.isThinking && activeAgentLabel) {
         return {
           tone: 'info',
-          message: `${activeAgentLabel} 正在思考... 按 Esc 可停止。`,
-          actionLabel: currentConversation?.type === ConversationType.TEAM ? '停止接力' : '停止生成',
+          message: t('chat.sessionThinking', { active: activeAgentLabel }),
+          actionLabel: stopActionLabel,
           onAction: handleStopGeneration,
           actionTone: 'danger',
         };
@@ -3782,10 +3899,8 @@ const ChatPage: React.FC = () => {
         const rawStatusMessage = relayStatusSnapshot.activeProcessingMessage.statusMessage;
         return {
           tone: 'info',
-          message: rawStatusMessage.startsWith('正在')
-            ? `${activeAgentLabel} ${rawStatusMessage}，按 Esc 可停止。`
-            : `${activeAgentLabel}：${rawStatusMessage}，按 Esc 可停止。`,
-          actionLabel: currentConversation?.type === ConversationType.TEAM ? '停止接力' : '停止生成',
+          message: t('chat.sessionStatusRaw', { active: activeAgentLabel, status: rawStatusMessage }),
+          actionLabel: stopActionLabel,
           onAction: handleStopGeneration,
           actionTone: 'danger',
         };
@@ -3795,9 +3910,9 @@ const ChatPage: React.FC = () => {
         return {
           tone: 'info',
           message: currentConversation?.type === ConversationType.TEAM
-            ? `${activeAgentLabel} 正在接力处理中。按 Esc 可停止。`
-            : `${activeAgentLabel} 正在生成回复。按 Esc 可停止。`,
-          actionLabel: currentConversation?.type === ConversationType.TEAM ? '停止接力' : '停止生成',
+            ? t('chat.sessionTeamProcessing', { active: activeAgentLabel })
+            : t('chat.sessionDirectProcessing', { active: activeAgentLabel }),
+          actionLabel: stopActionLabel,
           onAction: handleStopGeneration,
           actionTone: 'danger',
         };
@@ -3805,8 +3920,8 @@ const ChatPage: React.FC = () => {
 
       return {
         tone: streamState === 'error' || streamState === 'timeout' ? 'warning' : 'info',
-        message: `${STREAM_STATE_LABELS[streamState]}${streamState === 'error' || streamState === 'timeout' ? '' : '，按 Esc 可停止。'}`,
-        actionLabel: currentConversation?.type === ConversationType.TEAM ? '停止接力' : '停止生成',
+        message: streamStateLabels[streamState] as string,
+        actionLabel: stopActionLabel,
         onAction: handleStopGeneration,
         actionTone: 'danger',
       };
@@ -3826,21 +3941,24 @@ const ChatPage: React.FC = () => {
     requestInputFocus,
     isLoading,
     streamState,
+    streamStateLabels,
     relayStatusSnapshot,
     currentConversation?.type,
     handleStopGeneration,
+    formatAgentNamesForStatusLocalized,
+    t,
   ]);
   
   return (
     <div className="flex h-full min-h-full overflow-hidden">
       <div className="hidden w-64 min-h-0 flex-shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
         <div className="p-4 border-b border-slate-200">
-          <h2 className="font-semibold text-slate-800">对话</h2>
+          <h2 className="font-semibold text-slate-800">{t('chat.sectionTitle')}</h2>
         </div>
         
         <div className="flex-1 overflow-y-auto p-2">
           <div className="mb-4">
-            <h3 className="px-2 py-1 text-xs font-medium text-slate-500 uppercase tracking-wider">私信</h3>
+            <h3 className="px-2 py-1 text-xs font-medium text-slate-500 uppercase tracking-wider">{t('chat.directSection')}</h3>
             <div className="space-y-1 mt-1">
               {agents.map((agent) => {
                 const isSelected = selectedAgentId === agent.id;
@@ -3871,7 +3989,7 @@ const ChatPage: React.FC = () => {
           
           {teams.length > 0 && (
             <div>
-              <h3 className="px-2 py-1 text-xs font-medium text-slate-500 uppercase tracking-wider">团队</h3>
+              <h3 className="px-2 py-1 text-xs font-medium text-slate-500 uppercase tracking-wider">{t('chat.teamSection')}</h3>
               <div className="space-y-1 mt-1">
                 {teams.map((team) => {
                   const isSelected = selectedTeamId === team.id;
@@ -3892,7 +4010,7 @@ const ChatPage: React.FC = () => {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{team.name}</p>
-                        <p className="text-xs text-slate-500">{team.members.length} 个成员</p>
+                        <p className="text-xs text-slate-500">{t('chat.teamMembers', { count: team.members.length })}</p>
                       </div>
                     </button>
                   );
@@ -3924,37 +4042,38 @@ const ChatPage: React.FC = () => {
                     <h2 className="truncate font-semibold text-slate-800">{currentConversation.name}</h2>
                     <p className="text-xs text-slate-500">
                       {currentConversation.type === ConversationType.TEAM
-                        ? `${currentTeamMembers.length} 个成员 · 可直接 @agent 接力`
+                        ? t('chat.teamHeaderDescription', { count: currentTeamMembers.length })
                         : currentDirectAgentProfilePreset
                           ? `${currentDirectAgentProfilePreset.label} · ${currentDirectAgentProfilePreset.summary}`
-                          : '适合直接问答与配置确认'}
+                          : t('chat.directHeaderDescription')}
                     </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       {currentConversation.type !== ConversationType.TEAM && currentDirectAgentProfilePreset && (
                         <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${currentDirectAgentProfilePreset.accent}`}>
-                          协作画像 · {currentDirectAgentProfilePreset.label}
+                          {t('chat.profileBadge')} · {currentDirectAgentProfilePreset.label}
                         </span>
                       )}
                       {currentConversation.type !== ConversationType.TEAM && currentDirectAgentPermissionPreset && (
                         <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${currentDirectAgentPermissionPreset.accent}`}>
-                          权限 · {currentDirectAgentPermissionPreset.label}
+                          {t('chat.permissionBadge')} · {currentDirectAgentPermissionPreset.label}
                         </span>
                       )}
                       {currentConversationCapabilities.length > 0 && (
                         <>
                           <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                            可用能力
+                            {t('chat.availableCapabilities')}
                           </span>
                           {currentConversationCapabilities.slice(0, 6).map((capability) => {
                             const Icon = getCapabilityIcon(capability.id);
+                            const capabilityLabel = getCapabilityLabel(t, capability);
                             return (
                               <span
                                 key={capability.id}
-                                title={capability.description || capability.label}
+                                title={capability.description || capabilityLabel}
                                 className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium ${getCapabilityTone(capability.id)}`}
                               >
                                 <Icon className="h-3.5 w-3.5" />
-                                {capability.label}
+                                {capabilityLabel}
                               </span>
                             );
                           })}
@@ -3975,7 +4094,7 @@ const ChatPage: React.FC = () => {
                     ? 'bg-violet-100 text-violet-700'
                     : 'bg-blue-100 text-blue-700'
                 }`}>
-                  {currentConversation.type === ConversationType.TEAM ? '团队接力' : '单聊'}
+                  {currentConversation.type === ConversationType.TEAM ? t('chat.teamRelay') : t('chat.directMessage')}
                 </span>
                 {messages.length > 0 && (
                   <div className="relative">
@@ -3989,7 +4108,7 @@ const ChatPage: React.FC = () => {
                       }`}
                     >
                       <Search className="h-3.5 w-3.5" strokeWidth={2} />
-                      查找历史
+                      {t('chat.historySearch')}
                       {historySearchMatches.length > 0 && (
                         <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
                           {historySearchIndex + 1}/{historySearchMatches.length}
@@ -4001,14 +4120,14 @@ const ChatPage: React.FC = () => {
                       <div className="absolute right-0 top-full z-20 mt-2 w-[min(92vw,32rem)] rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur">
                         <div className="flex items-center justify-between gap-3">
                           <div>
-                            <div className="text-sm font-semibold text-slate-800">查找当前会话</div>
-                            <div className="text-[11px] text-slate-400">共 {messageTurns.length} 轮，快捷键 Cmd/Ctrl + F</div>
+                            <div className="text-sm font-semibold text-slate-800">{t('chat.historySearchSession')}</div>
+                            <div className="text-[11px] text-slate-400">{t('chat.historySearchTurns', { count: messageTurns.length })}</div>
                           </div>
                           <button
                             type="button"
                             onClick={() => setIsHistorySearchOpen(false)}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-                            aria-label="关闭查找"
+                            aria-label={t('chat.closeSearch')}
                           >
                             <X className="h-4 w-4" strokeWidth={2} />
                           </button>
@@ -4024,7 +4143,7 @@ const ChatPage: React.FC = () => {
                                 setHistorySearchQuery(event.target.value);
                                 setHistorySearchIndex(0);
                               }}
-                              placeholder="输入关键词，快速定位聊天记录"
+                              placeholder={t('chat.historySearchPlaceholder')}
                               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-10 text-sm text-slate-700 outline-none transition focus:border-sky-300 focus:bg-white focus:ring-2 focus:ring-sky-100"
                             />
                             {historySearchQuery && (
@@ -4036,7 +4155,7 @@ const ChatPage: React.FC = () => {
                                   setActiveHistoryResultKey(null);
                                 }}
                                 className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-600"
-                                aria-label="清空搜索"
+                                aria-label={t('chat.searchClear')}
                               >
                                 <X className="h-3.5 w-3.5" strokeWidth={2} />
                               </button>
@@ -4051,7 +4170,7 @@ const ChatPage: React.FC = () => {
                             disabled={historySearchMatches.length === 0}
                             className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            上一个
+                            {t('chat.previousResult')}
                           </button>
                           <button
                             type="button"
@@ -4059,7 +4178,7 @@ const ChatPage: React.FC = () => {
                             disabled={historySearchMatches.length === 0}
                             className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            下一个
+                            {t('chat.nextResult')}
                           </button>
                           {historySearchMatches.length > 0 && (
                             <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
@@ -4094,7 +4213,7 @@ const ChatPage: React.FC = () => {
                         ? 'bg-violet-100 text-violet-700'
                         : 'bg-sky-100 text-sky-700'
                     }`}>
-                      {batonNavigationNotice.tone === 'team' ? '已切到团队接力' : '已回到单聊'}
+                      {batonNavigationNotice.tone === 'team' ? t('chat.teamSwitchNotice') : t('chat.dmSwitchNotice')}
                     </span>
                     <p className="min-w-0 text-sm text-slate-700">{batonNavigationNotice.message}</p>
                   </div>
@@ -4115,7 +4234,7 @@ const ChatPage: React.FC = () => {
                       type="button"
                       onClick={dismissBatonNavigationNotice}
                       className="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-white hover:text-slate-600"
-                      aria-label="关闭接力导航提示"
+                      aria-label={t('chat.closeBatonNotice')}
                     >
                       <X className="h-3.5 w-3.5" strokeWidth={2} />
                     </button>
@@ -4149,25 +4268,25 @@ const ChatPage: React.FC = () => {
                         <div className="h-16 w-5/6 animate-pulse rounded-3xl bg-slate-100" />
                       </div>
                       <p className="text-sm text-slate-500">
-                        正在加载这段会话的历史消息...
+                        {t('chat.loadHistory')}
                       </p>
                     </div>
                   ) : currentConversation.type !== ConversationType.TEAM && (currentDirectAgent?.setup_required || currentDirectAgent?.bootstrap_setup_pending) ? (
                     <div className="w-full max-w-2xl rounded-[28px] border border-accent-orange/30 bg-white px-6 py-6 text-left shadow-sm">
                       <div className="inline-flex rounded-full bg-accent-orange/10 px-3 py-1 text-xs font-semibold text-accent-orange">
-                        首次私聊引导
+                        {t('chat.onboardingBadge')}
                       </div>
-                      <h3 className="mt-4 text-lg font-semibold text-slate-900">{currentDirectAgent.name} 还没有完成首次配置</h3>
+                      <h3 className="mt-4 text-lg font-semibold text-slate-900">{t('chat.onboardingTitle', { name: currentDirectAgent.name })}</h3>
                       <p className="mt-2 text-sm text-slate-600">
                         {currentDirectAgent?.setup_required
-                          ? '先在多 Agent 管理里为它选择 provider 和 model，然后回到这里，用第一轮私聊继续约定职责、语气和协作边界。'
-                          : '模型已经可用，但这位 Agent 的专属档案还处于首次引导阶段。建议先用一轮私聊明确职责、语气、边界和协作方式。'}
+                          ? t('chat.onboardingDescriptionSetupRequired')
+                          : t('chat.onboardingDescriptionReady')}
                       </p>
                       {currentDirectAgentProfilePreset && (
                         <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${currentDirectAgentProfilePreset.accent}`}>
-                              协作画像 · {currentDirectAgentProfilePreset.label}
+                              {t('chat.profileBadge')} · {currentDirectAgentProfilePreset.label}
                             </span>
                             <span className="text-xs text-slate-500">{currentDirectAgentProfilePreset.summary}</span>
                           </div>
@@ -4180,18 +4299,18 @@ const ChatPage: React.FC = () => {
                             href="/teams"
                             className="inline-flex items-center rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
                           >
-                            去多 Agent 管理
+                            {t('chat.goManageAgents')}
                           </a>
                         )}
                         <button
-                          onClick={() => applyInputDraftPreset(currentDirectStarterPrompts[0] || '开始完善配置吧，请先带我完成第一轮引导，逐步确认职责、语气、边界和协作方式。')}
+                          onClick={() => applyInputDraftPreset(currentDirectStarterPrompts[0] || t('chat.onboardingDefaultPrompt'))}
                           className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                         >
-                          {currentDirectAgent?.setup_required ? '先准备引导问题' : '开始首轮引导'}
+                          {currentDirectAgent?.setup_required ? t('chat.onboardingPrepare') : t('chat.onboardingStart')}
                         </button>
                       </div>
                       <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-xs text-slate-600">
-                        <div className="font-semibold text-slate-700">建议第一轮先确认</div>
+                        <div className="font-semibold text-slate-700">{t('chat.onboardingChecklist')}</div>
                         <div className="mt-2 flex flex-wrap gap-2">
                           {currentDirectOnboardingChecklist.map((item) => (
                             <span key={item} className="rounded-full border border-slate-200 bg-white px-2.5 py-1">
@@ -4199,7 +4318,7 @@ const ChatPage: React.FC = () => {
                             </span>
                           ))}
                         </div>
-                        <div className="mt-3 font-semibold text-slate-700">快捷开场</div>
+                        <div className="mt-3 font-semibold text-slate-700">{t('chat.onboardingOpeners')}</div>
                         <div className="mt-2 flex flex-wrap gap-2">
                           {currentDirectStarterPrompts.map((prompt) => (
                             <button
@@ -4221,21 +4340,21 @@ const ChatPage: React.FC = () => {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
                       </div>
-                      <p className="text-lg font-medium">开始对话</p>
+                      <p className="text-lg font-medium">{t('chat.startConversationTitle')}</p>
                       <p className="text-sm mt-1">
                         {currentConversation.type === ConversationType.TEAM
-                          ? '发送消息，团队成员将回复你'
-                          : '发送消息开始与 Agent 对话'}
+                          ? t('chat.startConversationDescriptionTeam')
+                          : t('chat.startConversationDescriptionDirect')}
                       </p>
                       {currentConversation.type !== ConversationType.TEAM && currentDirectAgentProfilePreset && (
                         <div className="mt-4 max-w-2xl rounded-[24px] border border-slate-200 bg-white px-4 py-4 text-left shadow-sm">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${currentDirectAgentProfilePreset.accent}`}>
-                              协作画像 · {currentDirectAgentProfilePreset.label}
+                              {t('chat.profileBadge')} · {currentDirectAgentProfilePreset.label}
                             </span>
                             <span className="text-xs text-slate-500">{currentDirectAgentProfilePreset.summary}</span>
                           </div>
-                          <div className="mt-3 text-xs font-semibold text-slate-700">推荐开场</div>
+                          <div className="mt-3 text-xs font-semibold text-slate-700">{t('chat.onboardingOpeners')}</div>
                           <div className="mt-2 flex flex-wrap gap-2">
                             {currentDirectStarterPrompts.map((prompt) => (
                               <button
@@ -4269,7 +4388,7 @@ const ChatPage: React.FC = () => {
                       )}
                       {currentConversation.type !== ConversationType.TEAM && currentDirectAgent && (
                         <p className="mt-3 max-w-2xl text-center text-xs text-slate-500">
-                          例如可以直接让 {currentDirectAgent.name} 打开网页、安排提醒、读取文件或执行终端命令。
+                          {t('chat.startConversationCapabilityHint', { name: currentDirectAgent.name })}
                         </p>
                       )}
                     </>
@@ -4280,13 +4399,13 @@ const ChatPage: React.FC = () => {
                   <div className="rounded-[28px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                        会话概览
+                        {t('chat.sessionOverview')}
                       </span>
                       <span className="text-sm text-slate-600">{currentConversationSummary}</span>
                     </div>
                     {currentConversation.type === ConversationType.TEAM && (
                       <p className="mt-2 text-xs text-slate-500">
-                        建议直接在输入框里使用 <code>@AgentName</code> 指定下一棒，由界面按回合展示接力过程。
+                        {t('chat.teamRelayHint')}
                       </p>
                     )}
                   </div>
@@ -4298,7 +4417,7 @@ const ChatPage: React.FC = () => {
                     const isTeamTurn = currentConversation.type === ConversationType.TEAM;
                     const isInterruptedTurn = canResumeInterruptedRequest && lastInterruptedTurnId === turn.id;
                     const relayTimelineSteps = isTeamTurn
-                      ? getRelayTimelineSteps(turn, getAgentName)
+                      ? getRelayTimelineStepsLocalized(turn)
                       : [];
                     const isTimelineExpanded = relayTimelineSteps.length > 0
                       ? (expandedTimelineTurnIds[turn.id] ?? false)
@@ -4309,24 +4428,24 @@ const ChatPage: React.FC = () => {
                     const relayTimelineFailedCount = relayTimelineSteps.filter((step) => step.state === 'error').length;
                     const finalResponseGroup = turn.responseGroups.at(-1);
                     const finalResponderName = finalResponseGroup?.[0]
-                      ? (finalResponseGroup[0].agentName || getAgentName(finalResponseGroup[0].agentId) || '助手')
+                      ? (finalResponseGroup[0].agentName || getAgentName(finalResponseGroup[0].agentId) || t('chat.assistantFallback'))
                       : undefined;
                     const activeRelayStep = relayTimelineSteps.find((step) => step.state === 'active');
                     const waitingRelayStep = relayTimelineSteps.find((step) => step.state === 'waiting');
                     const batonHeadline = activeRelayStep
-                      ? `当前接棒: ${activeRelayStep.label}`
+                      ? t('chat.timelineHeadlineActive', { label: activeRelayStep.label })
                       : waitingRelayStep
-                        ? `等待下一棒: ${waitingRelayStep.label}`
+                        ? t('chat.timelineHeadlineWaiting', { label: waitingRelayStep.label })
                         : finalResponderName
-                          ? `最终输出: ${finalResponderName}`
-                          : '本轮接力已完成';
+                          ? t('chat.timelineHeadlineFinal', { name: finalResponderName })
+                          : t('chat.timelineHeadlineDone');
                     const batonDetail = activeRelayStep
                       ? activeRelayStep.detail
                       : waitingRelayStep
                         ? waitingRelayStep.detail
                         : relayTimelineFailedCount > 0
-                          ? '本轮存在失败棒次，建议展开时间线查看详情。'
-                          : '当前没有正在处理的棒次。';
+                          ? t('chat.timelineDetailFailed')
+                          : t('chat.timelineDetailIdle');
                     const isCollapsibleRelay = isTeamTurn && turn.relayCount > 1;
                     const allowRelayCollapse = turn.relayCount > MAX_VISIBLE_RELAY_GROUPS_WITHOUT_COLLAPSE;
                     const isExpanded = isCollapsibleRelay
@@ -4363,7 +4482,7 @@ const ChatPage: React.FC = () => {
                     const relayRenderItems = buildRelayRenderItems(
                       turn.responseGroups,
                       visibleRelayGroupIndexes,
-                      getAgentName,
+                      getRelayGroupLabelLocalized,
                     );
                     const hiddenRelayCount = relayRenderItems.reduce(
                       (total, item) => total + (item.type === 'summary' ? item.hiddenCount : 0),
@@ -4388,27 +4507,27 @@ const ChatPage: React.FC = () => {
                         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                              第 {idx + 1} 轮
+                              {t('chat.turnLabel', { turn: idx + 1 })}
                             </span>
                             {isTeamTurn && (
                               <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700">
-                                {turn.relayCount > 1 ? `接力 ${turn.relayCount} 棒` : '单轮响应'}
+                                {turn.relayCount > 1 ? t('chat.relayCount', { count: turn.relayCount }) : t('chat.singleResponse')}
                               </span>
                             )}
                             {turn.hasError && (
                               <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">
-                                本轮出现失败
+                                {t('chat.turnHasFailure')}
                               </span>
                             )}
                             {isInterruptedTurn && (
                               <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                                本轮在这里被中断
+                                {t('chat.turnInterrupted')}
                               </span>
                             )}
                           </div>
                           {participantNames.length > 0 && (
                             <span className="text-xs text-slate-500">
-                              响应者: {participantNames.join(' · ')}
+                              {t('chat.responders', { names: participantNames.join(' · ') })}
                             </span>
                           )}
                         </div>
@@ -4418,26 +4537,26 @@ const ChatPage: React.FC = () => {
                             <div className="space-y-1">
                               <div className="flex flex-wrap items-center gap-2 text-xs text-emerald-800">
                                 <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold shadow-sm">
-                                  中断恢复
+                                  {t('chat.interruptResumeBadge')}
                                 </span>
-                                <span>你可以直接续跑这一轮，或回到输入框改写后再发。</span>
+                                <span>{t('chat.interruptResumeHint')}</span>
                               </div>
                               {turn.userMessage?.content && (
                                 <p className="text-sm text-emerald-900">
-                                  上次请求: {buildRequestPreview(turn.userMessage.content, 40)}
+                                  {t('chat.lastRequest', { preview: buildRequestPreviewLocalized(turn.userMessage.content, 40) })}
                                 </p>
                               )}
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                               <ChatIconButton
-                                label="从这里继续"
+                                label={t('chat.resumeFromHere')}
                                 dataTestId="chat-turn-resume"
                                 onClick={() => void handleResumeInterruptedRequest()}
                                 tone="success"
                                 icon={<CirclePlay className="h-4 w-4" strokeWidth={2} />}
                               />
                               <ChatIconButton
-                                label="继续输入"
+                                label={t('chat.continueInput')}
                                 onClick={requestInputFocus}
                                 tone="success"
                                 icon={<PencilLine className="h-4 w-4" strokeWidth={2} />}
@@ -4451,12 +4570,12 @@ const ChatPage: React.FC = () => {
                             <div className="flex flex-wrap items-center justify-between gap-3">
                               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                                 <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-slate-700 shadow-sm">
-                                  接力时间线
+                                  {t('chat.timelineTitle')}
                                 </span>
-                                <span>按棒次查看当前轮次的等待、处理中、完成与失败状态。</span>
+                                <span>{t('chat.timelineHint')}</span>
                               </div>
                               <ChatIconButton
-                                label={isTimelineExpanded ? '折叠接力时间线' : '展开接力时间线'}
+                                label={isTimelineExpanded ? t('chat.timelineCollapse') : t('chat.timelineExpand')}
                                 dataTestId="chat-turn-timeline-toggle"
                                 onClick={() => toggleTimelineExpanded(turn.id)}
                                 icon={isTimelineExpanded
@@ -4481,7 +4600,7 @@ const ChatPage: React.FC = () => {
                                 }`}>
                                   <div className="flex flex-wrap items-center gap-2 text-xs">
                                     <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-slate-700 shadow-sm">
-                                      Live Baton
+                                      {t('chat.liveBaton')}
                                     </span>
                                     <span className={`inline-flex items-center rounded-full px-2.5 py-1 font-medium ${
                                       activeRelayStep
@@ -4493,19 +4612,19 @@ const ChatPage: React.FC = () => {
                                             : 'bg-emerald-100 text-emerald-700'
                                     }`}>
                                       {activeRelayStep
-                                        ? '处理中'
+                                        ? t('chat.statusActive')
                                         : waitingRelayStep
-                                          ? '等待中'
+                                          ? t('chat.statusWaiting')
                                           : relayTimelineFailedCount > 0
-                                            ? '有失败'
-                                            : '已完成'}
+                                            ? t('chat.timelineHasFailure')
+                                            : t('chat.statusDone')}
                                     </span>
                                     <span className="inline-flex items-center rounded-full bg-white/80 px-2.5 py-1 font-medium text-slate-600">
-                                      共 {relayTimelineSteps.length} 棒
+                                      {t('chat.totalBatons', { count: relayTimelineSteps.length })}
                                     </span>
                                     {activeRelayStep && waitingRelayStep && (
                                       <span className="inline-flex items-center rounded-full bg-white/80 px-2.5 py-1 font-medium text-slate-600">
-                                        下一棒: {waitingRelayStep.label}
+                                        {t('chat.nextBaton', { label: waitingRelayStep.label })}
                                       </span>
                                     )}
                                   </div>
@@ -4521,8 +4640,8 @@ const ChatPage: React.FC = () => {
                                     <button
                                       key={`${step.key}:collapsed`}
                                       type="button"
-                                      title={`定位到第 ${timelineIdx + 1} 棒：${step.label}`}
-                                      aria-label={`定位到第 ${timelineIdx + 1} 棒：${step.label}`}
+                                      title={t('chat.jumpToBaton', { index: timelineIdx + 1, label: step.label })}
+                                      aria-label={t('chat.jumpToBaton', { index: timelineIdx + 1, label: step.label })}
                                       onClick={() => jumpToRelayStep(turn.id, step.groupIndex)}
                                       className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${
                                         step.state === 'error'
@@ -4543,7 +4662,7 @@ const ChatPage: React.FC = () => {
                                               ? 'bg-amber-500'
                                               : 'bg-emerald-500'
                                       }`} />
-                                      <span>第 {timelineIdx + 1} 棒</span>
+                                      <span>{t('chat.batonLabel', { index: timelineIdx + 1 })}</span>
                                       <span className="max-w-[14rem] truncate">{step.label}</span>
                                     </button>
                                   ))}
@@ -4551,27 +4670,27 @@ const ChatPage: React.FC = () => {
                                 <div className="flex flex-wrap items-center gap-2">
                                   {relayTimelineCompletedCount > 0 && (
                                     <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                                      已完成 {relayTimelineCompletedCount}
+                                      {t('chat.completedCount', { count: relayTimelineCompletedCount })}
                                     </span>
                                   )}
                                   {relayTimelineActiveCount > 0 && (
                                     <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">
-                                      处理中 {relayTimelineActiveCount}
+                                      {t('chat.activeCount', { count: relayTimelineActiveCount })}
                                     </span>
                                   )}
                                   {relayTimelineWaitingCount > 0 && (
                                     <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
-                                      等待中 {relayTimelineWaitingCount}
+                                      {t('chat.waitingCount', { count: relayTimelineWaitingCount })}
                                     </span>
                                   )}
                                   {relayTimelineFailedCount > 0 && (
                                     <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">
-                                      失败 {relayTimelineFailedCount}
+                                      {t('chat.failedCount', { count: relayTimelineFailedCount })}
                                     </span>
                                   )}
                                   {finalResponderName && (
                                     <span className="text-xs text-slate-500">
-                                      最终输出: {finalResponderName}
+                                      {t('chat.finalOutput', { name: finalResponderName })}
                                     </span>
                                   )}
                                 </div>
@@ -4590,8 +4709,8 @@ const ChatPage: React.FC = () => {
                                       <button
                                         type="button"
                                         data-testid="chat-turn-timeline-step"
-                                        title={`定位到第 ${timelineIdx + 1} 棒：${step.label}`}
-                                        aria-label={`定位到第 ${timelineIdx + 1} 棒：${step.label}`}
+                                        title={t('chat.jumpToBaton', { index: timelineIdx + 1, label: step.label })}
+                                        aria-label={t('chat.jumpToBaton', { index: timelineIdx + 1, label: step.label })}
                                         onClick={() => jumpToRelayStep(turn.id, step.groupIndex)}
                                         className={`min-w-[144px] max-w-[220px] rounded-2xl border px-3 py-2 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${
                                           step.state === 'error'
@@ -4609,7 +4728,7 @@ const ChatPage: React.FC = () => {
                                       >
                                         <div className="flex flex-wrap items-center gap-2">
                                           <span className="text-xs font-semibold text-slate-700">
-                                            第 {timelineIdx + 1} 棒
+                                            {t('chat.batonLabel', { index: timelineIdx + 1 })}
                                           </span>
                                           <span
                                             className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
@@ -4623,16 +4742,16 @@ const ChatPage: React.FC = () => {
                                             }`}
                                           >
                                             {step.state === 'error'
-                                              ? '失败'
+                                              ? t('chat.statusFailed')
                                               : step.state === 'active'
-                                                ? '处理中'
+                                                ? t('chat.statusActive')
                                                 : step.state === 'waiting'
-                                                  ? '等待中'
-                                                  : '已完成'}
+                                                  ? t('chat.statusWaiting')
+                                                  : t('chat.statusDone')}
                                           </span>
                                           {step.isFinal && (
                                             <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                                              最终输出
+                                              {t('chat.finalOutputBadge')}
                                             </span>
                                           )}
                                         </div>
@@ -4660,30 +4779,30 @@ const ChatPage: React.FC = () => {
                               <div className="space-y-1">
                                 <div className="flex flex-wrap items-center gap-2 text-xs text-violet-700">
                                   <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-violet-700 shadow-sm">
-                                    团队接力摘要
+                                    {t('chat.relaySummaryTitle')}
                                   </span>
                                   {finalResponderName && (
-                                    <span>最终回复: {finalResponderName}</span>
+                                    <span>{t('chat.finalReply', { name: finalResponderName })}</span>
                                   )}
-                                  <span>参与成员: {participantNames.length}</span>
+                                  <span>{t('chat.participantCount', { count: participantNames.length })}</span>
                                   {inspectedStep && (
                                     <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-1 font-medium text-sky-700 ring-1 ring-sky-200">
-                                      正在查看第 {inspectedStep.groupIndex + 1} 棒
+                                      {t('chat.inspectingStep', { index: inspectedStep.groupIndex + 1 })}
                                     </span>
                                   )}
                                 </div>
                                 <p className="text-sm text-slate-600">
                                   {inspectedStep
-                                    ? `你当前定位在第 ${inspectedStep.groupIndex + 1} 棒，来自 ${inspectedStep.label}，状态为${inspectedStep.state === 'error' ? '失败' : inspectedStep.state === 'active' ? '处理中' : inspectedStep.state === 'waiting' ? '等待中' : '已完成'}。`
+                                    ? t('chat.inspectedStepDetail', { index: inspectedStep.groupIndex + 1, label: inspectedStep.label, state: relayStateLabel(inspectedStep.state) })
                                     : isExpanded
-                                      ? '当前已展开完整接力过程，适合排查中间棒次的转交与失败点。'
+                                      ? t('chat.relayExpandedDetail')
                                       : hiddenRelayCount > 0
-                                        ? `当前默认保留关键棒次，已折叠 ${hiddenRelayCount} 段稳定接力过程。`
-                                        : '当前所有关键棒次都已直接展示，无需额外展开。'}
+                                        ? t('chat.relayCollapsedDetail', { count: hiddenRelayCount })
+                                        : t('chat.relayAllVisible')}
                                 </p>
                               </div>
                               <ChatIconButton
-                                label={isExpanded ? '收起接力过程' : '展开接力过程'}
+                                label={isExpanded ? t('chat.collapseRelayProcess') : t('chat.expandRelayProcess')}
                                 dataTestId="chat-turn-toggle"
                                 onClick={() => toggleTurnExpanded(turn.id)}
                                 tone="violet"
@@ -4730,26 +4849,26 @@ const ChatPage: React.FC = () => {
                                       <div className="space-y-1">
                                         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                                           <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-slate-700 shadow-sm">
-                                            已折叠 {item.hiddenCount} 棒稳定转交
+                                            {t('chat.collapsedStableRelay', { count: item.hiddenCount })}
                                           </span>
                                           <span>
-                                            第 {item.startIndex + 1} 到 {item.endIndex + 1} 棒
+                                            {t('chat.batonRange', { start: item.startIndex + 1, end: item.endIndex + 1 })}
                                           </span>
                                         </div>
                                         <p className="text-sm text-slate-600">
-                                          {formatCollapsedRelayLabels(item.labels)}
+                                          {formatCollapsedRelayLabelsLocalized(item.labels)}
                                         </p>
                                       </div>
                                       <div className="flex items-center gap-2">
                                         <ChatIconButton
-                                          label="展开这一段接力过程"
+                                          label={t('chat.expandRelaySegment')}
                                           dataTestId="chat-turn-expand-segment"
                                           onClick={() => toggleRelaySegmentExpanded(turn.id, item.startIndex, item.endIndex)}
                                           className="group-hover:border-slate-400"
                                           icon={<ChevronsDown className="h-4 w-4" strokeWidth={2} />}
                                         />
                                         <ChatIconButton
-                                          label="展开完整接力过程"
+                                          label={t('chat.expandFullRelay')}
                                           onClick={() => toggleTurnExpanded(turn.id)}
                                           className="group-hover:border-slate-400"
                                           icon={<UnfoldVertical className="h-4 w-4" strokeWidth={2} />}
@@ -4768,7 +4887,7 @@ const ChatPage: React.FC = () => {
                                 ? isRelaySegmentStart(manualExpandedSegments, item.groupIndex)
                                 : null;
                               const groupExecutionSteps = item.group.reduce<ExecutionStep[]>(
-                                (allSteps, message) => mergeExecutionSteps(allSteps, message.executionSteps),
+                                (allSteps, message) => mergeLocalizedExecutionSteps(allSteps, message.executionSteps),
                                 [],
                               );
 
@@ -4782,18 +4901,18 @@ const ChatPage: React.FC = () => {
                                       <div className="space-y-1">
                                         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                                           <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-sky-700 shadow-sm">
-                                            已展开这一段
+                                            {t('chat.expandedSegment')}
                                           </span>
                                           <span>
-                                            第 {expandedSegmentAtStart.startIndex + 1} 到 {expandedSegmentAtStart.endIndex + 1} 棒
+                                            {t('chat.batonRange', { start: expandedSegmentAtStart.startIndex + 1, end: expandedSegmentAtStart.endIndex + 1 })}
                                           </span>
                                         </div>
                                         <p className="text-sm text-slate-600">
-                                          当前只补充展示这段稳定转交，并已自动定位到这一段的起始棒次；其余非关键棒次仍保持折叠。
+                                          {t('chat.expandedSegmentHint')}
                                         </p>
                                       </div>
                                       <ChatIconButton
-                                        label="收起这一段接力过程"
+                                        label={t('chat.collapseRelaySegment')}
                                         onClick={() => toggleRelaySegmentExpanded(
                                           turn.id,
                                           expandedSegmentAtStart.startIndex,
@@ -4866,7 +4985,7 @@ const ChatPage: React.FC = () => {
                   className="absolute bottom-4 right-4 inline-flex items-center gap-1 rounded-full border border-sky-200 bg-white/95 px-3 py-2 text-xs font-medium text-sky-700 shadow-lg backdrop-blur transition hover:-translate-y-0.5 hover:bg-sky-50"
                 >
                   <ArrowDown className="h-3.5 w-3.5" strokeWidth={2} />
-                  回到底部
+                  {t('chat.scrollToBottom')}
                 </button>
               )}
             </div>
@@ -4884,12 +5003,12 @@ const ChatPage: React.FC = () => {
                 draftPresetText={inputDraftPreset.text}
                 draftPresetKey={inputDraftPreset.key}
                 placeholder={
-                  !isOnline ? '网络已断开，请检查网络连接' :
+                  !isOnline ? t('chat.placeholderOffline') :
                   currentConversation.type === ConversationType.TEAM
-                    ? '发送消息到团队... (使用 @ 提及 Agent)'
+                    ? t('chat.placeholderTeam')
                     : currentDirectAgentProfilePreset
-                      ? `给 ${currentConversation.name || 'Agent'} 发送消息，例如：${currentDirectAgentProfilePreset.placeholderHint}`
-                      : `给 ${currentConversation.name || 'Agent'} 发送消息...`
+                      ? t('chat.placeholderDirectHint', { name: currentConversation.name || 'Agent', hint: currentDirectAgentProfilePreset.placeholderHint })
+                      : t('chat.placeholderDirect', { name: currentConversation.name || 'Agent' })
                 }
               />
             </div>
@@ -4901,8 +5020,8 @@ const ChatPage: React.FC = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
             </div>
-            <p className="text-xl font-medium">选择一个对话</p>
-            <p className="text-sm mt-2">从左侧选择一个 Agent 或团队开始对话</p>
+            <p className="text-xl font-medium">{t('chat.selectConversationTitle')}</p>
+            <p className="text-sm mt-2">{t('chat.selectConversationDescription')}</p>
           </div>
         )}
       </div>

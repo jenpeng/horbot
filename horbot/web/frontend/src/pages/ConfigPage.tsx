@@ -8,14 +8,16 @@ import AgentConfigSection from '../components/config/AgentConfigSection';
 import WorkspaceConfigSection from '../components/config/WorkspaceConfigSection';
 import WebSearchConfigSection from '../components/config/WebSearchConfigSection';
 import ProviderConfigSection from '../components/config/ProviderConfigSection';
+import { useI18n } from '../contexts/I18nContext';
 
 const ConfigPage: React.FC = () => {
+  const { t } = useI18n();
   const state = useConfigurationState();
   const [reloadConfirmOpen, setReloadConfirmOpen] = useState(false);
 
   const handleReload = () => {
     if (!state.hasPendingChanges) {
-      void state.refreshConfigFromServer('配置已重新从磁盘加载');
+      void state.refreshConfigFromServer(t('config.reloadSuccess'));
       return;
     }
     setReloadConfirmOpen(true);
@@ -65,7 +67,7 @@ const ConfigPage: React.FC = () => {
           webSearchMaxResults={state.currentWebSearchConfig.maxResults}
         />
 
-        {state.validationData && <ConfigCheckResult data={state.validationData} title="配置体检" />}
+        {state.validationData && <ConfigCheckResult data={state.validationData} title={t('dashboard.diagnostics.configCheck')} />}
 
         {state.error && (
           <div className="fixed top-4 right-4 z-50 px-4 py-3 bg-accent-red/5 border border-accent-red/20 rounded-xl shadow-lg flex items-center gap-3 animate-slide-in-right">
@@ -161,13 +163,13 @@ const ConfigPage: React.FC = () => {
 
       <ConfirmDialog
         isOpen={reloadConfirmOpen}
-        title="放弃未保存修改？"
-        message="当前页面还有未保存的配置更改。重新加载会丢弃这些本地修改。"
-        confirmText="重新加载"
-        cancelText="继续编辑"
+        title={t('config.confirmDiscardTitle')}
+        message={t('config.confirmDiscardMessage')}
+        confirmText={t('config.reload')}
+        cancelText={t('config.continueEditing')}
         onConfirm={() => {
           setReloadConfirmOpen(false);
-          void state.refreshConfigFromServer('配置已重新从磁盘加载');
+          void state.refreshConfigFromServer(t('config.reloadSuccess'));
         }}
         onCancel={() => setReloadConfirmOpen(false)}
         variant="warning"

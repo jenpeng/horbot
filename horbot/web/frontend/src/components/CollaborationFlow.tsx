@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useI18n } from '../contexts/I18nContext';
 
 interface AgentInfo {
   id: string;
@@ -29,6 +30,7 @@ interface CollaborationFlowProps {
 }
 
 const CollaborationFlow: React.FC<CollaborationFlowProps> = ({ teamId }) => {
+  const { t } = useI18n();
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [tasks, setTasks] = useState<DelegatedTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,6 +113,19 @@ const CollaborationFlow: React.FC<CollaborationFlowProps> = ({ teamId }) => {
     }
   };
 
+  const getStatusLabel = (status: string): string => {
+    switch (status) {
+      case 'completed':
+        return t('collaborationFlow.status.completed');
+      case 'failed':
+        return t('collaborationFlow.status.failed');
+      case 'pending':
+        return t('collaborationFlow.status.pending');
+      default:
+        return t('common.unknown');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -130,37 +145,37 @@ const CollaborationFlow: React.FC<CollaborationFlowProps> = ({ teamId }) => {
   return (
     <div className="bg-white rounded-2xl border border-surface-200 p-6">
       <div className="flex items-center justify-between mb-6">
-        <h3 className="text-lg font-semibold text-surface-900">协作流程</h3>
+        <h3 className="text-lg font-semibold text-surface-900">{t('collaborationFlow.title')}</h3>
         <div className="flex items-center gap-4 text-sm">
           <div className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full bg-semantic-success" />
-            <span className="text-surface-600">已完成</span>
+            <span className="text-surface-600">{t('collaborationFlow.status.completed')}</span>
           </div>
           <div className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full bg-semantic-warning" />
-            <span className="text-surface-600">进行中</span>
+            <span className="text-surface-600">{t('collaborationFlow.status.pending')}</span>
           </div>
           <div className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full bg-semantic-error" />
-            <span className="text-surface-600">失败</span>
+            <span className="text-surface-600">{t('collaborationFlow.status.failed')}</span>
           </div>
         </div>
       </div>
 
       {agents.length === 0 ? (
         <div className="text-center py-12 text-surface-500">
-          暂无 Agent 数据
+          {t('collaborationFlow.emptyAgents')}
         </div>
       ) : (
         <div className="space-y-6">
           <div className="rounded-2xl border border-surface-200 bg-surface-50 p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h4 className="text-sm font-semibold text-surface-900">当前接入 Agent</h4>
-                <p className="mt-1 text-xs text-surface-500">所有 Agent 在全局层面平级展示；团队中的主次与职责请在团队配置里定义。</p>
+                <h4 className="text-sm font-semibold text-surface-900">{t('collaborationFlow.connectedAgents')}</h4>
+                <p className="mt-1 text-xs text-surface-500">{t('collaborationFlow.connectedAgentsHint')}</p>
               </div>
               <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-surface-600 shadow-sm">
-                共 {agents.length} 个
+                {t('collaborationFlow.totalAgents', { count: agents.length })}
               </span>
             </div>
             <div className="mt-4 flex flex-wrap justify-center gap-4">
@@ -172,7 +187,7 @@ const CollaborationFlow: React.FC<CollaborationFlowProps> = ({ teamId }) => {
                     </svg>
                   </div>
                   <p className="mt-1.5 text-sm font-medium text-surface-900">{agent.name}</p>
-                  <p className="text-xs text-surface-500 text-center">{agent.capabilities[0] || '通用协作'}</p>
+                  <p className="text-xs text-surface-500 text-center">{agent.capabilities[0] || t('collaborationFlow.defaultCapability')}</p>
                 </div>
               ))}
             </div>
@@ -180,7 +195,7 @@ const CollaborationFlow: React.FC<CollaborationFlowProps> = ({ teamId }) => {
 
           {tasks.length > 0 && (
             <div className="mt-8">
-              <h4 className="text-sm font-medium text-surface-700 mb-3">任务流程</h4>
+              <h4 className="text-sm font-medium text-surface-700 mb-3">{t('collaborationFlow.taskFlow')}</h4>
               <div className="space-y-3">
                 {tasks.slice(0, 10).map((task) => {
                   const sourceAgent = getAgentById(task.source_agent_id);
@@ -222,7 +237,7 @@ const CollaborationFlow: React.FC<CollaborationFlowProps> = ({ teamId }) => {
                             task.status === 'failed' ? 'bg-semantic-error-light text-semantic-error' :
                             'bg-semantic-warning-light text-semantic-warning'
                           }`}>
-                            {task.status === 'completed' ? '已完成' : task.status === 'failed' ? '失败' : '进行中'}
+                            {getStatusLabel(task.status)}
                           </span>
                         </div>
                       </div>
@@ -231,25 +246,25 @@ const CollaborationFlow: React.FC<CollaborationFlowProps> = ({ teamId }) => {
                         <div className="mt-4 pt-4 border-t border-surface-200">
                           <div className="grid grid-cols-2 gap-4 text-sm">
                             <div>
-                              <p className="text-surface-500">任务 ID</p>
+                              <p className="text-surface-500">{t('collaborationFlow.taskId')}</p>
                               <p className="font-mono text-surface-900">{task.id}</p>
                             </div>
                             <div>
-                              <p className="text-surface-500">优先级</p>
+                              <p className="text-surface-500">{t('collaborationFlow.priority')}</p>
                               <p className="text-surface-900">{task.priority}</p>
                             </div>
                             <div>
-                              <p className="text-surface-500">创建时间</p>
+                              <p className="text-surface-500">{t('collaborationFlow.createdAt')}</p>
                               <p className="text-surface-900">{new Date(task.created_at).toLocaleString()}</p>
                             </div>
                             <div>
-                              <p className="text-surface-500">完成时间</p>
+                              <p className="text-surface-500">{t('collaborationFlow.completedAt')}</p>
                               <p className="text-surface-900">{task.completed_at ? new Date(task.completed_at).toLocaleString() : '-'}</p>
                             </div>
                           </div>
                           {task.result && (
                             <div className="mt-3">
-                              <p className="text-surface-500 text-sm">结果</p>
+                              <p className="text-surface-500 text-sm">{t('collaborationFlow.result')}</p>
                               <pre className="mt-1 p-3 bg-surface-100 rounded-lg text-xs overflow-auto max-h-32">
                                 {typeof task.result === 'string' ? task.result : JSON.stringify(task.result, null, 2)}
                               </pre>
@@ -257,7 +272,7 @@ const CollaborationFlow: React.FC<CollaborationFlowProps> = ({ teamId }) => {
                           )}
                           {task.error && (
                             <div className="mt-3">
-                              <p className="text-semantic-error text-sm">错误</p>
+                              <p className="text-semantic-error text-sm">{t('collaborationFlow.error')}</p>
                               <p className="mt-1 text-sm text-surface-700">{task.error}</p>
                             </div>
                           )}
@@ -272,7 +287,7 @@ const CollaborationFlow: React.FC<CollaborationFlowProps> = ({ teamId }) => {
 
           {tasks.length === 0 && (
             <div className="text-center py-8 text-surface-500">
-              暂无协作任务
+              {t('collaborationFlow.emptyTasks')}
             </div>
           )}
         </div>

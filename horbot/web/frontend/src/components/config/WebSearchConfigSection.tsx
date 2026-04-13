@@ -1,5 +1,6 @@
 import type { WebSearchApiKeyMode } from '../../hooks/useConfigurationState';
 import React from 'react';
+import { useI18n } from '../../contexts/I18nContext';
 import type { WebSearchProvider } from '../../types';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -34,15 +35,16 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
   onWebSearchChange,
   onSaveWebSearch,
 }) => {
+  const { t } = useI18n();
   const providerRequiresApiKey = Boolean(selectedWebSearchProvider?.requires_api_key);
   const hasMaskedKey = currentWebSearchConfig.hasApiKey && currentWebSearchConfig.apiKeyMasked;
   const apiKeyActionLabel = currentWebSearchConfig.apiKeyMode === 'clear'
-    ? '本次保存将清空已保存密钥'
+    ? t('config.webSearch.keyClear')
     : currentWebSearchConfig.apiKeyMode === 'replace'
-      ? '本次保存将使用新密钥覆盖旧值'
+      ? t('config.webSearch.keyReplace')
       : currentWebSearchConfig.hasApiKey
-        ? '当前将保留已保存密钥'
-        : '当前尚未配置密钥';
+        ? t('config.webSearch.keyKeep')
+        : t('config.webSearch.keyMissing');
 
   return (
     <Card padding="none" variant="default" className="shadow-sm hover:shadow-md transition-shadow duration-300">
@@ -53,13 +55,13 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
           </div>
-          Web Search
+          {t('config.section.webSearch')}
         </h2>
-        <p className="text-base text-surface-600 mt-2 ml-12">配置联网搜索提供商、API Key 和结果条数</p>
+        <p className="text-base text-surface-600 mt-2 ml-12">{t('config.webSearch.subtitle')}</p>
       </div>
       <div className="p-6 space-y-4">
         <div>
-          <label className="block text-sm font-semibold text-surface-700 mb-2">Search Provider</label>
+          <label className="block text-sm font-semibold text-surface-700 mb-2">{t('config.webSearch.providerLabel')}</label>
           <select
             value={currentWebSearchConfig.provider}
             onChange={(e) => {
@@ -70,7 +72,7 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
           >
             {webSearchProviders.map((provider) => (
               <option key={provider.id} value={provider.id}>
-                {provider.name} {provider.requires_api_key ? '' : '(免费)'}
+                {provider.name} {provider.requires_api_key ? '' : `(${t('common.freeTier')})`}
               </option>
             ))}
           </select>
@@ -92,7 +94,7 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
                     : 'bg-surface-100 text-surface-700 hover:bg-surface-200'
                 }`}
               >
-                保留现有密钥
+                {t('config.webSearch.keepKey')}
               </button>
               <button
                 type="button"
@@ -103,7 +105,7 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
                     : 'bg-surface-100 text-surface-700 hover:bg-surface-200'
                 }`}
               >
-                更新为新密钥
+                {t('config.webSearch.replaceKey')}
               </button>
               {currentWebSearchConfig.hasApiKey && (
                 <button
@@ -115,7 +117,7 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
                       : 'bg-red-50 text-red-700 hover:bg-red-100'
                   }`}
                 >
-                  清空已保存密钥
+                  {t('config.webSearch.clearKey')}
                 </button>
               )}
             </div>
@@ -125,7 +127,7 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
                 type="password"
                 value={currentWebSearchConfig.apiKey}
                 onChange={(e) => onWebSearchChange({ apiKey: e.target.value })}
-                placeholder={hasMaskedKey ? `当前已配置 ${currentWebSearchConfig.apiKeyMasked}，输入后将覆盖` : 'Enter your API key'}
+                placeholder={hasMaskedKey ? t('config.webSearch.replacePlaceholderMasked', { mask: currentWebSearchConfig.apiKeyMasked }) : t('config.webSearch.replacePlaceholder')}
                 className="w-full bg-white border-2 border-surface-200 rounded-xl px-4 py-3 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all duration-200"
               />
             )}
@@ -139,17 +141,17 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
             }`}>
               <p className="font-medium">{apiKeyActionLabel}</p>
               {hasMaskedKey && currentWebSearchConfig.apiKeyMode !== 'replace' && (
-                <p className="mt-1 text-xs">已保存密钥掩码：{currentWebSearchConfig.apiKeyMasked}</p>
+                <p className="mt-1 text-xs">{t('config.webSearch.savedMask', { mask: currentWebSearchConfig.apiKeyMasked })}</p>
               )}
               {currentWebSearchConfig.apiKeyMode === 'replace' && !currentWebSearchConfig.apiKey.trim() && (
-                <p className="mt-1 text-xs">请输入新的 API Key 后再保存。</p>
+                <p className="mt-1 text-xs">{t('config.webSearch.enterKeyBeforeSave')}</p>
               )}
             </div>
           </div>
         )}
 
         <div>
-          <label className="block text-sm font-semibold text-surface-700 mb-2">Max Results</label>
+          <label className="block text-sm font-semibold text-surface-700 mb-2">{t('config.webSearch.maxResultsLabel')}</label>
           <input
             type="number"
             value={currentWebSearchConfig.maxResults}
@@ -158,7 +160,7 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
             max={10}
             className="w-full bg-white border-2 border-surface-200 rounded-xl px-4 py-3 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all duration-200"
           />
-          <p className="text-sm text-surface-500 mt-2">Number of search results to return (1-10)</p>
+          <p className="text-sm text-surface-500 mt-2">{t('config.webSearch.maxResultsHint')}</p>
         </div>
       </div>
 
@@ -167,12 +169,12 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
           {hasWebSearchChanges ? (
             <span className="inline-flex items-center gap-2 text-accent-orange font-medium">
               <span className="h-2.5 w-2.5 rounded-full bg-accent-orange"></span>
-              Web Search 有未保存修改
+              {t('config.webSearch.unsaved')}
             </span>
           ) : (
             <span className="inline-flex items-center gap-2 text-surface-500">
               <span className="h-2.5 w-2.5 rounded-full bg-surface-300"></span>
-              当前配置已与磁盘同步
+              {t('config.webSearch.synced')}
             </span>
           )}
         </div>
@@ -187,7 +189,7 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
             </svg>
           }
         >
-          保存 Web Search 配置
+          {t('config.webSearch.save')}
         </Button>
       </div>
     </Card>

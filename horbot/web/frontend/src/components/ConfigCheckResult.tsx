@@ -1,4 +1,5 @@
 import React from 'react';
+import { useI18n } from '../contexts/I18nContext';
 import { Card, CardContent, Badge } from './ui';
 
 export interface ConfigCheckItem {
@@ -93,11 +94,13 @@ const ResultItem: React.FC<{
 
 const ConfigCheckResult: React.FC<ConfigCheckResultProps> = ({
   data,
-  title = '配置检查结果',
+  title,
   className = '',
 }) => {
+  const { t } = useI18n();
   const totalIssues = data.errors.length + data.warnings.length + data.info.length;
   const isPassed = data.status === 'passed' && data.errors.length === 0;
+  const resolvedTitle = title || t('config.check.title');
 
   return (
     <Card padding="none" variant="default" className={`shadow-sm hover:shadow-md transition-shadow duration-300 ${className}`}>
@@ -116,14 +119,14 @@ const ConfigCheckResult: React.FC<ConfigCheckResultProps> = ({
               )}
             </div>
             <div>
-              <h3 className="text-lg font-bold text-surface-900">{title}</h3>
+              <h3 className="text-lg font-bold text-surface-900">{resolvedTitle}</h3>
               <p className="text-sm text-surface-600">
-                {isPassed ? '所有检查通过' : `发现 ${totalIssues} 个问题`}
+                {isPassed ? t('config.check.allPassed') : t('config.check.issuesFound', { count: totalIssues })}
               </p>
             </div>
           </div>
           <Badge variant={isPassed ? 'success' : 'error'} dot pulse={!isPassed}>
-            {isPassed ? '通过' : '失败'}
+            {isPassed ? t('config.check.passed') : t('config.check.failed')}
           </Badge>
         </div>
       </div>
@@ -136,7 +139,7 @@ const ConfigCheckResult: React.FC<ConfigCheckResultProps> = ({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <p className="text-surface-600 font-medium">配置验证通过，无问题发现</p>
+            <p className="text-surface-600 font-medium">{t('config.check.noIssues')}</p>
           </div>
         ) : (
           <div className="space-y-6">
@@ -144,9 +147,9 @@ const ConfigCheckResult: React.FC<ConfigCheckResultProps> = ({
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <Badge variant="error" size="sm">
-                    {data.errors.length} 个错误
+                    {t('config.check.errorCount', { count: data.errors.length })}
                   </Badge>
-                  <span className="text-sm text-surface-500">需要立即修复</span>
+                  <span className="text-sm text-surface-500">{t('config.check.errorHint')}</span>
                 </div>
                 <div className="space-y-2">
                   {data.errors.map((item, index) => (
@@ -160,9 +163,9 @@ const ConfigCheckResult: React.FC<ConfigCheckResultProps> = ({
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <Badge variant="warning" size="sm">
-                    {data.warnings.length} 个警告
+                    {t('config.check.warningCount', { count: data.warnings.length })}
                   </Badge>
-                  <span className="text-sm text-surface-500">建议修复</span>
+                  <span className="text-sm text-surface-500">{t('config.check.warningHint')}</span>
                 </div>
                 <div className="space-y-2">
                   {data.warnings.map((item, index) => (
@@ -176,9 +179,9 @@ const ConfigCheckResult: React.FC<ConfigCheckResultProps> = ({
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <Badge variant="info" size="sm">
-                    {data.info.length} 条信息
+                    {t('config.check.infoCount', { count: data.info.length })}
                   </Badge>
-                  <span className="text-sm text-surface-500">供参考</span>
+                  <span className="text-sm text-surface-500">{t('config.check.infoHint')}</span>
                 </div>
                 <div className="space-y-2">
                   {data.info.map((item, index) => (

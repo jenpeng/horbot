@@ -5,11 +5,11 @@ import configService from '../services/config';
 import type { AgentRecord } from '../services/config';
 import diagnosticsService from '../services/diagnostics';
 import type { ConfigCheckResultData } from '../components/ConfigCheckResult';
+import { useI18n } from '../contexts/I18nContext';
 import {
   BUILTIN_PROVIDER_NAMES,
   DEFAULT_MODELS_CONFIG,
   DEFAULT_WEB_SEARCH,
-  MODEL_SCENARIOS,
   normalizeModelsConfig,
   type ModelScenarioKey,
 } from '../components/config/constants';
@@ -116,6 +116,7 @@ export interface UseConfigurationStateResult {
 }
 
 export const useConfigurationState = (): UseConfigurationStateResult => {
+  const { t } = useI18n();
   const [config, setConfig] = useState<Config | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -250,7 +251,7 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
         }
         return data;
       } catch (err) {
-        setError('Failed to fetch configuration');
+        setError(t('config.fetchFailed'));
         console.error('Error fetching config:', err);
         return null;
       } finally {
@@ -271,7 +272,7 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     } catch (err) {
       console.error('Failed to validate config:', err);
       if (!options.silent) {
-        setError('配置校验失败，请稍后重试');
+        setError(t('config.validateFailed'));
       }
       return null;
     } finally {
@@ -315,10 +316,10 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
   const validateAgentSettings = useCallback(() => {
     const errors: Record<string, string> = {};
     if (agentSettings.max_tokens < 1 || agentSettings.max_tokens > 1000000) {
-      errors.max_tokens = 'Max Tokens must be between 1 and 1,000,000';
+      errors.max_tokens = t('config.validation.maxTokens');
     }
     if (agentSettings.temperature < 0 || agentSettings.temperature > 2) {
-      errors.temperature = 'Temperature must be between 0 and 2';
+      errors.temperature = t('config.validation.temperature');
     }
     setAgentErrors(errors);
     return Object.keys(errors).length === 0;
@@ -430,9 +431,9 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
         maxTokens: agentSettings.max_tokens,
         temperature: agentSettings.temperature,
       });
-      await refreshConfigFromServer('高级参数保存成功！');
+      await refreshConfigFromServer(t('config.success.agentSettingsSaved'));
     } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || err.message || 'Failed to save agent settings';
+      const errorMsg = err.response?.data?.detail || err.message || t('config.error.saveAgentSettings');
       setError(errorMsg);
     } finally {
       setIsSavingAgent(false);
@@ -448,9 +449,9 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
       await configService.updateAgentDefaults({
         workspace: workspacePath,
       });
-      await refreshConfigFromServer('工作区设置保存成功！');
+      await refreshConfigFromServer(t('config.success.workspaceSaved'));
     } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || err.message || 'Failed to save workspace settings';
+      const errorMsg = err.response?.data?.detail || err.message || t('config.error.saveWorkspace');
       setError(errorMsg);
     } finally {
       setIsSavingWorkspace(false);
@@ -469,9 +470,9 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
         ...(webSearchApiKeyMode === 'clear' ? { apiKey: '' } : {}),
         maxResults: currentWebSearchConfig.maxResults,
       });
-      await refreshConfigFromServer('Web Search 配置保存成功！');
+      await refreshConfigFromServer(t('config.success.webSearchSaved'));
     } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || err.message || 'Failed to save web search settings';
+      const errorMsg = err.response?.data?.detail || err.message || t('config.error.saveWebSearch');
       setError(errorMsg);
     } finally {
       setIsSavingWebSearch(false);
@@ -487,9 +488,9 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
       await configService.updateAgentDefaults({
         models: modelsConfig,
       });
-      await refreshConfigFromServer('模型配置保存成功！');
+      await refreshConfigFromServer(t('config.success.modelsSaved'));
     } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || err.message || 'Failed to save models configuration';
+      const errorMsg = err.response?.data?.detail || err.message || t('config.error.saveModels');
       setError(errorMsg);
     } finally {
       setIsSavingModels(false);
@@ -504,10 +505,18 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
 
       try {
         await configService.updateModelConfig(scenario, modelsConfig[scenario]);
-        const label = MODEL_SCENARIOS.find((item) => item.key === scenario)?.label || scenario;
-        await refreshConfigFromServer(`${label}保存成功！`);
+        const scenarioLabelKeyMap: Record<ModelScenarioKey, string> = {
+          main: 'config.modelScenario.main',
+          planning: 'config.modelScenario.planning',
+          file: 'config.modelScenario.file',
+          image: 'config.modelScenario.image',
+          audio: 'config.modelScenario.audio',
+          video: 'config.modelScenario.video',
+        };
+        const label = t(scenarioLabelKeyMap[scenario]);
+        await refreshConfigFromServer(t('config.success.modelSaved', { label }));
       } catch (err: any) {
-        const errorMsg = err.response?.data?.detail || err.message || '保存失败';
+        const errorMsg = err.response?.data?.detail || err.message || t('config.error.saveGeneric');
         setError(errorMsg);
       } finally {
         setModelSaving((prev) => ({ ...prev, [scenario]: false }));
@@ -559,9 +568,9 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
         try {
           const importedConfig = JSON.parse(e.target?.result as string);
           await configService.updateConfig(importedConfig);
-          await refreshConfigFromServer('配置导入成功！');
+          await refreshConfigFromServer(t('config.success.imported'));
         } catch (err: any) {
-          const errorMsg = err.response?.data?.detail || 'Invalid configuration file format';
+          const errorMsg = err.response?.data?.detail || t('config.invalidImportFormat');
           setError(errorMsg);
         }
       };
@@ -574,14 +583,14 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
   );
 
   const handleProviderAdded = useCallback(async () => {
-    await refreshConfigFromServer('Provider 添加成功！');
-  }, [refreshConfigFromServer]);
+    await refreshConfigFromServer(t('config.success.providerAdded'));
+  }, [refreshConfigFromServer, t]);
 
   const handleProviderDeleted = useCallback(
     async (name: string) => {
-      await refreshConfigFromServer(`Provider "${name}" 删除成功！`);
+      await refreshConfigFromServer(t('config.success.providerDeleted', { name }));
     },
-    [refreshConfigFromServer]
+    [refreshConfigFromServer, t]
   );
 
   const handleValidateClick = useCallback(async () => {
@@ -608,13 +617,13 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
       return null;
     }
     if (validationData.errors.length === 0 && validationData.warnings.length === 0) {
-      return { label: '配置校验通过', tone: 'ok' as const };
+      return { label: t('config.validationSummary.passed'), tone: 'ok' as const };
     }
     if (validationData.errors.length > 0) {
-      return { label: `${validationData.errors.length} 个错误，${validationData.warnings.length} 个警告`, tone: 'error' as const };
+      return { label: t('config.validationSummary.errorsWarnings', { errors: validationData.errors.length, warnings: validationData.warnings.length }), tone: 'error' as const };
     }
-    return { label: `${validationData.warnings.length} 个警告`, tone: 'warning' as const };
-  }, [validationData]);
+    return { label: t('config.validationSummary.warnings', { warnings: validationData.warnings.length }), tone: 'warning' as const };
+  }, [t, validationData]);
 
   const hasPendingChanges = hasAgentChanges || hasWorkspaceChanges || hasModelsChanges || hasWebSearchChanges;
   const dirtySections = useMemo(() => {

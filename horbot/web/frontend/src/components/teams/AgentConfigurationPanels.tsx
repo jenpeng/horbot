@@ -1,4 +1,5 @@
 import type { AgentInfo, AgentAssetBundle, SummarySectionKey } from '../../pages/teams/types';
+import { useI18n } from '../../contexts/I18nContext';
 
 interface SummarySectionDef {
   key: SummarySectionKey;
@@ -48,13 +49,15 @@ const AgentConfigurationPanels = ({
   onSummaryDraftChange,
   onSaveAssetFile,
   onAssetDraftChange,
-}: AgentConfigurationPanelsProps) => (
+}: AgentConfigurationPanelsProps) => {
+  const { t } = useI18n();
+  return (
   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <div className="lg:col-span-3 pt-2">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-surface-900">档案与配置</h3>
-          <p className="mt-1 text-sm text-surface-500">结构化摘要和人格档案属于低频配置，集中放在后面统一管理。</p>
+          <h3 className="text-lg font-semibold text-surface-900">{t('teams.agentConfig.title')}</h3>
+          <p className="mt-1 text-sm text-surface-500">{t('teams.agentConfig.subtitle')}</p>
         </div>
       </div>
     </div>
@@ -62,8 +65,8 @@ const AgentConfigurationPanels = ({
     <div className="bg-white rounded-2xl border border-surface-200 p-6 lg:col-span-2 transition-shadow" data-focus-anchor="agent-summary">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-surface-900">配置摘要</h3>
-          <p className="mt-1 text-sm text-surface-500">这里按分类直接编辑结构化要点。每行一条，保存后会自动写回 `SOUL.md` 和 `USER.md` 对应章节。</p>
+          <h3 className="text-lg font-semibold text-surface-900">{t('teams.agentConfig.summaryTitle')}</h3>
+          <p className="mt-1 text-sm text-surface-500">{t('teams.agentConfig.summarySubtitle')}</p>
         </div>
         {assetReady && (
           <button
@@ -72,7 +75,7 @@ const AgentConfigurationPanels = ({
             data-testid="agent-save-summary"
             className="px-3 py-2 rounded-xl bg-primary-500 text-white hover:bg-primary-600 disabled:opacity-60 transition-colors"
           >
-            {summarySaving ? '保存中...' : '保存摘要'}
+            {summarySaving ? t('teams.agentConfig.saving') : t('teams.agentConfig.saveSummary')}
           </button>
         )}
       </div>
@@ -86,7 +89,7 @@ const AgentConfigurationPanels = ({
                   {(summaryDrafts[section.key] || '')
                     .split('\n')
                     .map((item) => item.trim())
-                    .filter(Boolean).length} 条
+                    .filter(Boolean).length} {t('teams.agentConfig.itemsSuffix')}
                 </span>
               </div>
               <textarea
@@ -119,10 +122,10 @@ const AgentConfigurationPanels = ({
     <div className="bg-white rounded-2xl border border-surface-200 p-6 lg:col-span-2 transition-shadow" data-focus-anchor="agent-files">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-surface-900">Bootstrap 文件</h3>
-          <p className="text-sm text-surface-500 mt-1">这里直接管理当前 Agent 的独立人格与用户档案文件。若文件仍处于初始状态，系统会按画像和权限档位自动生成待确认模板。</p>
+          <h3 className="text-lg font-semibold text-surface-900">{t('teams.agentConfig.bootstrapTitle')}</h3>
+          <p className="text-sm text-surface-500 mt-1">{t('teams.agentConfig.bootstrapSubtitle')}</p>
         </div>
-        {assetLoading && <span className="text-sm text-surface-500">加载中...</span>}
+        {assetLoading && <span className="text-sm text-surface-500">{t('teams.agentConfig.loading')}</span>}
       </div>
       {assetError && (
         <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
@@ -142,15 +145,15 @@ const AgentConfigurationPanels = ({
               : noticeToneClasses.success
           }`}>
             {selectedAgent.bootstrap_setup_pending
-              ? '当前仍处于首次引导阶段：建议继续通过私聊完善信息，或在这里手动补全并移除待配置标记。'
-              : '当前档案已完成初始化，不会再自动进入首次引导。'}
+              ? t('teams.agentConfig.pendingNotice')
+              : t('teams.agentConfig.readyNotice')}
           </div>
           <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="rounded-2xl border border-surface-200 bg-surface-50 p-4 transition-shadow" data-focus-anchor="agent-file-soul">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h4 className="font-semibold text-surface-900">SOUL.md</h4>
-                  <p className="text-xs text-surface-500 break-all">{agentAssets?.files?.soul?.path || '未加载'}</p>
+                  <p className="text-xs text-surface-500 break-all">{agentAssets?.files?.soul?.path || t('teams.agentConfig.notLoaded')}</p>
                 </div>
                 <button
                   onClick={() => onSaveAssetFile('soul')}
@@ -158,7 +161,7 @@ const AgentConfigurationPanels = ({
                   disabled={assetSaving === 'soul'}
                   className="px-3 py-2 bg-primary-500 text-white rounded-xl hover:bg-primary-600 disabled:opacity-60 transition-colors"
                 >
-                  {assetSaving === 'soul' ? '保存中...' : '保存 SOUL'}
+                  {assetSaving === 'soul' ? t('teams.agentConfig.saving') : t('teams.agentConfig.saveSoul')}
                 </button>
               </div>
               <textarea
@@ -166,7 +169,7 @@ const AgentConfigurationPanels = ({
                 value={assetDrafts.soul}
                 onChange={(e) => onAssetDraftChange('soul', e.target.value)}
                 className="mt-4 h-72 w-full rounded-xl border border-surface-300 bg-white px-3 py-3 text-sm text-surface-800 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
-                placeholder="为这个 Agent 编写独立的 SOUL.md..."
+                placeholder={t('teams.agentConfig.soulPlaceholder')}
               />
             </div>
 
@@ -174,7 +177,7 @@ const AgentConfigurationPanels = ({
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h4 className="font-semibold text-surface-900">USER.md</h4>
-                  <p className="text-xs text-surface-500 break-all">{agentAssets?.files?.user?.path || '未加载'}</p>
+                  <p className="text-xs text-surface-500 break-all">{agentAssets?.files?.user?.path || t('teams.agentConfig.notLoaded')}</p>
                 </div>
                 <button
                   onClick={() => onSaveAssetFile('user')}
@@ -182,7 +185,7 @@ const AgentConfigurationPanels = ({
                   disabled={assetSaving === 'user'}
                   className="px-3 py-2 bg-surface-900 text-white rounded-xl hover:bg-surface-800 disabled:opacity-60 transition-colors"
                 >
-                  {assetSaving === 'user' ? '保存中...' : '保存 USER'}
+                  {assetSaving === 'user' ? t('teams.agentConfig.saving') : t('teams.agentConfig.saveUser')}
                 </button>
               </div>
               <textarea
@@ -190,7 +193,7 @@ const AgentConfigurationPanels = ({
                 value={assetDrafts.user}
                 onChange={(e) => onAssetDraftChange('user', e.target.value)}
                 className="mt-4 h-72 w-full rounded-xl border border-surface-300 bg-white px-3 py-3 text-sm text-surface-800 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
-                placeholder="为这个 Agent 编写独立的 USER.md..."
+                placeholder={t('teams.agentConfig.userPlaceholder')}
               />
             </div>
           </div>
@@ -210,7 +213,7 @@ const AgentConfigurationPanels = ({
                 <div className="mt-4 h-72 rounded-xl bg-white/80 border border-surface-200" />
               </div>
               <p className="mt-3 text-xs text-surface-500">
-                {assetLoading ? `正在加载 ${label}...` : '等待当前 Agent 资产就绪...'}
+                {assetLoading ? t('teams.agentConfig.loadingFile', { label }) : t('teams.agentConfig.waitingAssets')}
               </p>
             </div>
           ))}
@@ -218,6 +221,7 @@ const AgentConfigurationPanels = ({
       )}
     </div>
   </div>
-);
+  );
+};
 
 export default AgentConfigurationPanels;

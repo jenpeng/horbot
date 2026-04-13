@@ -1,4 +1,5 @@
 import type React from 'react';
+import type { I18nContextValue } from '../../contexts/I18nContext';
 
 export interface DashboardSkill {
   id: string;
@@ -11,11 +12,13 @@ export interface DashboardSkill {
   bgGradient: string;
 }
 
-export const AI_SKILLS: DashboardSkill[] = [
+type Translator = I18nContextValue['t'];
+
+export const getDashboardSkills = (t: Translator): DashboardSkill[] => [
   {
     id: 'config-check',
-    title: 'Config Check',
-    description: 'Verify system configuration',
+    title: t('dashboard.skill.config-check.title'),
+    description: t('dashboard.skill.config-check.description'),
     icon: (
       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
@@ -28,8 +31,8 @@ export const AI_SKILLS: DashboardSkill[] = [
   },
   {
     id: 'gateway-diagnosis',
-    title: 'Gateway Diagnostics',
-    description: 'Diagnose gateway connection status',
+    title: t('dashboard.skill.gateway-diagnosis.title'),
+    description: t('dashboard.skill.gateway-diagnosis.description'),
     icon: (
       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
@@ -42,8 +45,8 @@ export const AI_SKILLS: DashboardSkill[] = [
   },
   {
     id: 'env-detection',
-    title: 'Environment Detection',
-    description: 'Detect runtime environment',
+    title: t('dashboard.skill.env-detection.title'),
+    description: t('dashboard.skill.env-detection.description'),
     icon: (
       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z" />
@@ -56,8 +59,8 @@ export const AI_SKILLS: DashboardSkill[] = [
   },
   {
     id: 'system-info',
-    title: 'System Info',
-    description: 'View detailed system information',
+    title: t('dashboard.skill.system-info.title'),
+    description: t('dashboard.skill.system-info.description'),
     icon: (
       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
@@ -70,8 +73,8 @@ export const AI_SKILLS: DashboardSkill[] = [
   },
   {
     id: 'log-viewer',
-    title: 'Log Viewer',
-    description: 'View system runtime logs',
+    title: t('dashboard.skill.log-viewer.title'),
+    description: t('dashboard.skill.log-viewer.description'),
     icon: (
       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
@@ -84,8 +87,8 @@ export const AI_SKILLS: DashboardSkill[] = [
   },
   {
     id: 'memory-manager',
-    title: 'Memory Manager',
-    description: 'Manage AI memory storage',
+    title: t('dashboard.skill.memory-manager.title'),
+    description: t('dashboard.skill.memory-manager.description'),
     icon: (
       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
@@ -98,8 +101,8 @@ export const AI_SKILLS: DashboardSkill[] = [
   },
   {
     id: 'quick-settings',
-    title: 'Quick Settings',
-    description: 'Quick configuration options',
+    title: t('dashboard.skill.quick-settings.title'),
+    description: t('dashboard.skill.quick-settings.description'),
     icon: (
       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />

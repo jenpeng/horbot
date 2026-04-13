@@ -1,10 +1,11 @@
 import type { Dispatch, SetStateAction } from 'react';
 import {
-  AGENT_PERMISSION_PRESETS,
-  AGENT_PROFILE_PRESETS,
+  getAgentPermissionPresets,
+  getAgentProfilePresets,
 } from '../../constants';
+import { useI18n } from '../../contexts/I18nContext';
 import {
-  MEMORY_REASONING_STYLE_OPTIONS,
+  getMemoryReasoningStyleOptions,
 } from '../../pages/teams/formOptions';
 import type {
   AgentFormState,
@@ -65,16 +66,20 @@ const AgentFormModal = ({
   onSubmit,
 }: AgentFormModalProps) => {
   const isCreateMode = mode === 'create';
+  const { t } = useI18n();
+  const agentProfilePresets = getAgentProfilePresets(t);
+  const agentPermissionPresets = getAgentPermissionPresets(t);
+  const memoryReasoningStyleOptions = getMemoryReasoningStyleOptions(t);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-2xl p-6 w-full max-w-4xl mx-4">
         <h3 className="text-lg font-semibold text-surface-900 mb-4">
-          {isCreateMode ? '创建新 Agent' : '编辑 Agent'}
+          {isCreateMode ? t('teams.agentForm.createTitle') : t('teams.agentForm.editTitle')}
         </h3>
         <div className="space-y-4 max-h-[70vh] overflow-y-auto">
           <div>
-            <label htmlFor="agent-form-id" className="block text-sm font-medium text-surface-700 mb-1">ID</label>
+            <label htmlFor="agent-form-id" className="block text-sm font-medium text-surface-700 mb-1">{t('common.id')}</label>
             <input
               id="agent-form-id"
               type="text"
@@ -88,7 +93,7 @@ const AgentFormModal = ({
                     }`
                   : 'w-full px-3 py-2 border border-surface-300 rounded-lg bg-surface-50 text-surface-500 cursor-not-allowed'
               }
-              placeholder="agent-id"
+              placeholder={t('teams.teamForm.agentIdPlaceholder')}
               aria-invalid={Boolean(createIdError)}
             />
             {createIdError && (
@@ -96,7 +101,7 @@ const AgentFormModal = ({
             )}
           </div>
           <div>
-            <label htmlFor="agent-form-name" className="block text-sm font-medium text-surface-700 mb-1">名称</label>
+            <label htmlFor="agent-form-name" className="block text-sm font-medium text-surface-700 mb-1">{t('common.name')}</label>
             <input
               id="agent-form-name"
               type="text"
@@ -105,7 +110,7 @@ const AgentFormModal = ({
               className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 ${
                 isCreateMode && createNameError ? 'border-red-300 bg-red-50/40' : 'border-surface-300'
               }`}
-              placeholder="Agent 名称"
+              placeholder={t('teams.agentForm.namePlaceholder')}
               aria-invalid={Boolean(createNameError)}
             />
             {createNameError && (
@@ -113,10 +118,10 @@ const AgentFormModal = ({
             )}
           </div>
           <div className="border-t border-surface-200 pt-4">
-            <h4 className="text-sm font-medium text-surface-700 mb-3">模型配置</h4>
+            <h4 className="text-sm font-medium text-surface-700 mb-3">{t('teams.agentForm.modelConfig')}</h4>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label htmlFor="agent-form-provider" className="block text-xs font-medium text-surface-600 mb-1">供应商</label>
+                <label htmlFor="agent-form-provider" className="block text-xs font-medium text-surface-600 mb-1">{t('common.provider')}</label>
                 <select
                   id="agent-form-provider"
                   value={form.provider}
@@ -126,11 +131,11 @@ const AgentFormModal = ({
                   }`}
                   aria-invalid={Boolean(createProviderError)}
                 >
-                  {isCreateMode && <option value="">请选择供应商</option>}
-                  <option value="auto" disabled={isCreateMode}>自动选择</option>
+                  {isCreateMode && <option value="">{t('teams.agentForm.providerPlaceholder')}</option>}
+                  <option value="auto" disabled={isCreateMode}>{t('teams.agentForm.autoSelect')}</option>
                   {providers.map((provider) => (
                     <option key={provider.id} value={provider.id} disabled={!provider.configured}>
-                      {provider.name} {!provider.configured && '(未配置)'}
+                      {provider.name} {!provider.configured && `(${t('teams.agentForm.notConfigured')})`}
                     </option>
                   ))}
                 </select>
@@ -139,7 +144,7 @@ const AgentFormModal = ({
                 )}
               </div>
               <div>
-                <label htmlFor="agent-form-model" className="block text-xs font-medium text-surface-600 mb-1">模型名称</label>
+                <label htmlFor="agent-form-model" className="block text-xs font-medium text-surface-600 mb-1">{t('common.model')}</label>
                 <input
                   id="agent-form-model"
                   type="text"
@@ -148,37 +153,37 @@ const AgentFormModal = ({
                   className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm ${
                     isCreateMode && createModelError ? 'border-red-300 bg-red-50/40' : 'border-surface-300'
                   }`}
-                  placeholder="如: gpt-4o, claude-sonnet-4-5"
+                  placeholder={t('teams.agentForm.modelPlaceholder')}
                   aria-invalid={Boolean(createModelError)}
                 />
                 {createModelError ? (
                   <p className="mt-1 text-xs text-red-600">{createModelError}</p>
                 ) : (
                   <p className="mt-1 text-xs text-surface-500">
-                    创建阶段需要明确 provider 和 model，创建完成后即可直接开始首次私聊。
+                    {t('teams.agentForm.modelHint')}
                   </p>
                 )}
               </div>
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-surface-700 mb-1">描述</label>
+            <label className="block text-sm font-medium text-surface-700 mb-1">{t('common.description')}</label>
             <input
               type="text"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               className="w-full px-3 py-2 border border-surface-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-              placeholder="Agent 描述"
+              placeholder={t('teams.agentForm.descriptionPlaceholder')}
             />
           </div>
           <div className="border-t border-surface-200 pt-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h4 className="text-sm font-medium text-surface-700">协作画像</h4>
+                <h4 className="text-sm font-medium text-surface-700">{t('teams.agentForm.profileSectionTitle')}</h4>
                 <p className="mt-1 text-xs text-surface-500">
                   {isCreateMode
-                    ? '用可视化方式给 Agent 一个默认工作风格，首次私聊时再继续细化。'
-                    : '这里保存 Agent 的可视化 profile，不直接替代首次私聊里的细节设定。'}
+                    ? t('teams.agentForm.profileCreateHint')
+                    : t('teams.agentForm.profileEditHint')}
                 </p>
               </div>
               {form.profile && (
@@ -187,12 +192,12 @@ const AgentFormModal = ({
                   onClick={() => setForm({ ...form, profile: '', memory_bank_profile: recommendedMemoryProfile })}
                   className="text-xs text-surface-500 hover:text-surface-700"
                 >
-                  清除画像
+                  {t('teams.agentForm.clearProfile')}
                 </button>
               )}
             </div>
             <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {AGENT_PROFILE_PRESETS.map((preset) => {
+              {agentProfilePresets.map((preset) => {
                 const selected = form.profile === preset.id;
                 return (
                   <button
@@ -208,7 +213,7 @@ const AgentFormModal = ({
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-sm font-semibold text-surface-900">{preset.label}</div>
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${preset.accent}`}>
-                        预设
+                        {t('teams.agentForm.presetBadge')}
                       </span>
                     </div>
                     <p className="mt-2 text-xs text-surface-700">{preset.summary}</p>
@@ -231,25 +236,25 @@ const AgentFormModal = ({
           <div className="border-t border-surface-200 pt-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h4 className="text-sm font-medium text-surface-700">工具权限</h4>
+                <h4 className="text-sm font-medium text-surface-700">{t('teams.agentForm.permissionSectionTitle')}</h4>
                 <p className="mt-1 text-xs text-surface-500">
                   {isCreateMode
-                    ? '创建时可先给一个默认权限档位；不选则继承系统全局配置。'
-                    : '为当前 Agent 选择默认权限档位；未单独设置时将继承系统全局权限。'}
+                    ? t('teams.agentForm.permissionCreateHint')
+                    : t('teams.agentForm.permissionEditHint')}
                 </p>
               </div>
               {!isCreateMode && form.permission_profile && (
-                <button
-                  type="button"
-                  onClick={() => setForm({ ...form, permission_profile: '' })}
-                  className="text-xs text-surface-500 hover:text-surface-700"
-                >
-                  继承全局
-                </button>
+                        <button
+                          type="button"
+                          onClick={() => setForm({ ...form, permission_profile: '' })}
+                          className="text-xs text-surface-500 hover:text-surface-700"
+                        >
+                          {t('teams.agentForm.cancelGlobalInherit')}
+                        </button>
               )}
             </div>
             <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {AGENT_PERMISSION_PRESETS.map((preset) => {
+              {agentPermissionPresets.map((preset) => {
                 const selected = (form.permission_profile || 'inherit') === preset.id;
                 return (
                   <button
@@ -265,7 +270,7 @@ const AgentFormModal = ({
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-sm font-semibold text-surface-900">{preset.label}</div>
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${preset.accent}`}>
-                        权限
+                        {t('teams.agentForm.permissionBadge')}
                       </span>
                     </div>
                     <p className="mt-2 text-xs text-surface-700">{preset.summary}</p>
@@ -278,15 +283,15 @@ const AgentFormModal = ({
           {isCreateMode ? (
             <>
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-4 text-sm text-surface-700">
-                <div className="font-semibold text-surface-900">记忆银行画像已自动设置为默认策略。</div>
+                <div className="font-semibold text-surface-900">{t('teams.agentForm.memoryDefaultNoticeTitle')}</div>
                 <div className="mt-1">
-                  当前会按“{recommendedMemoryProfileMeta.label}”创建记忆偏好，系统会自动决定长期目标、召回倾向和反思重点。通常不需要在创建阶段手动配置，后续如果觉得不合适，再到编辑页微调即可。
+                  {t('teams.agentForm.memoryDefaultNoticeBody', { label: recommendedMemoryProfileMeta.label })}
                 </div>
               </div>
               <div className="rounded-2xl border border-primary-200 bg-primary-50/70 px-4 py-4 text-sm text-surface-700">
-                <div className="font-semibold text-surface-900">创建前需要先把模型配置补齐。</div>
+                <div className="font-semibold text-surface-900">{t('teams.agentForm.modelRequiredNoticeTitle')}</div>
                 <div className="mt-1">
-                  这样创建完成后就可以直接进入首次私聊，引导它完善职责、风格与协作边界，不再出现“先创建、再补模型”的往返操作。
+                  {t('teams.agentForm.modelRequiredNoticeBody')}
                 </div>
               </div>
             </>
@@ -295,8 +300,8 @@ const AgentFormModal = ({
               <div className="rounded-2xl border border-surface-200 bg-surface-50/80 px-4 py-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <h4 className="text-sm font-medium text-surface-800">高级设置</h4>
-                    <p className="mt-1 text-xs text-surface-500">低频配置默认收起，避免编辑 Agent 时一次看到过多信息。</p>
+                    <h4 className="text-sm font-medium text-surface-800">{t('teams.agentForm.advancedSettings')}</h4>
+                    <p className="mt-1 text-xs text-surface-500">{t('teams.agentForm.advancedHint')}</p>
                   </div>
                   <button
                     type="button"
@@ -307,7 +312,7 @@ const AgentFormModal = ({
                     <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
-                    {advancedOpen ? '收起高级设置' : '展开高级设置'}
+                    {advancedOpen ? t('teams.agentForm.advancedCollapse') : t('teams.agentForm.advancedExpand')}
                   </button>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -324,8 +329,8 @@ const AgentFormModal = ({
                   <div className="border-t border-surface-200 pt-4" data-testid="agent-edit-advanced-panel">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <h4 className="text-sm font-medium text-surface-700">记忆银行画像</h4>
-                        <p className="mt-1 text-xs text-surface-500">默认已按协作画像自动设置。只有当你明确想改变记忆召回倾向时，再手动微调。</p>
+                        <h4 className="text-sm font-medium text-surface-700">{t('teams.agentForm.memoryProfileTitle')}</h4>
+                        <p className="mt-1 text-xs text-surface-500">{t('teams.agentForm.memoryProfileHint')}</p>
                       </div>
                       {!isUsingRecommendedMemoryProfile && (
                         <button
@@ -333,7 +338,7 @@ const AgentFormModal = ({
                           onClick={onRestoreRecommendedMemoryProfile}
                           className="text-xs text-surface-500 hover:text-surface-700"
                         >
-                          恢复系统推荐
+                          {t('teams.agentForm.restoreRecommended')}
                         </button>
                       )}
                     </div>
@@ -341,18 +346,18 @@ const AgentFormModal = ({
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-semibold text-surface-900">{recommendedMemoryProfileMeta.label}</span>
                         <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-surface-700 ring-1 ring-surface-200">
-                          {MEMORY_REASONING_STYLE_OPTIONS.find((item) => item.id === recommendedMemoryProfile.reasoning_style)?.label || recommendedMemoryProfile.reasoning_style}
+                          {memoryReasoningStyleOptions.find((item) => item.id === recommendedMemoryProfile.reasoning_style)?.label || recommendedMemoryProfile.reasoning_style}
                         </span>
                         <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isUsingRecommendedMemoryProfile ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                          {isUsingRecommendedMemoryProfile ? '正在使用推荐策略' : '已偏离推荐策略'}
+                          {isUsingRecommendedMemoryProfile ? t('teams.agentForm.usingRecommended') : t('teams.agentForm.deviatedRecommended')}
                         </span>
                       </div>
                       <p className="mt-2 text-xs text-surface-600">{recommendedMemoryProfileMeta.summary}</p>
                     </div>
                     <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
                       <div className="rounded-2xl border border-surface-200 bg-surface-50 p-4">
-                        <label className="block text-sm font-medium text-surface-800">长期目标</label>
-                        <p className="mt-1 text-xs text-surface-500">一句话说明这个 Agent 的长期记忆应该优先服务什么。</p>
+                        <label className="block text-sm font-medium text-surface-800">{t('teams.agentForm.missionLabel')}</label>
+                        <p className="mt-1 text-xs text-surface-500">{t('teams.agentForm.missionHint')}</p>
                         <textarea
                           value={form.memory_bank_profile.mission}
                           onChange={(e) => setForm((current) => ({
@@ -363,23 +368,23 @@ const AgentFormModal = ({
                             },
                           }))}
                           className="mt-3 h-28 w-full rounded-xl border border-surface-300 bg-white px-3 py-3 text-sm text-surface-800 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
-                          placeholder="例如：优先保留与前端交互优化、用户习惯和回归风险相关的长期记忆。"
+                          placeholder={t('teams.agentForm.missionPlaceholder')}
                         />
                       </div>
                       <div className="rounded-2xl border border-surface-200 bg-surface-50 p-4 xl:col-span-2">
                         <div className="flex items-center justify-between gap-3">
                           <div>
-                            <label className="block text-sm font-medium text-surface-800">记忆策略</label>
-                            <p className="mt-1 text-xs text-surface-500">决定它在解释记忆和做轻量反思时更偏向哪种方式。</p>
+                            <label className="block text-sm font-medium text-surface-800">{t('teams.agentForm.reasoningLabel')}</label>
+                            <p className="mt-1 text-xs text-surface-500">{t('teams.agentForm.reasoningHint')}</p>
                           </div>
                           {form.memory_bank_profile.reasoning_style && (
                             <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-surface-700 ring-1 ring-surface-200">
-                              {MEMORY_REASONING_STYLE_OPTIONS.find((item) => item.id === form.memory_bank_profile.reasoning_style)?.label || form.memory_bank_profile.reasoning_style}
+                              {memoryReasoningStyleOptions.find((item) => item.id === form.memory_bank_profile.reasoning_style)?.label || form.memory_bank_profile.reasoning_style}
                             </span>
                           )}
                         </div>
                         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                          {MEMORY_REASONING_STYLE_OPTIONS.map((option) => {
+                          {memoryReasoningStyleOptions.map((option) => {
                             const selected = form.memory_bank_profile.reasoning_style === option.id;
                             return (
                               <button
@@ -405,8 +410,8 @@ const AgentFormModal = ({
                           })}
                         </div>
                         <div className="mt-4">
-                          <label className="block text-sm font-medium text-surface-800">优先注意事项</label>
-                          <p className="mt-1 text-xs text-surface-500">每行一条，告诉系统在召回和反思时应该优先关注什么。</p>
+                          <label className="block text-sm font-medium text-surface-800">{t('teams.agentForm.directivesLabel')}</label>
+                          <p className="mt-1 text-xs text-surface-500">{t('teams.agentForm.directivesHint')}</p>
                           <textarea
                             value={form.memory_bank_profile.directives.join('\n')}
                             onChange={(e) => setForm((current) => ({
@@ -420,7 +425,7 @@ const AgentFormModal = ({
                               },
                             }))}
                             className="mt-3 h-28 w-full rounded-xl border border-surface-300 bg-white px-3 py-3 text-sm text-surface-800 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
-                            placeholder={'例如：\n优先召回与当前团队协作有关的决策\n遇到冲突记忆时优先相信较新的约束\n反思时记录可复用的排障策略'}
+                            placeholder={t('teams.agentForm.directivesPlaceholder')}
                           />
                         </div>
                       </div>
@@ -428,25 +433,25 @@ const AgentFormModal = ({
                   </div>
 
                   <div className="border-t border-surface-200 pt-4">
-                    <h4 className="text-sm font-medium text-surface-700 mb-3">工作空间与团队</h4>
+                    <h4 className="text-sm font-medium text-surface-700 mb-3">{t('teams.agentForm.workspaceTeamsTitle')}</h4>
                     <div>
-                      <label className="block text-xs font-medium text-surface-600 mb-1">自定义工作空间</label>
+                      <label className="block text-xs font-medium text-surface-600 mb-1">{t('teams.agentForm.customWorkspace')}</label>
                       <input
                         type="text"
                         value={form.workspace}
                         onChange={(e) => setForm({ ...form, workspace: e.target.value })}
                         className="w-full px-3 py-2 border border-surface-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
-                        placeholder="留空使用默认 Agent 目录"
+                        placeholder={t('teams.agentForm.customWorkspacePlaceholder')}
                       />
                       <p className="mt-1 text-xs text-surface-500">
-                        填写后该目录会成为 Agent 实际工作区，记忆与会话数据写入其中隐藏目录。
+                        {t('teams.agentForm.customWorkspaceHint')}
                       </p>
                     </div>
                     <div className="mt-3">
-                      <label className="block text-xs font-medium text-surface-600 mb-2">所属团队</label>
+                      <label className="block text-xs font-medium text-surface-600 mb-2">{t('teams.agentForm.teamsLabel')}</label>
                       <div className="max-h-32 overflow-y-auto space-y-2 border border-surface-200 rounded-lg p-3">
                         {teams.length === 0 ? (
-                          <p className="text-xs text-surface-500">暂无团队，可稍后再绑定。</p>
+                          <p className="text-xs text-surface-500">{t('teams.agentForm.noTeams')}</p>
                         ) : (
                           teams.map((team) => (
                             <label key={team.id} className="flex items-center gap-2 cursor-pointer">
@@ -471,17 +476,17 @@ const AgentFormModal = ({
                   </div>
 
                   <div className="border-t border-surface-200 pt-4">
-                    <h4 className="text-sm font-medium text-surface-700 mb-3">引导式配置</h4>
+                    <h4 className="text-sm font-medium text-surface-700 mb-3">{t('teams.agentForm.onboardingSectionTitle')}</h4>
                     <div className="rounded-2xl border border-primary-200 bg-primary-50/70 px-4 py-4 text-sm text-surface-700">
-                      <div className="font-semibold text-surface-900">人格、系统提示词和用户偏好不再在这里直接编辑。</div>
+                      <div className="font-semibold text-surface-900">{t('teams.agentForm.onboardingTitle')}</div>
                       <div className="mt-1">
-                        请在首次私聊时由 AI 引导完成，并将结果沉淀到该 Agent 的 `SOUL.md`、`USER.md` 等工作区文件中。
+                        {t('teams.agentForm.onboardingBody')}
                       </div>
                     </div>
                   </div>
 
                   <div className="border-t border-surface-200 pt-4">
-                    <h4 className="text-sm font-medium text-surface-700 mb-3">协作能力标签</h4>
+                    <h4 className="text-sm font-medium text-surface-700 mb-3">{t('teams.agentForm.capabilities')}</h4>
                     <div className="flex flex-wrap gap-2">
                       {capabilityOptions.map((capability) => {
                         const selected = form.capabilities.includes(capability.id);
@@ -508,7 +513,7 @@ const AgentFormModal = ({
                       })}
                     </div>
                     <p className="mt-3 text-xs text-surface-500">
-                      这些标签用于团队协作展示与后续能力匹配；优先选择稳定、可复用的职责标签。
+                      {t('teams.agentForm.capabilitiesHint')}
                     </p>
                   </div>
                 </>
@@ -521,14 +526,14 @@ const AgentFormModal = ({
             onClick={onClose}
             className="px-4 py-2 text-surface-700 hover:bg-surface-100 rounded-lg transition-colors"
           >
-            取消
+            {t('common.cancel')}
           </button>
           <button
             onClick={onSubmit}
             disabled={submitDisabled}
             className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:cursor-not-allowed disabled:bg-surface-300"
           >
-            {isCreateMode ? '创建' : '保存'}
+            {isCreateMode ? t('common.create') : t('common.save')}
           </button>
         </div>
       </div>

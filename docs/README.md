@@ -11,6 +11,7 @@ Horbot is a lightweight multi-agent assistant stack with:
 
 - per-agent workspace, memory, sessions, and skills
 - Web UI for operations and configuration
+- browser-persisted UI locale switching for English, Simplified Chinese, and Thai
 - chat, attachments, and relay-style team conversations
 - compact chat layout plus baton-aware relay status in team conversations
 - automatic DM -> team -> DM baton navigation in Web Chat, with a temporary top banner so relay-driven view changes are explicit
@@ -18,6 +19,18 @@ Horbot is a lightweight multi-agent assistant stack with:
 - background skill distillation from reusable work
 - validated `.skill` / `.zip` imports with compatibility checks
 - WeCom AI Bot channel support with reply streaming and media handling
+
+## Interface Preview
+
+The images below are captured from the current Horbot Web UI with the interface language set to English.
+
+| Dashboard | Chat |
+| --- | --- |
+| ![Dashboard](./assets/en/preview-dashboard.png) | ![Chat](./assets/en/preview-chat.png) |
+
+| Skills | Teams |
+| --- | --- |
+| ![Skills](./assets/en/preview-skills.png) | ![Teams](./assets/en/preview-teams.png) |
 
 ## Guides
 

@@ -1,4 +1,5 @@
 import React, { useState, memo } from 'react';
+import { useI18n } from '../contexts/I18nContext';
 import { configService } from '../services';
 import type { AddProviderData } from '../services/config';
 import type { ProvidersConfig } from '../types';
@@ -13,6 +14,7 @@ const ProviderManager: React.FC<ProviderManagerProps> = ({
   providers,
   onProviderAdded,
 }) => {
+  const { t } = useI18n();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newProvider, setNewProvider] = useState({ name: '', apiKey: '', apiBase: '' });
   const [error, setError] = useState<string | null>(null);
@@ -23,14 +25,14 @@ const ProviderManager: React.FC<ProviderManagerProps> = ({
     const errors: Record<string, string> = {};
     const trimmedName = newProvider.name.trim();
     if (!trimmedName) {
-      errors.name = 'Provider name is required';
+      errors.name = t('config.providers.validation.nameRequired');
     } else if (!/^[a-zA-Z0-9_-]+$/.test(trimmedName)) {
-      errors.name = 'Provider name can only contain letters, numbers, hyphens, and underscores';
+      errors.name = t('config.providers.validation.nameInvalid');
     } else if (providers && trimmedName in providers) {
-      errors.name = `Provider "${trimmedName}" already exists`;
+      errors.name = t('config.providers.validation.nameExists', { name: trimmedName });
     }
     if (newProvider.apiBase && !/^https?:\/\/.+/.test(newProvider.apiBase)) {
-      errors.apiBase = 'API Base URL must start with http:// or https://';
+      errors.apiBase = t('config.providers.validation.apiBaseInvalid');
     }
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
@@ -55,7 +57,7 @@ const ProviderManager: React.FC<ProviderManagerProps> = ({
       setIsDialogOpen(false);
     } catch (err: unknown) {
       const errorMsg = (err as { response?: { data?: { detail?: string } }; message?: string })?.response?.data?.detail || 
-                       (err as Error).message || 'Failed to add provider';
+                       (err as Error).message || t('config.providers.addFailed');
       setError(errorMsg);
     } finally {
       setIsSubmitting(false);
@@ -79,13 +81,13 @@ const ProviderManager: React.FC<ProviderManagerProps> = ({
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
         </svg>
-        <span>添加自定义 Provider</span>
+        <span>{t('config.providers.addCustom')}</span>
       </button>
 
       <Modal
         isOpen={isDialogOpen}
         onClose={handleClose}
-        title="添加自定义 Provider"
+        title={t('config.providers.addCustom')}
       >
         <div className="space-y-4">
           {error && (
@@ -95,12 +97,12 @@ const ProviderManager: React.FC<ProviderManagerProps> = ({
           )}
 
           <Input
-            label="Provider Name"
+            label={t('config.providers.providerName')}
             required
             value={newProvider.name}
             onChange={(e) => setNewProvider({ ...newProvider, name: e.target.value })}
             error={validationErrors.name}
-            placeholder="例如：my-custom-llm"
+            placeholder={t('config.providers.providerNamePlaceholder')}
             data-testid="provider-name-input"
           />
 
@@ -109,12 +111,12 @@ const ProviderManager: React.FC<ProviderManagerProps> = ({
             label="API Key"
             value={newProvider.apiKey}
             onChange={(e) => setNewProvider({ ...newProvider, apiKey: e.target.value })}
-            placeholder="输入 API Key（可选）"
+            placeholder={t('config.providers.apiKeyPlaceholderOptional')}
             data-testid="provider-api-key-input"
           />
 
           <Input
-            label="API Base URL"
+            label={t('config.providers.apiBaseUrl')}
             value={newProvider.apiBase}
             onChange={(e) => setNewProvider({ ...newProvider, apiBase: e.target.value })}
             error={validationErrors.apiBase}
@@ -122,13 +124,13 @@ const ProviderManager: React.FC<ProviderManagerProps> = ({
             data-testid="provider-api-base-input"
           />
           <p className="text-sm text-surface-500">
-            适合接入 OpenAI 兼容网关、公司内部代理，或暂未内置的第三方模型服务。
+            {t('config.providers.customHint')}
           </p>
         </div>
 
         <div className="flex justify-end space-x-3 mt-6">
           <Button variant="secondary" onClick={handleClose} disabled={isSubmitting}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={handleAddProvider}
@@ -136,7 +138,7 @@ const ProviderManager: React.FC<ProviderManagerProps> = ({
             isLoading={isSubmitting}
             data-testid="provider-add-confirm"
           >
-            添加 Provider
+            {t('config.providers.addProvider')}
           </Button>
         </div>
       </Modal>

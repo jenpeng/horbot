@@ -92,6 +92,16 @@ npm install
 npm run dev
 ```
 
+### 文档与截图同步
+
+如果改动影响了 README 或文档截图，请基于当前本地运行中的真实 Web UI 重新抓图，不要使用设计稿或旧项目截图。
+
+英文版 README 截图可使用：
+
+```bash
+./.venv/bin/python scripts/capture_readme_screenshots.py --locale en --output-dir docs/assets/en
+```
+
 ---
 
 ## 新功能开发指南

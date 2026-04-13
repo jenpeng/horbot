@@ -2,9 +2,11 @@ import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { MessageSquarePlus, History, Settings } from 'lucide-react';
 import { navItems } from './NavConfig';
+import { useI18n } from '../../contexts/I18nContext';
 
 const IconBar: React.FC = React.memo(() => {
   const location = useLocation();
+  const { t } = useI18n();
 
   return (
     <aside className="hidden md:flex lg:hidden flex-col w-[68px] bg-surface-50 border-r border-black/[0.06] shrink-0 h-screen">
@@ -42,11 +44,11 @@ const IconBar: React.FC = React.memo(() => {
                     : 'text-surface-500 hover:bg-surface-100 hover:text-surface-700'
                   }
                 `}
-                title={item.label}
+                title={t(item.labelKey)}
               >
                 <Icon className="w-4 h-4" />
                 <div className="absolute left-full ml-2 px-2 py-1 bg-surface-900 text-white text-xs font-medium rounded-md whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-[100] pointer-events-none shadow-lg">
-                  {item.label}
+                  {t(item.labelKey)}
                   <div className="absolute top-1/2 -left-0.5 -translate-y-1/2 w-1 h-1 bg-surface-900 rotate-45" />
                 </div>
               </NavLink>

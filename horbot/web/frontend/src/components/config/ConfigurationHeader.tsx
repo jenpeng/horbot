@@ -1,4 +1,5 @@
 import React from 'react';
+import { useI18n } from '../../contexts/I18nContext';
 import { Button } from '../ui/Button';
 
 interface ConfigurationHeaderProps {
@@ -20,11 +21,13 @@ const ConfigurationHeader: React.FC<ConfigurationHeaderProps> = ({
   onExport,
   onImport,
 }) => {
+  const { t } = useI18n();
+
   return (
     <div className="flex items-start justify-between gap-4 flex-wrap">
       <div>
-        <h1 className="text-3xl font-bold text-surface-900">Configuration</h1>
-        <p className="text-base text-surface-600 mt-2">管理 horbot 的全局默认值。主 agent 或其他 agent 的实例覆盖项请到多 Agent 管理页维护。</p>
+        <h1 className="text-3xl font-bold text-surface-900">{t('config.pageTitle')}</h1>
+        <p className="text-base text-surface-600 mt-2">{t('config.pageSubtitle')}</p>
       </div>
       <div className="flex items-center gap-2 flex-wrap justify-end">
         <Button
@@ -38,7 +41,7 @@ const ConfigurationHeader: React.FC<ConfigurationHeaderProps> = ({
             </svg>
           }
         >
-          检查配置
+          {t('config.validate')}
         </Button>
         <Button
           variant="secondary"
@@ -51,7 +54,7 @@ const ConfigurationHeader: React.FC<ConfigurationHeaderProps> = ({
             </svg>
           }
         >
-          重新加载
+          {t('config.reload')}
         </Button>
         <Button
           variant="secondary"
@@ -63,7 +66,7 @@ const ConfigurationHeader: React.FC<ConfigurationHeaderProps> = ({
             </svg>
           }
         >
-          导入配置
+          {t('config.import')}
         </Button>
         <Button
           variant="secondary"
@@ -75,7 +78,7 @@ const ConfigurationHeader: React.FC<ConfigurationHeaderProps> = ({
             </svg>
           }
         >
-          导出配置
+          {t('config.export')}
         </Button>
         <input
           ref={fileInputRef}

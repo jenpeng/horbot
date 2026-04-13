@@ -1,10 +1,14 @@
+import type { ReactElement } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { I18nProvider } from '../../contexts/I18nContext';
 import StatusLogsPanel from './StatusLogsPanel';
+
+const renderWithI18n = (ui: ReactElement) => render(<I18nProvider>{ui}</I18nProvider>);
 
 describe('StatusLogsPanel', () => {
   it('shows the empty state when no logs are available', () => {
-    render(
+    renderWithI18n(
       <StatusLogsPanel
         logs={[]}
         logLevel=""
@@ -24,7 +28,7 @@ describe('StatusLogsPanel', () => {
     const setLogLines = vi.fn();
     const fetchLogs = vi.fn();
 
-    render(
+    renderWithI18n(
       <StatusLogsPanel
         logs={[{ raw: 'warn line', level: 'WARNING' }]}
         logLevel="WARNING"

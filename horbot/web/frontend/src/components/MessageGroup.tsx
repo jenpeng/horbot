@@ -2,6 +2,7 @@ import React, { memo, useCallback, useMemo, useState } from 'react';
 import { ArrowUpRight, BookMarked, ChevronDown, Copy, FileAudio2, FileImage, FileText, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
+import { useI18n } from '../contexts/I18nContext';
 import MarkdownRenderer from './MarkdownRenderer';
 import { Modal, ModalFooter } from './ui';
 import type { MemoryRecall, MemorySource, Message, MessageFile } from '../types/conversation';
@@ -17,6 +18,7 @@ interface MessageGroupProps {
 }
 
 type AttachmentFile = MessageFile;
+type TranslateFn = (key: string, values?: Record<string, string | number>) => string;
 
 const AVATAR_COLORS = [
   'from-blue-500 to-cyan-500',
@@ -25,13 +27,6 @@ const AVATAR_COLORS = [
   'from-fuchsia-500 to-pink-500',
   'from-indigo-500 to-violet-500',
 ];
-
-const ERROR_KIND_META: Record<NonNullable<Message['errorKind']>, { label: string; tone: string }> = {
-  provider: { label: '模型异常', tone: 'bg-amber-100 text-amber-800 border-amber-200' },
-  network: { label: '网络异常', tone: 'bg-sky-100 text-sky-800 border-sky-200' },
-  timeout: { label: '请求超时', tone: 'bg-orange-100 text-orange-800 border-orange-200' },
-  stream: { label: '服务异常', tone: 'bg-red-100 text-red-800 border-red-200' },
-};
 
 const getAvatarColor = (id: string): string => {
   const index = Math.abs(
@@ -98,27 +93,34 @@ const coerceProviderRemediation = (value: unknown): string[] => {
   return remediation.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
 };
 
-const getMemoryCategoryMeta = (category?: string): { label: string; tone: string } => {
+const getErrorKindMeta = (t: TranslateFn): Record<NonNullable<Message['errorKind']>, { label: string; tone: string }> => ({
+  provider: { label: t('messageGroup.errorKind.provider'), tone: 'bg-amber-100 text-amber-800 border-amber-200' },
+  network: { label: t('messageGroup.errorKind.network'), tone: 'bg-sky-100 text-sky-800 border-sky-200' },
+  timeout: { label: t('messageGroup.errorKind.timeout'), tone: 'bg-orange-100 text-orange-800 border-orange-200' },
+  stream: { label: t('messageGroup.errorKind.stream'), tone: 'bg-red-100 text-red-800 border-red-200' },
+});
+
+const getMemoryCategoryMeta = (category: string | undefined, t: TranslateFn): { label: string; tone: string } => {
   switch ((category || '').toLowerCase()) {
     case 'reflection':
-      return { label: 'reflection', tone: 'bg-violet-50 text-violet-700' };
+      return { label: t('messageGroup.memoryCategory.reflection'), tone: 'bg-violet-50 text-violet-700' };
     case 'team':
-      return { label: 'team', tone: 'bg-emerald-50 text-emerald-700' };
+      return { label: t('messageGroup.memoryCategory.team'), tone: 'bg-emerald-50 text-emerald-700' };
     case 'recent':
-      return { label: 'recent', tone: 'bg-blue-50 text-blue-700' };
+      return { label: t('messageGroup.memoryCategory.recent'), tone: 'bg-blue-50 text-blue-700' };
     case 'long_term':
-      return { label: 'long-term', tone: 'bg-cyan-50 text-cyan-700' };
+      return { label: t('messageGroup.memoryCategory.longTerm'), tone: 'bg-cyan-50 text-cyan-700' };
     default:
-      return { label: category || 'memory', tone: 'bg-slate-100 text-slate-700' };
+      return { label: category || t('messageGroup.memoryCategory.default'), tone: 'bg-slate-100 text-slate-700' };
   }
 };
 
-const getOriginMeta = (source: MemorySource): { label: string; tone: string } | null => {
+const getOriginMeta = (source: MemorySource, t: TranslateFn): { label: string; tone: string } | null => {
   if (source.origin === 'team_shared' || source.category === 'team') {
-    return { label: `团队 ${source.owner_id || ''}`.trim(), tone: 'bg-emerald-50 text-emerald-700' };
+    return { label: t('messageGroup.origin.team', { owner: source.owner_id || '' }).trim(), tone: 'bg-emerald-50 text-emerald-700' };
   }
   if (source.category === 'reflection') {
-    return { label: 'Reflect', tone: 'bg-violet-50 text-violet-700' };
+    return { label: t('messageGroup.origin.reflect'), tone: 'bg-violet-50 text-violet-700' };
   }
   if (source.origin) {
     return { label: source.origin, tone: 'bg-slate-100 text-slate-700' };
@@ -155,42 +157,42 @@ const getSourceFileName = (source: MemorySource | null): string => {
   return normalized.trim().toLowerCase();
 };
 
-const getSourceTypeDescription = (source: MemorySource | null): string => {
+const getSourceTypeDescription = (source: MemorySource | null, t: TranslateFn): string => {
   if (!source) {
     return '';
   }
   const fileName = getSourceFileName(source);
   if (source.category === 'team') {
-    return '团队共享记忆。通常来自团队交接、共享约束、团队决策或阻塞信息，适合回到团队管理与团队聊天继续追踪。';
+    return t('messageGroup.sourceType.team');
   }
   if (fileName === 'soul.md') {
-    return 'Agent 人格档案。适合回到 Agent 管理页直接调整角色定位、风格和协作边界。';
+    return t('messageGroup.sourceType.soul');
   }
   if (fileName === 'user.md') {
-    return '用户偏好档案。适合回到 Agent 管理页检查偏好项，或回到单聊继续细化用户习惯。';
+    return t('messageGroup.sourceType.user');
   }
   if (fileName === 'reflection.md' || source.category === 'reflection') {
-    return '反思型记忆。表示系统从近期工作里提炼出的稳定观察或可复用策略。';
+    return t('messageGroup.sourceType.reflection');
   }
   if (fileName === 'memory.md' || fileName === 'history.md') {
-    return '长期或近期记忆片段。适合回到 Agent 运行摘要查看整体上下文沉淀情况。';
+    return t('messageGroup.sourceType.memory');
   }
-  return '普通记忆片段。可以继续在当前聊天追问，也可以跳到管理页查看关联配置。';
+  return t('messageGroup.sourceType.default');
 };
 
-const buildMemorySummaryText = (source: MemorySource | null): string => {
+const buildMemorySummaryText = (source: MemorySource | null, t: TranslateFn): string => {
   if (!source) {
     return '';
   }
   const lines = [
-    `标题: ${source.title || source.file || '未命名记忆片段'}`,
-    `级别: ${source.level}`,
-    ...(source.category ? [`类别: ${source.category}`] : []),
-    ...(source.scope_label ? [`范围: ${source.scope_label}`] : []),
-    ...(source.owner_id ? [`归属: ${source.owner_id}`] : []),
-    ...(source.reasons?.length ? [`命中原因: ${sortReasons(source.reasons).join(' / ')}`] : []),
-    ...(source.matched_terms?.length ? [`命中词: ${source.matched_terms.join(', ')}`] : []),
-    ...(source.snippet ? [`片段: ${source.snippet}`] : []),
+    `${t('messageGroup.summary.title')}: ${source.title || source.file || t('messageGroup.unnamedMemory')}`,
+    `${t('messageGroup.summary.level')}: ${source.level}`,
+    ...(source.category ? [`${t('messageGroup.summary.category')}: ${source.category}`] : []),
+    ...(source.scope_label ? [`${t('messageGroup.summary.scope')}: ${source.scope_label}`] : []),
+    ...(source.owner_id ? [`${t('messageGroup.summary.owner')}: ${source.owner_id}`] : []),
+    ...(source.reasons?.length ? [`${t('messageGroup.summary.reasons')}: ${sortReasons(source.reasons).join(' / ')}`] : []),
+    ...(source.matched_terms?.length ? [`${t('messageGroup.summary.matchedTerms')}: ${source.matched_terms.join(', ')}`] : []),
+    ...(source.snippet ? [`${t('messageGroup.summary.snippet')}: ${source.snippet}`] : []),
   ];
   return lines.join('\n');
 };
@@ -214,26 +216,26 @@ const buildMemoryContextText = (source: MemorySource | null): string => {
   ].join('\n');
 };
 
-const buildMemoryHandoffText = (source: MemorySource | null): string => {
+const buildMemoryHandoffText = (source: MemorySource | null, t: TranslateFn): string => {
   if (!source) {
     return '';
   }
   return [
     '[Relay Handoff]',
-    `请基于以下记忆来源继续处理：${source.title || source.file || 'unknown'}`,
-    `来源级别：${source.level}`,
-    `来源类别：${source.category || 'memory'}`,
-    `来源范围：${source.scope_label || source.scope || 'n/a'}`,
-    `来源归属：${source.owner_id || 'n/a'}`,
-    `关键原因：${sortReasons(source.reasons).join(' / ') || 'n/a'}`,
-    `命中词：${source.matched_terms?.join(', ') || 'n/a'}`,
-    `来源路径：${source.path || source.file || 'n/a'}`,
-    '参考片段：',
+    `${t('messageGroup.handoff.continueFrom')}: ${source.title || source.file || 'unknown'}`,
+    `${t('messageGroup.handoff.level')}: ${source.level}`,
+    `${t('messageGroup.handoff.category')}: ${source.category || 'memory'}`,
+    `${t('messageGroup.handoff.scope')}: ${source.scope_label || source.scope || 'n/a'}`,
+    `${t('messageGroup.handoff.owner')}: ${source.owner_id || 'n/a'}`,
+    `${t('messageGroup.handoff.reasons')}: ${sortReasons(source.reasons).join(' / ') || 'n/a'}`,
+    `${t('messageGroup.handoff.matchedTerms')}: ${source.matched_terms?.join(', ') || 'n/a'}`,
+    `${t('messageGroup.handoff.path')}: ${source.path || source.file || 'n/a'}`,
+    `${t('messageGroup.handoff.referenceSnippet')}:`,
     source.snippet || 'n/a',
-    '请输出：',
-    '1. 你从这条记忆中提炼出的当前约束或关键信息',
-    '2. 你接下来准备执行的动作',
-    '3. 如果信息不足，你需要向谁追问什么',
+    `${t('messageGroup.handoff.pleaseOutput')}:`,
+    `1. ${t('messageGroup.handoff.output1')}`,
+    `2. ${t('messageGroup.handoff.output2')}`,
+    `3. ${t('messageGroup.handoff.output3')}`,
   ].join('\n');
 };
 
@@ -247,31 +249,31 @@ const formatFileSize = (size: number): string => {
   return `${size} B`;
 };
 
-const getFileKindLabel = (file: NonNullable<Message['files']>[number]): string => {
+const getFileKindLabel = (file: NonNullable<Message['files']>[number], t: TranslateFn): string => {
   const name = file.originalName.toLowerCase();
-  if (file.category === 'image') return '图片';
-  if (file.category === 'audio') return '音频';
+  if (file.category === 'image') return t('messageGroup.fileKind.image');
+  if (file.category === 'audio') return t('messageGroup.fileKind.audio');
   if (name.endsWith('.pdf')) return 'PDF';
   if (name.endsWith('.docx')) return 'Word';
   if (name.endsWith('.xlsx')) return 'Excel';
   if (name.endsWith('.pptx')) return 'PowerPoint';
-  if (name.endsWith('.md')) return 'Markdown';
-  if (name.endsWith('.txt')) return '文本';
-  return '文件';
+  if (name.endsWith('.md')) return t('messageGroup.fileKind.markdown');
+  if (name.endsWith('.txt')) return t('messageGroup.fileKind.text');
+  return t('messageGroup.fileKind.file');
 };
 
-const getFilePreviewText = (file: NonNullable<Message['files']>[number]): string => {
+const getFilePreviewText = (file: NonNullable<Message['files']>[number], t: TranslateFn): string => {
   const extractedText = file.extractedText?.trim();
   if (extractedText) {
     return extractedText.replace(/\s+/g, ' ').slice(0, 160);
   }
   if (file.category === 'audio') {
-    return '音频附件，可直接在消息里播放并让 Agent 转写或分析。';
+    return t('messageGroup.filePreview.audio');
   }
   if (file.category === 'image') {
-    return '图片附件，可直接点击放大查看。';
+    return t('messageGroup.filePreview.image');
   }
-  return '文件附件，可打开原文件继续查看。';
+  return t('messageGroup.filePreview.default');
 };
 
 const getFilePreviewUrl = (file: AttachmentFile): string =>
@@ -299,7 +301,7 @@ const getFilePreviewModalSize = (file: AttachmentFile | null): 'lg' | 'full' => 
   return file.category === 'image' || isPdfFile(file) ? 'full' : 'lg';
 };
 
-const renderFilePreviewContent = (file: AttachmentFile): React.ReactNode => {
+const renderFilePreviewContent = (file: AttachmentFile, t: TranslateFn): React.ReactNode => {
   const previewUrl = getFilePreviewUrl(file);
   const extractedText = file.extractedText?.trim();
 
@@ -329,7 +331,7 @@ const renderFilePreviewContent = (file: AttachmentFile): React.ReactNode => {
         </div>
         {extractedText ? (
           <div>
-            <div className="mb-2 text-sm font-semibold text-slate-800">转写 / 提取内容</div>
+            <div className="mb-2 text-sm font-semibold text-slate-800">{t('messageGroup.filePreview.transcript')}</div>
             <pre className="max-h-[40vh] overflow-auto rounded-2xl border border-slate-200 bg-white px-4 py-3 whitespace-pre-wrap break-words text-sm text-slate-700">
               {extractedText}
             </pre>
@@ -354,7 +356,7 @@ const renderFilePreviewContent = (file: AttachmentFile): React.ReactNode => {
       <div className="space-y-3">
         {isOfficeFile(file) && (
           <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            当前预览展示的是解析出的文本内容，版式请通过“打开原文件”查看。
+            {t('messageGroup.filePreview.officeNotice')}
           </div>
         )}
         <pre className="max-h-[68vh] overflow-auto rounded-2xl border border-slate-200 bg-white px-4 py-3 whitespace-pre-wrap break-words text-sm text-slate-700">
@@ -376,7 +378,7 @@ const renderFilePreviewContent = (file: AttachmentFile): React.ReactNode => {
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-      当前类型暂不支持直接内嵌预览，可以使用下方按钮打开原文件。
+      {t('messageGroup.filePreview.unsupported')}
     </div>
   );
 };
@@ -390,28 +392,30 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
   onRetryMessage,
   children,
 }) => {
+  const { t } = useI18n();
   const toast = useToast();
   const navigate = useNavigate();
   const avatarColor = agentId ? getAvatarColor(agentId) : 'from-blue-500 to-cyan-500';
   const [inspectedSource, setInspectedSource] = useState<MemorySource | null>(null);
   const [previewedFile, setPreviewedFile] = useState<AttachmentFile | null>(null);
+  const errorKindMeta = useMemo(() => getErrorKindMeta(t), [t]);
 
   const inspectedSourceOrigin = useMemo(() => {
     if (!inspectedSource) {
       return null;
     }
-    return getOriginMeta(inspectedSource);
-  }, [inspectedSource]);
+    return getOriginMeta(inspectedSource, t);
+  }, [inspectedSource, t]);
 
   const handleCopy = useCallback(async (message: Message) => {
     try {
       await navigator.clipboard.writeText(stripMessageTags(message.content || ''));
-      toast.success('消息已复制');
+      toast.success(t('messageGroup.toast.messageCopied'));
     } catch (error) {
       console.error('Failed to copy message:', error);
-      toast.error('复制失败，请稍后重试');
+      toast.error(t('messageGroup.toast.copyFailed'));
     }
-  }, [toast]);
+  }, [t, toast]);
 
   const handleOpenMemorySource = useCallback((source: MemorySource) => {
     setInspectedSource(source);
@@ -420,11 +424,11 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
   const handleOpenFilePreview = useCallback((file: AttachmentFile) => {
     const previewUrl = getFilePreviewUrl(file);
     if (!previewUrl && !file.extractedText?.trim()) {
-      toast.error('当前附件暂时无法预览');
+      toast.error(t('messageGroup.toast.previewUnavailable'));
       return;
     }
     setPreviewedFile(file);
-  }, [toast]);
+  }, [t, toast]);
 
   const handleOpenOriginalFile = useCallback(() => {
     if (!previewedFile) {
@@ -432,11 +436,11 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
     }
     const targetUrl = previewedFile.url || getFilePreviewUrl(previewedFile);
     if (!targetUrl) {
-      toast.error('没有可打开的原文件地址');
+      toast.error(t('messageGroup.toast.noOriginalFile'));
       return;
     }
     window.open(targetUrl, '_blank', 'noopener,noreferrer');
-  }, [previewedFile, toast]);
+  }, [previewedFile, t, toast]);
 
   const handleNavigateToSource = useCallback(() => {
     if (!inspectedSource) {
@@ -491,88 +495,88 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
     }
     const pathText = inspectedSource.path || inspectedSource.file;
     if (!pathText) {
-      toast.error('没有可复制的来源路径');
+      toast.error(t('messageGroup.toast.noSourcePath'));
       return;
     }
     try {
       await navigator.clipboard.writeText(pathText);
-      toast.success('来源路径已复制');
+      toast.success(t('messageGroup.toast.sourcePathCopied'));
     } catch (error) {
       console.error('Failed to copy source path:', error);
-      toast.error('复制来源路径失败');
+      toast.error(t('messageGroup.toast.copySourcePathFailed'));
     }
-  }, [inspectedSource, toast]);
+  }, [inspectedSource, t, toast]);
 
   const handleCopySourceSummary = useCallback(async () => {
-    const content = buildMemorySummaryText(inspectedSource);
+    const content = buildMemorySummaryText(inspectedSource, t);
     if (!content) {
-      toast.error('没有可复制的引用摘要');
+      toast.error(t('messageGroup.toast.noSummary'));
       return;
     }
     try {
       await navigator.clipboard.writeText(content);
-      toast.success('引用摘要已复制');
+      toast.success(t('messageGroup.toast.summaryCopied'));
     } catch (error) {
       console.error('Failed to copy source summary:', error);
-      toast.error('复制引用摘要失败');
+      toast.error(t('messageGroup.toast.copySummaryFailed'));
     }
-  }, [inspectedSource, toast]);
+  }, [inspectedSource, t, toast]);
 
   const handleCopySourceContext = useCallback(async () => {
     const content = buildMemoryContextText(inspectedSource);
     if (!content) {
-      toast.error('没有可复制的上下文');
+      toast.error(t('messageGroup.toast.noContext'));
       return;
     }
     try {
       await navigator.clipboard.writeText(content);
-      toast.success('可复现上下文已复制');
+      toast.success(t('messageGroup.toast.contextCopied'));
     } catch (error) {
       console.error('Failed to copy source context:', error);
-      toast.error('复制可复现上下文失败');
+      toast.error(t('messageGroup.toast.copyContextFailed'));
     }
-  }, [inspectedSource, toast]);
+  }, [inspectedSource, t, toast]);
 
   const handleCopySourceHandoff = useCallback(async () => {
-    const content = buildMemoryHandoffText(inspectedSource);
+    const content = buildMemoryHandoffText(inspectedSource, t);
     if (!content) {
-      toast.error('没有可复制的接力模板');
+      toast.error(t('messageGroup.toast.noHandoff'));
       return;
     }
     try {
       await navigator.clipboard.writeText(content);
-      toast.success('接力模板已复制');
+      toast.success(t('messageGroup.toast.handoffCopied'));
     } catch (error) {
       console.error('Failed to copy source handoff:', error);
-      toast.error('复制接力模板失败');
+      toast.error(t('messageGroup.toast.copyHandoffFailed'));
     }
-  }, [inspectedSource, toast]);
+  }, [inspectedSource, t, toast]);
 
   const inspectedSourceTargetLabel = useMemo(() => {
     if (!inspectedSource) {
       return '';
     }
     if (inspectedSource.category === 'team' && inspectedSource.owner_id) {
-      return '前往团队管理';
+      return t('messageGroup.navigate.teamManagement');
     }
     if (agentId) {
-      return '前往 Agent 管理';
+      return t('messageGroup.navigate.agentManagement');
     }
     return '';
-  }, [agentId, inspectedSource]);
+  }, [agentId, inspectedSource, t]);
 
   const inspectedSourceChatLabel = useMemo(() => {
     if (!inspectedSource) {
       return '';
     }
     if (inspectedSource.category === 'team' && inspectedSource.owner_id) {
-      return '打开团队聊天';
+      return t('messageGroup.navigate.teamChat');
     }
     if (agentId) {
-      return '打开 Agent 单聊';
+      return t('messageGroup.navigate.agentChat');
     }
     return '';
-  }, [agentId, inspectedSource]);
+  }, [agentId, inspectedSource, t]);
 
   const renderMessageFiles = useCallback((files?: Message['files'], isUserMessage?: boolean) => {
     if (!files || files.length === 0) {
@@ -622,7 +626,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                   <span className="truncate">{file.originalName}</span>
                 </div>
                 <div className={`rounded-2xl border px-3 py-3 text-xs ${isUserMessage ? 'border-white/20 bg-white/10 text-white/85' : 'border-slate-200 bg-white text-slate-500'}`}>
-                  点击预览并播放音频
+                  {t('messageGroup.filePreview.playAudio')}
                 </div>
                 <div className={`mt-2 text-[11px] ${isUserMessage ? 'text-white/75' : 'text-slate-500'}`}>
                   {formatFileSize(file.size)}
@@ -645,7 +649,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className={`mb-1 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${isUserMessage ? 'bg-white/15 text-white/90' : 'bg-slate-200 text-slate-600'}`}>
-                    {getFileKindLabel(file)}
+                    {getFileKindLabel(file, t)}
                   </span>
                   <span className="block truncate text-sm font-medium">{file.originalName}</span>
                   <span className={`block text-[11px] ${isUserMessage ? 'text-white/75' : 'text-slate-500'}`}>
@@ -654,25 +658,27 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                 </span>
               </div>
               <p className={`line-clamp-4 text-[12px] leading-5 ${isUserMessage ? 'text-white/80' : 'text-slate-500'}`}>
-                {getFilePreviewText(file)}
+                {getFilePreviewText(file, t)}
               </p>
             </button>
           );
         })}
       </div>
     );
-  }, [handleOpenFilePreview]);
+  }, [handleOpenFilePreview, t]);
 
   const renderMessage = (message: Message, index: number) => {
     const showAvatar = index === 0;
     const showTimestamp = index === messages.length - 1;
     const isErrorMessage = !isUser && !!message.isError;
-    const errorMeta = message.errorKind ? ERROR_KIND_META[message.errorKind] : null;
+    const errorMeta = message.errorKind ? errorKindMeta[message.errorKind] : null;
     const providerRemediation = !isUser ? coerceProviderRemediation(message.metadata?._provider_error) : [];
     const cleanedContent = stripMessageTags(message.content);
     const memorySources = !isUser ? coerceMemorySources(message.metadata?._memory_sources) : [];
     const memoryRecall = !isUser ? coerceMemoryRecall(message.metadata?._memory_recall) : null;
-    const memorySummaryLabel = memorySources.length > 0 ? `记忆参考 ${memorySources.length} 条` : '记忆召回';
+    const memorySummaryLabel = memorySources.length > 0
+      ? t('messageGroup.memorySummary.references', { count: memorySources.length })
+      : t('messageGroup.memorySummary.recall');
     const shouldRenderMarkdown = !isUser && !message.isStreaming && !isErrorMessage && !!cleanedContent.trim();
     const handoffFromName = !isUser && typeof message.metadata?.handoff_from_name === 'string'
       ? message.metadata.handoff_from_name
@@ -684,8 +690,8 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
       ? message.metadata.handoff_preview
       : '';
     const relayStatusLabel = handoffFromName
-      ? `${handoffFromName} -> ${agentName || '助手'}`
-      : `${agentName || '助手'} 接力中`;
+      ? `${handoffFromName} -> ${agentName || t('messageGroup.assistant')}`
+      : t('messageGroup.relay.relayingWithAgent', { name: agentName || t('messageGroup.assistant') });
     const relayStatusTone = handoffMode === 'summary'
       ? 'border-emerald-200 bg-emerald-50/80 text-emerald-800'
       : handoffMode === 'continue'
@@ -703,7 +709,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
       >
         {showAvatar ? (
           <div className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${isUser ? 'from-blue-500 to-cyan-500' : avatarColor} text-[10px] font-semibold text-white shadow-sm`}>
-            {isUser ? '你' : (agentName ? agentName.charAt(0).toUpperCase() : '?')}
+            {isUser ? t('common.user').charAt(0) : (agentName ? agentName.charAt(0).toUpperCase() : '?')}
           </div>
         ) : (
           <div className="w-6 flex-shrink-0" />
@@ -713,7 +719,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
           {showAvatar && (
             <div className={`mb-0.5 flex items-center gap-1.5 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
               <span className="text-[12px] font-semibold text-slate-800">
-                {isUser ? '你' : agentName || '助手'}
+                {isUser ? t('common.user') : agentName || t('messageGroup.assistant')}
               </span>
               {showTimestamp && message.timestamp && (
                 <span className="text-[10px] text-slate-400">
@@ -727,17 +733,17 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
             <div className={`w-fit max-w-full rounded-2xl border px-3 py-2 shadow-sm sm:max-w-[36rem] ${relayStatusTone}`}>
               <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium">
                 <span className="inline-flex items-center rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                  团队接力
+                  {t('messageGroup.relay.teamRelay')}
                 </span>
                 <span>{relayStatusLabel}</span>
                 {handoffMode === 'summary' && (
                   <span className="inline-flex items-center rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-                    返回总结
+                    {t('messageGroup.relay.returnSummary')}
                   </span>
                 )}
                 {handoffMode === 'continue' && (
                   <span className="inline-flex items-center rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-medium text-sky-700">
-                    继续下一棒
+                    {t('messageGroup.relay.continueNext')}
                   </span>
                 )}
               </div>
@@ -747,7 +753,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
               </div>
               {handoffPreview && (
                 <p className="mt-1 text-[11px] leading-4 text-slate-500">
-                  当前子任务: {handoffPreview}
+                  {t('messageGroup.relay.currentSubtask')}: {handoffPreview}
                 </p>
               )}
             </div>
@@ -756,7 +762,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
           {shouldShowCompactStreamingStatus && (
             <div className={`mb-1 inline-flex max-w-full items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-sm ${compactStreamingTone}`}>
               <span className="inline-flex items-center rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
-                {handoffFromName || handoffMode ? '团队接力' : '处理中'}
+                {handoffFromName || handoffMode ? t('messageGroup.relay.teamRelay') : t('messageGroup.relay.processing')}
               </span>
               <span className="truncate">{message.statusMessage}</span>
               <span className="inline-block h-3.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-current" />
@@ -778,7 +784,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                   <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 4h.01M10.29 3.86l-7.5 13A1 1 0 003.66 18h16.68a1 1 0 00.87-1.5l-7.5-13a1 1 0 00-1.74 0z" />
                   </svg>
-                  <span>请求失败</span>
+                  <span>{t('messageGroup.requestFailed')}</span>
                 </div>
                 {errorMeta && (
                   <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${errorMeta.tone}`}>
@@ -813,7 +819,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
 
             {isErrorMessage && providerRemediation.length > 0 && (
               <div className="mt-3 rounded-2xl border border-red-100 bg-white/70 px-3 py-2">
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-red-600">建议处理</div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-red-600">{t('messageGroup.remediationTitle')}</div>
                 <ul className="space-y-1 text-xs leading-5 text-red-800">
                   {providerRemediation.map((item, remediationIndex) => (
                     <li key={`${message.id}-remediation-${remediationIndex}`}>• {item}</li>
@@ -835,7 +841,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                   {memorySummaryLabel}
                 </span>
                 <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
-                  默认折叠
+                  {t('messageGroup.collapsedByDefault')}
                   <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />
                 </span>
               </summary>
@@ -844,34 +850,34 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                   <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3">
                     <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
                       <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
-                        本轮召回
+                        {t('messageGroup.memoryRecall.currentRound')}
                       </span>
                       {typeof memoryRecall.latency_ms === 'number' && (
                         <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
-                          耗时 {memoryRecall.latency_ms.toFixed(1)} ms
+                          {t('messageGroup.memoryRecall.latency', { value: memoryRecall.latency_ms.toFixed(1) })}
                         </span>
                       )}
                       {typeof memoryRecall.candidates_count === 'number' && (
                         <span className="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 font-medium text-sky-700">
-                          候选 {memoryRecall.candidates_count}
+                          {t('messageGroup.memoryRecall.candidates', { count: memoryRecall.candidates_count })}
                         </span>
                       )}
                       {typeof memoryRecall.selected_count === 'number' && (
                         <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
-                          命中 {memoryRecall.selected_count}
+                          {t('messageGroup.memoryRecall.hits', { count: memoryRecall.selected_count })}
                         </span>
                       )}
                     </div>
                     {memoryRecall.query && (
                       <p className="mt-2 text-xs text-slate-600">
-                        检索词: {memoryRecall.query}
+                        {t('messageGroup.memoryRecall.query')}: {memoryRecall.query}
                       </p>
                     )}
                   </div>
                 )}
                 {memorySources.slice(0, 5).map((source, sourceIdx) => {
-                  const categoryMeta = getMemoryCategoryMeta(source.category);
-                  const originMeta = getOriginMeta(source);
+                  const categoryMeta = getMemoryCategoryMeta(source.category, t);
+                  const originMeta = getOriginMeta(source, t);
                   const sortedReasons = sortReasons(source.reasons);
                   const snippetView = previewSnippet(source.snippet);
                   return (
@@ -900,17 +906,17 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                         )}
                         {typeof source.relevance === 'number' && (
                           <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
-                            匹配 {(source.relevance * 100).toFixed(0)}%
+                            {t('messageGroup.matchPercent', { percent: (source.relevance * 100).toFixed(0) })}
                           </span>
                         )}
-                        <span>{source.title || source.file || '未命名记忆片段'}</span>
+                        <span>{source.title || source.file || t('messageGroup.unnamedMemory')}</span>
                         <button
                           type="button"
                           onClick={() => handleOpenMemorySource(source)}
                           data-testid="memory-source-open-detail"
                           className="ml-auto inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 transition-colors hover:bg-slate-200 hover:text-slate-800"
                         >
-                          查看详情
+                          {t('messageGroup.viewDetails')}
                           <ArrowUpRight className="h-3 w-3" strokeWidth={2} />
                         </button>
                       </div>
@@ -922,7 +928,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                           {snippetView.expanded && (
                             <details className="mt-2 rounded-xl bg-slate-50 px-2 py-1">
                               <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:hidden">
-                                展开原文片段
+                                {t('messageGroup.expandSnippet')}
                               </summary>
                               <p className="mt-2 whitespace-pre-wrap break-words text-xs text-slate-700">
                                 {source.snippet}
@@ -975,8 +981,8 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                       ? 'hover:bg-blue-100/80'
                       : 'hover:bg-white'
                   }`}
-                  aria-label="复制内容"
-                  title="复制内容"
+                  aria-label={t('messageGroup.copyContent')}
+                  title={t('messageGroup.copyContent')}
                 >
                   <Copy className="h-3.5 w-3.5" strokeWidth={2} />
                 </button>
@@ -985,8 +991,8 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                     type="button"
                     onClick={() => onRetryMessage(message)}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-white"
-                    aria-label="重试上一条"
-                    title="重试上一条"
+                    aria-label={t('messageGroup.retryLastMessage')}
+                    title={t('messageGroup.retryLastMessage')}
                   >
                     <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />
                   </button>
@@ -1011,7 +1017,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
       <Modal
         isOpen={!!inspectedSource}
         onClose={() => setInspectedSource(null)}
-        title={inspectedSource?.title || inspectedSource?.file || '记忆来源详情'}
+        title={inspectedSource?.title || inspectedSource?.file || t('messageGroup.memorySourceDetail')}
         size="lg"
       >
         {inspectedSource && (
@@ -1021,8 +1027,8 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                 {inspectedSource.level}
               </span>
               {inspectedSource.category && (
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${getMemoryCategoryMeta(inspectedSource.category).tone}`}>
-                  {getMemoryCategoryMeta(inspectedSource.category).label}
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${getMemoryCategoryMeta(inspectedSource.category, t).tone}`}>
+                  {getMemoryCategoryMeta(inspectedSource.category, t).label}
                 </span>
               )}
               {inspectedSourceOrigin && (
@@ -1037,26 +1043,26 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
               )}
               {typeof inspectedSource.relevance === 'number' && (
                 <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
-                  匹配 {(inspectedSource.relevance * 100).toFixed(0)}%
+                  {t('messageGroup.matchPercent', { percent: (inspectedSource.relevance * 100).toFixed(0) })}
                 </span>
               )}
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">来源文件</div>
-              <div className="mt-2 break-all text-sm text-slate-700">{inspectedSource.path || inspectedSource.file || '未记录路径'}</div>
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{t('messageGroup.sourceFile')}</div>
+              <div className="mt-2 break-all text-sm text-slate-700">{inspectedSource.path || inspectedSource.file || t('messageGroup.pathNotRecorded')}</div>
             </div>
 
             <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3">
-              <div className="text-xs font-medium uppercase tracking-wide text-sky-700">来源类型说明</div>
+              <div className="text-xs font-medium uppercase tracking-wide text-sky-700">{t('messageGroup.sourceTypeTitle')}</div>
               <p className="mt-2 text-sm text-sky-900" data-testid="memory-source-description">
-                {getSourceTypeDescription(inspectedSource)}
+                {getSourceTypeDescription(inspectedSource, t)}
               </p>
             </div>
 
             {inspectedSource.reasons?.length ? (
               <div>
-                <div className="text-sm font-semibold text-slate-800">命中原因</div>
+                <div className="text-sm font-semibold text-slate-800">{t('messageGroup.hitReasons')}</div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {sortReasons(inspectedSource.reasons).map((reason) => (
                     <span
@@ -1072,7 +1078,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
 
             {inspectedSource.matched_terms?.length ? (
               <div>
-                <div className="text-sm font-semibold text-slate-800">命中词</div>
+                <div className="text-sm font-semibold text-slate-800">{t('messageGroup.hitTerms')}</div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {inspectedSource.matched_terms.map((term) => (
                     <span
@@ -1087,15 +1093,15 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
             ) : null}
 
             <div>
-              <div className="text-sm font-semibold text-slate-800">原文片段</div>
+              <div className="text-sm font-semibold text-slate-800">{t('messageGroup.originalSnippet')}</div>
               <pre className="mt-2 max-h-[45vh] overflow-auto rounded-2xl border border-slate-200 bg-white px-4 py-3 whitespace-pre-wrap break-words text-sm text-slate-700">
-                {inspectedSource.snippet || '暂无片段内容'}
+                {inspectedSource.snippet || t('messageGroup.noSnippet')}
               </pre>
             </div>
 
             <ModalFooter className="flex-col items-stretch gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div className="space-y-2">
-                <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">复制</div>
+                <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{t('messageGroup.copySection')}</div>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -1103,7 +1109,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                     data-testid="memory-source-copy-handoff"
                     className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
                   >
-                    复制接力模板
+                    {t('messageGroup.copyHandoffTemplate')}
                   </button>
                   <button
                     type="button"
@@ -1111,7 +1117,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                     data-testid="memory-source-copy-summary"
                     className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
                   >
-                    复制摘要
+                    {t('messageGroup.copySummary')}
                   </button>
                   <button
                     type="button"
@@ -1119,7 +1125,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                     data-testid="memory-source-copy-context"
                     className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
                   >
-                    复制上下文
+                    {t('messageGroup.copyContext')}
                   </button>
                   <button
                     type="button"
@@ -1127,12 +1133,12 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                     data-testid="memory-source-copy-path"
                     className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
                   >
-                    复制路径
+                    {t('messageGroup.copyPath')}
                   </button>
                 </div>
               </div>
               <div className="space-y-2 sm:text-right">
-                <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">跳转</div>
+                <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{t('messageGroup.navigateSection')}</div>
                 <div className="flex flex-wrap gap-2 sm:justify-end">
                   {inspectedSourceChatLabel && (
                     <button
@@ -1164,14 +1170,14 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
       <Modal
         isOpen={!!previewedFile}
         onClose={() => setPreviewedFile(null)}
-        title={previewedFile?.originalName || '附件预览'}
+        title={previewedFile?.originalName || t('messageGroup.filePreviewTitle')}
         size={getFilePreviewModalSize(previewedFile)}
       >
         {previewedFile && (
           <div className="space-y-4" data-testid="message-file-preview-modal">
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
               <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
-                {getFileKindLabel(previewedFile)}
+                {getFileKindLabel(previewedFile, t)}
               </span>
               <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
                 {formatFileSize(previewedFile.size)}
@@ -1183,7 +1189,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
               )}
             </div>
 
-            {renderFilePreviewContent(previewedFile)}
+            {renderFilePreviewContent(previewedFile, t)}
 
             <ModalFooter>
               <button
@@ -1191,7 +1197,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                 onClick={handleOpenOriginalFile}
                 className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800"
               >
-                打开原文件
+                {t('messageGroup.openOriginalFile')}
                 <ArrowUpRight className="h-4 w-4" strokeWidth={2} />
               </button>
             </ModalFooter>

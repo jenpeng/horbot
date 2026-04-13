@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader } from '../ui';
 import type { SystemStatus } from '../../types';
+import { useI18n } from '../../contexts/I18nContext';
 import { SystemMetricsSummary } from '../system';
 
 interface DashboardSystemStatusCardProps {
@@ -7,8 +8,11 @@ interface DashboardSystemStatusCardProps {
 }
 
 const DashboardSystemStatusCard = ({ systemStatus }: DashboardSystemStatusCardProps) => {
+  const { t } = useI18n();
   const cronJobsCount = systemStatus?.services.cron.jobs_count ?? 0;
-  const agentStatusLabel = systemStatus?.services.agent.initialized ? 'Initialized' : 'Pending';
+  const agentStatusLabel = systemStatus?.services.agent.initialized
+    ? t('dashboard.systemStatus.initialized')
+    : t('dashboard.systemStatus.pending');
 
   return (
     <Card
@@ -25,8 +29,8 @@ const DashboardSystemStatusCard = ({ systemStatus }: DashboardSystemStatusCardPr
               </svg>
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-surface-900 tracking-tight">System Status</h3>
-              <p className="text-sm text-surface-500">Core runtime and resource health</p>
+              <h3 className="text-lg font-semibold text-surface-900 tracking-tight">{t('dashboard.systemStatus.title')}</h3>
+              <p className="text-sm text-surface-500">{t('dashboard.systemStatus.subtitle')}</p>
             </div>
           </div>
         )}
@@ -34,11 +38,11 @@ const DashboardSystemStatusCard = ({ systemStatus }: DashboardSystemStatusCardPr
       <CardContent className="space-y-4 px-5 pb-5 pt-4">
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-2xl border border-surface-200 bg-surface-50 px-3 py-3">
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">Agent</p>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">{t('dashboard.systemStatus.agent')}</p>
             <p className="mt-2 text-sm font-semibold text-surface-900">{agentStatusLabel}</p>
           </div>
           <div className="rounded-2xl border border-surface-200 bg-surface-50 px-3 py-3">
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">Cron Jobs</p>
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">{t('dashboard.systemStatus.cronJobs')}</p>
             <p className="mt-2 text-sm font-semibold text-surface-900">{cronJobsCount}</p>
           </div>
         </div>

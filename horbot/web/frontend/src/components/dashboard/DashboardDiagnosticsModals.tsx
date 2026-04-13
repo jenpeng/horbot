@@ -6,15 +6,12 @@ import type { EnvironmentDetectionData } from '../EnvironmentDetectionResult';
 import { lazyWithReload } from '../../utils/lazyWithReload';
 import type { DashboardModal } from '../../hooks/useDashboardDiagnostics';
 import type { MemoryData } from '../../services/diagnostics';
+import { useI18n } from '../../contexts/I18nContext';
 import DashboardMemoryPanel from './DashboardMemoryPanel';
 
 const ConfigCheckResult = lazyWithReload('DashboardConfigCheckResult', () => import('../ConfigCheckResult'));
 const GatewayDiagnosticsResult = lazyWithReload('DashboardGatewayDiagnosticsResult', () => import('../GatewayDiagnosticsResult'));
 const EnvironmentDetectionResult = lazyWithReload('DashboardEnvironmentDetectionResult', () => import('../EnvironmentDetectionResult'));
-
-const modalBodyFallback = (
-  <div className="p-6 text-sm text-surface-500">加载诊断详情中...</div>
-);
 
 interface DashboardDiagnosticsModalsProps {
   activeModal: DashboardModal;
@@ -36,10 +33,16 @@ const DashboardDiagnosticsModals = ({
   environmentData,
   memoryData,
   onClose,
-}: DashboardDiagnosticsModalsProps) => (
-  <>
+}: DashboardDiagnosticsModalsProps) => {
+  const { t } = useI18n();
+  const modalBodyFallback = (
+    <div className="p-6 text-sm text-surface-500">{t('dashboard.diagnostics.loading')}</div>
+  );
+
+  return (
+    <>
     <DiagnosticModal
-      title="配置检查"
+      title={t('dashboard.diagnostics.configCheck')}
       isOpen={activeModal === 'config-check'}
       onClose={onClose}
       isLoading={modalLoading}
@@ -54,7 +57,7 @@ const DashboardDiagnosticsModals = ({
     </DiagnosticModal>
 
     <DiagnosticModal
-      title="网关诊断"
+      title={t('dashboard.diagnostics.gateway')}
       isOpen={activeModal === 'gateway-diagnosis'}
       onClose={onClose}
       isLoading={modalLoading}
@@ -69,7 +72,7 @@ const DashboardDiagnosticsModals = ({
     </DiagnosticModal>
 
     <DiagnosticModal
-      title="环境检测"
+      title={t('dashboard.diagnostics.environment')}
       isOpen={activeModal === 'env-detection'}
       onClose={onClose}
       isLoading={modalLoading}
@@ -84,7 +87,7 @@ const DashboardDiagnosticsModals = ({
     </DiagnosticModal>
 
     <DiagnosticModal
-      title="内存管理"
+      title={t('dashboard.diagnostics.memory')}
       isOpen={activeModal === 'memory-manager'}
       onClose={onClose}
       isLoading={modalLoading}
@@ -94,6 +97,7 @@ const DashboardDiagnosticsModals = ({
       {memoryData && <DashboardMemoryPanel memoryData={memoryData} />}
     </DiagnosticModal>
   </>
-);
+  );
+};
 
 export default DashboardDiagnosticsModals;

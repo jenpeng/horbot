@@ -19,6 +19,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
+import { useI18n } from '../contexts/I18nContext';
 import { useToast } from '../contexts/ToastContext';
 import { chatService, type UploadedFile } from '../services/chat';
 import { ConversationType, type MessageFile } from '../types/conversation';
@@ -93,12 +94,15 @@ type BrowserWindow = Window & typeof globalThis & {
   webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
 };
 
+type TranslateFn = (key: string, values?: Record<string, number | string>) => string;
+
 const getStatusActionIcon = (label?: string) => {
   if (!label) return <Info className="h-4 w-4" strokeWidth={2} />;
-  if (label.includes('重试')) return <RotateCcw className="h-4 w-4" strokeWidth={2} />;
-  if (label.includes('继续输入')) return <PencilLine className="h-4 w-4" strokeWidth={2} />;
-  if (label.includes('停止')) return <Square className="h-4 w-4" strokeWidth={2} />;
-  if (label.includes('继续')) return <SendHorizonal className="h-4 w-4" strokeWidth={2} />;
+  const normalized = label.toLowerCase();
+  if (label.includes('重试') || normalized.includes('retry')) return <RotateCcw className="h-4 w-4" strokeWidth={2} />;
+  if (label.includes('继续输入') || normalized.includes('continue input')) return <PencilLine className="h-4 w-4" strokeWidth={2} />;
+  if (label.includes('停止') || normalized.includes('stop')) return <Square className="h-4 w-4" strokeWidth={2} />;
+  if (label.includes('继续') || normalized.includes('continue')) return <SendHorizonal className="h-4 w-4" strokeWidth={2} />;
   return <Info className="h-4 w-4" strokeWidth={2} />;
 };
 
@@ -162,35 +166,6 @@ const inferAttachmentCategory = (file: File): ComposerAttachment['category'] => 
   return 'document';
 };
 
-const inferDocumentPromptLabel = (attachments: ComposerAttachment[]): string => {
-  const names = attachments.map((attachment) => attachment.originalName.toLowerCase());
-  const hasPdf = names.some((name) => name.endsWith('.pdf'));
-  const hasDocx = names.some((name) => name.endsWith('.docx'));
-  const hasPptx = names.some((name) => name.endsWith('.pptx'));
-  const hasXlsx = names.some((name) => name.endsWith('.xlsx'));
-
-  const labels = [
-    hasPdf ? 'PDF 文档' : null,
-    hasDocx ? 'Word 文档' : null,
-    hasXlsx ? 'Excel 表格' : null,
-    hasPptx ? 'PowerPoint 演示文稿' : null,
-  ].filter((label): label is string => Boolean(label));
-
-  if (labels.length === 1) {
-    return labels[0];
-  }
-  if (labels.length === 2) {
-    return `${labels[0]}和${labels[1]}`;
-  }
-  if (labels.length === 3) {
-    return `${labels[0]}、${labels[1]}和${labels[2]}`;
-  }
-  if (labels.length >= 4) {
-    return '办公文档附件';
-  }
-  return '文档附件';
-};
-
 const formatFileSize = (size: number): string => {
   if (size >= 1024 * 1024) {
     return `${(size / (1024 * 1024)).toFixed(1)} MB`;
@@ -204,6 +179,7 @@ const formatFileSize = (size: number): string => {
 const validateSelectedFiles = (
   selectedFiles: File[],
   existingCount: number,
+  t: TranslateFn,
 ): { accepted: File[]; errorMessage?: string } => {
   if (selectedFiles.length === 0) {
     return { accepted: [] };
@@ -212,7 +188,7 @@ const validateSelectedFiles = (
   if (existingCount + selectedFiles.length > MAX_ATTACHMENT_COUNT) {
     return {
       accepted: [],
-      errorMessage: `单次最多保留 ${MAX_ATTACHMENT_COUNT} 个附件，请先移除一部分再继续上传。`,
+      errorMessage: t('messageInput.maxAttachmentsError', { count: MAX_ATTACHMENT_COUNT }),
     };
   }
 
@@ -220,7 +196,7 @@ const validateSelectedFiles = (
   if (oversized) {
     return {
       accepted: [],
-      errorMessage: `文件 ${oversized.name} 超过 50 MB，当前不支持上传。`,
+      errorMessage: t('messageInput.fileTooLargeError', { name: oversized.name }),
     };
   }
 
@@ -233,33 +209,33 @@ const revokeObjectPreview = (previewUrl?: string) => {
   }
 };
 
-const buildAttachmentPreviewText = (attachment: ComposerAttachment): string => {
+const buildAttachmentPreviewText = (attachment: ComposerAttachment, t: TranslateFn): string => {
   const extractedText = attachment.extractedText?.trim();
   if (extractedText) {
     return extractedText.replace(/\s+/g, ' ').slice(0, 140);
   }
 
   const lowerName = attachment.originalName.toLowerCase();
-  if (lowerName.endsWith('.pdf')) return 'PDF 文档已上传，发送后可让 Agent 直接阅读并总结。';
-  if (lowerName.endsWith('.docx')) return 'Word 文档已上传，发送后可继续追问段落、摘要或改写。';
-  if (lowerName.endsWith('.xlsx')) return 'Excel 表格已上传，发送后可让 Agent 总结表格内容与关键数据。';
-  if (lowerName.endsWith('.pptx')) return 'PowerPoint 已上传，发送后可让 Agent 总结每页重点。';
-  if (attachment.category === 'audio') return '音频已上传，发送后可让 Agent 转写并分析内容。';
-  if (attachment.category === 'image') return '图片已上传，发送后可让 Agent 识别图像内容。';
-  return '附件已上传，发送后可让 Agent 继续分析。';
+  if (lowerName.endsWith('.pdf')) return t('messageInput.preview.pdf');
+  if (lowerName.endsWith('.docx')) return t('messageInput.preview.docx');
+  if (lowerName.endsWith('.xlsx')) return t('messageInput.preview.xlsx');
+  if (lowerName.endsWith('.pptx')) return t('messageInput.preview.pptx');
+  if (attachment.category === 'audio') return t('messageInput.preview.audio');
+  if (attachment.category === 'image') return t('messageInput.preview.image');
+  return t('messageInput.preview.default');
 };
 
-const getAttachmentKindLabel = (attachment: ComposerAttachment): string => {
+const getAttachmentKindLabel = (attachment: ComposerAttachment, t: TranslateFn): string => {
   const lowerName = attachment.originalName.toLowerCase();
-  if (attachment.category === 'image') return '图片';
-  if (attachment.category === 'audio') return '音频';
+  if (attachment.category === 'image') return t('messageInput.kind.image');
+  if (attachment.category === 'audio') return t('messageInput.kind.audio');
   if (lowerName.endsWith('.pdf')) return 'PDF';
   if (lowerName.endsWith('.docx')) return 'Word';
   if (lowerName.endsWith('.xlsx')) return 'Excel';
   if (lowerName.endsWith('.pptx')) return 'PowerPoint';
   if (lowerName.endsWith('.md')) return 'Markdown';
-  if (lowerName.endsWith('.txt')) return '文本';
-  return '文件';
+  if (lowerName.endsWith('.txt')) return t('messageInput.kind.text');
+  return t('messageInput.kind.file');
 };
 
 const createPendingAttachment = (file: File, index: number): ComposerAttachment => {
@@ -295,21 +271,21 @@ const getAttachmentIcon = (attachment: ComposerAttachment) => {
   return <FileText className="h-4 w-4" strokeWidth={2} />;
 };
 
-const buildDefaultAttachmentPrompt = (attachments: ComposerAttachment[]): string => {
+const buildDefaultAttachmentPrompt = (attachments: ComposerAttachment[], t: TranslateFn): string => {
   if (attachments.length === 0) {
     return '';
   }
   const categories = new Set(attachments.map((attachment) => attachment.category));
   if (categories.has('audio')) {
-    return '请先分析我上传的音频内容，并结合其他附件给出结论。';
+    return t('messageInput.defaultPrompt.audio');
   }
   if (categories.has('image')) {
-    return '请先分析我上传的图片内容，并结合其他附件给出结论。';
+    return t('messageInput.defaultPrompt.image');
   }
   if (categories.has('document')) {
-    return `请先分析我上传的${inferDocumentPromptLabel(attachments)}，并告诉我关键信息。`;
+    return t('messageInput.defaultPrompt.document');
   }
-  return '请先分析我上传的附件，并告诉我关键信息。';
+  return t('messageInput.defaultPrompt.default');
 };
 
 const getMentionedAgentIdsFromText = (value: string, agents: AgentInfo[]): string[] => (
@@ -329,13 +305,14 @@ const MessageInput: React.FC<MessageInputProps> = ({
   agents,
   onSend,
   disabled = false,
-  placeholder = '输入消息...',
+  placeholder = '',
   isLoading = false,
   sessionStatus = null,
   focusRequestKey = 0,
   draftPresetText = '',
   draftPresetKey = 0,
 }) => {
+  const { t } = useI18n();
   const toast = useToast();
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -366,6 +343,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const speechRecognitionCtor = typeof window === 'undefined'
     ? undefined
     : ((window as BrowserWindow).SpeechRecognition || (window as BrowserWindow).webkitSpeechRecognition);
+  const resolvedPlaceholder = placeholder || t('messageInput.defaultPlaceholder');
 
   const syncMentionedAgentsFromText = useCallback((value: string) => {
     if (!isTeamChat) {
@@ -530,10 +508,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
           ...retainedUploads,
         ];
       });
-      toast.success(`已添加 ${uploadedFiles.length} 个附件`);
+      toast.success(t('messageInput.attachmentsAdded', { count: uploadedFiles.length }));
     } catch (error) {
       console.error('Failed to upload files:', error);
-      const errorMessage = error instanceof Error ? error.message : '附件上传失败，请重试';
+      const errorMessage = error instanceof Error ? error.message : t('messageInput.uploadFailed');
       setAttachments((prev) => prev.map((item) => (
         pendingAttachments.some((pending) => pending.fileId === item.fileId)
           ? {
@@ -555,7 +533,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     ));
 
     if (targets.length === 0) {
-      toast.warning('没有可重试的附件');
+      toast.warning(t('messageInput.retryNone'));
       return;
     }
 
@@ -590,8 +568,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
       }
 
       const reason = result.status === 'rejected'
-        ? (result.reason instanceof Error ? result.reason.message : '附件上传失败，请重试')
-        : '附件上传失败，请重试';
+        ? (result.reason instanceof Error ? result.reason.message : t('messageInput.uploadFailed'))
+        : t('messageInput.uploadFailed');
       errorMap.set(attachmentId, reason);
     });
 
@@ -628,13 +606,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
     }));
 
     if (errorMap.size === 0) {
-      toast.success(`已重新上传 ${successMap.size} 个附件`);
+      toast.success(t('messageInput.retrySuccess', { count: successMap.size }));
     } else if (successMap.size > 0) {
-      toast.warning(`已重新上传 ${successMap.size} 个附件，仍有 ${errorMap.size} 个失败`);
+      toast.warning(t('messageInput.retryPartial', { success: successMap.size, failed: errorMap.size }));
     } else {
-      toast.error(errorMap.values().next().value || '附件上传失败，请重试');
+      toast.error(errorMap.values().next().value || t('messageInput.uploadFailed'));
     }
-  }, [toast]);
+  }, [t, toast]);
 
   const handleRetryAttachment = useCallback(async (attachmentId: string) => {
     await retryAttachments([attachmentId]);
@@ -651,13 +629,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const handleFileSelection = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(event.target.files || []);
     event.target.value = '';
-    const validation = validateSelectedFiles(selectedFiles, attachmentsRef.current.length);
+    const validation = validateSelectedFiles(selectedFiles, attachmentsRef.current.length, t);
     if (validation.errorMessage) {
       toast.error(validation.errorMessage);
       return;
     }
     await uploadAttachments(validation.accepted);
-  }, [toast, uploadAttachments]);
+  }, [t, toast, uploadAttachments]);
 
   const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const clipboardFiles = Array.from(event.clipboardData?.files || []);
@@ -665,13 +643,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
       return;
     }
     event.preventDefault();
-    const validation = validateSelectedFiles(clipboardFiles, attachmentsRef.current.length);
+    const validation = validateSelectedFiles(clipboardFiles, attachmentsRef.current.length, t);
     if (validation.errorMessage) {
       toast.error(validation.errorMessage);
       return;
     }
     void uploadAttachments(validation.accepted);
-  }, [toast, uploadAttachments]);
+  }, [t, toast, uploadAttachments]);
 
   const handleDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     if (disabled || !Array.from(event.dataTransfer?.types || []).includes('Files')) {
@@ -710,13 +688,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
     dragDepthRef.current = 0;
     setIsDragActive(false);
     const droppedFiles = Array.from(event.dataTransfer.files || []);
-    const validation = validateSelectedFiles(droppedFiles, attachmentsRef.current.length);
+    const validation = validateSelectedFiles(droppedFiles, attachmentsRef.current.length, t);
     if (validation.errorMessage) {
       toast.error(validation.errorMessage);
       return;
     }
     void uploadAttachments(validation.accepted);
-  }, [disabled, toast, uploadAttachments]);
+  }, [disabled, t, toast, uploadAttachments]);
 
   const handleClearDraft = useCallback(() => {
     recognitionRef.current?.stop();
@@ -742,7 +720,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   const handleSend = useCallback(() => {
     const trimmedMessage = message.trim();
-    const normalizedMessage = trimmedMessage || buildDefaultAttachmentPrompt(readyAttachments);
+    const normalizedMessage = trimmedMessage || buildDefaultAttachmentPrompt(readyAttachments, t);
     if ((!normalizedMessage && readyAttachments.length === 0) || disabled || hasPendingUploads) return;
     const orderedMentionedAgents = isTeamChat
       ? getMentionedAgentIdsFromText(normalizedMessage, agents)
@@ -760,7 +738,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [agents, isTeamChat, message, disabled, hasPendingUploads, mentionedAgents, onSend, readyAttachments]);
+  }, [agents, disabled, hasPendingUploads, isTeamChat, mentionedAgents, message, onSend, readyAttachments, t]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (showMentionPicker) return;
@@ -773,7 +751,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   const handleVoiceInputToggle = useCallback(() => {
     if (!speechRecognitionCtor) {
-      toast.warning('当前浏览器不支持语音输入');
+      toast.warning(t('messageInput.browserSpeechUnsupported'));
       return;
     }
 
@@ -802,7 +780,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     recognition.onerror = (event: BrowserSpeechRecognitionErrorEvent) => {
       setIsRecording(false);
       if (event.error && event.error !== 'no-speech') {
-        toast.error(`语音输入失败: ${event.error}`);
+        toast.error(t('messageInput.voiceInputFailedWithReason', { reason: event.error }));
       }
     };
 
@@ -818,9 +796,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
     } catch (error) {
       console.error('Failed to start speech recognition:', error);
       setIsRecording(false);
-      toast.error('无法开始语音输入，请稍后重试');
+      toast.error(t('messageInput.voiceInputStartFailed'));
     }
-  }, [isRecording, message, speechRecognitionCtor, syncMentionedAgentsFromText, toast]);
+  }, [isRecording, message, speechRecognitionCtor, syncMentionedAgentsFromText, t, toast]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -900,8 +878,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
               <Upload className="h-6 w-6" strokeWidth={2} />
             </span>
             <div className="space-y-1">
-              <div className="text-sm font-semibold">松开即可上传到当前对话</div>
-              <div className="text-xs text-blue-600">支持图片、音频、PDF、Word、Excel、PowerPoint 与文本文件</div>
+              <div className="text-sm font-semibold">{t('messageInput.dragUploadTitle')}</div>
+              <div className="text-xs text-blue-600">{t('messageInput.dragUploadBody')}</div>
             </div>
           </div>
         </div>
@@ -925,10 +903,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 ? 'border-violet-200 bg-violet-50 text-violet-700'
                 : 'border-blue-200 bg-blue-50 text-blue-700'
             }`}>
-              {isTeamChat ? '团队接力模式' : '单聊模式'}
+              {isTeamChat ? t('messageInput.teamRelayMode') : t('messageInput.directMode')}
             </span>
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 shadow-sm">
-              <span className="font-medium text-slate-500">当前会话</span>
+              <span className="font-medium text-slate-500">{t('messageInput.currentConversation')}</span>
               <span className="font-semibold text-slate-700">{conversationName}</span>
             </div>
           </div>
@@ -939,8 +917,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 type="button"
                 onClick={handleClearDraft}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-100"
-                aria-label="清空草稿"
-                title="清空草稿"
+                aria-label={t('messageInput.clearDraft')}
+                title={t('messageInput.clearDraft')}
               >
                 <Eraser className="h-4 w-4" strokeWidth={2} />
               </button>
@@ -1001,8 +979,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
                   type="button"
                   onClick={sessionStatus.onDismiss}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors hover:bg-white/50"
-                  aria-label="关闭"
-                  title="关闭"
+                  aria-label={t('common.close')}
+                  title={t('common.close')}
                 >
                   <X className="h-4 w-4" strokeWidth={2} />
                 </button>
@@ -1013,7 +991,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
         {sessionStatus?.tone === 'success' && hasDraft && (
           <p className="mt-2 text-xs text-emerald-700">
-            当前草稿已保留，可直接发送，或改写后再发送。
+            {t('messageInput.draftPreserved')}
           </p>
         )}
       </div>
@@ -1030,7 +1008,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
         <div className="rounded-[28px] border border-slate-200 bg-white p-2.5 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
           {mentionedAgents.length > 0 && (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[22px] border border-violet-200 bg-violet-50/80 px-3 py-2">
-              <span className="text-xs font-medium text-violet-700">本次将唤起</span>
+              <span className="text-xs font-medium text-violet-700">{t('messageInput.willMention')}</span>
               {mentionedAgents.map((agentId) => {
                 const agent = agents.find((item) => item.id === agentId);
                 return agent ? (
@@ -1054,23 +1032,23 @@ const MessageInput: React.FC<MessageInputProps> = ({
             <div className="mb-2 rounded-[18px] border border-slate-200 bg-slate-50/90 px-2.5 py-2">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-medium text-slate-600">附件</span>
+                  <span className="text-xs font-medium text-slate-600">{t('messageInput.attachments')}</span>
                   <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-[11px] text-slate-500">
-                    {attachments.length} 项待发送
+                    {t('messageInput.pendingSendCount', { count: attachments.length })}
                   </span>
                   {readyAttachments.length > 0 && (
                     <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">
-                      {readyAttachments.length} 个已就绪
+                      {t('messageInput.readyCount', { count: readyAttachments.length })}
                     </span>
                   )}
                   {uploadingCount > 0 && (
                     <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-700">
-                      {uploadingCount} 个上传中
+                      {t('messageInput.uploadingCount', { count: uploadingCount })}
                     </span>
                   )}
                   {failedCount > 0 && (
                     <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-700">
-                      {failedCount} 个失败
+                      {t('messageInput.failedCount', { count: failedCount })}
                     </span>
                   )}
                 </div>
@@ -1082,7 +1060,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                       className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white px-2.5 py-1 text-[11px] font-medium text-red-700 transition-colors hover:bg-red-50"
                     >
                       <RefreshCcw className="h-3.5 w-3.5" strokeWidth={2} />
-                      重试失败项
+                      {t('messageInput.retryFailed')}
                     </button>
                   )}
                   <button
@@ -1091,7 +1069,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 transition-colors hover:bg-slate-100"
                   >
                     <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
-                    清空附件
+                    {t('messageInput.clearAttachments')}
                   </button>
                 </div>
               </div>
@@ -1114,8 +1092,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
                           type="button"
                           onClick={() => handleMoveAttachment(attachment.fileId, 'left')}
                           className="inline-flex h-6 w-6 items-center justify-center rounded-full transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-                          aria-label={`将附件 ${attachment.originalName} 前移`}
-                          title="前移"
+                          aria-label={t('messageInput.moveAttachmentLeft', { name: attachment.originalName })}
+                          title={t('messageInput.moveLeft')}
                           disabled={attachments[0]?.fileId === attachment.fileId}
                         >
                           <ArrowLeft className="h-3 w-3" strokeWidth={2} />
@@ -1124,8 +1102,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
                           type="button"
                           onClick={() => handleMoveAttachment(attachment.fileId, 'right')}
                           className="inline-flex h-6 w-6 items-center justify-center rounded-full transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-                          aria-label={`将附件 ${attachment.originalName} 后移`}
-                          title="后移"
+                          aria-label={t('messageInput.moveAttachmentRight', { name: attachment.originalName })}
+                          title={t('messageInput.moveRight')}
                           disabled={attachments[attachments.length - 1]?.fileId === attachment.fileId}
                         >
                           <ArrowRight className="h-3 w-3" strokeWidth={2} />
@@ -1137,8 +1115,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
                         type="button"
                         onClick={() => void handleRetryAttachment(attachment.fileId)}
                         className="inline-flex h-6 w-6 items-center justify-center rounded-full text-red-700 transition-colors hover:bg-red-100"
-                        aria-label={`重试上传附件 ${attachment.originalName}`}
-                        title="重试上传"
+                        aria-label={t('messageInput.retryAttachment', { name: attachment.originalName })}
+                        title={t('messageInput.retryUpload')}
                       >
                         <RefreshCcw className="h-3 w-3" strokeWidth={2} />
                       </button>
@@ -1147,8 +1125,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
                       type="button"
                       onClick={() => handleRemoveAttachment(attachment.fileId)}
                       className="inline-flex h-6 w-6 items-center justify-center rounded-full transition-colors hover:bg-slate-100"
-                      aria-label={`移除附件 ${attachment.originalName}`}
-                      title="移除附件"
+                      aria-label={t('messageInput.removeAttachment', { name: attachment.originalName })}
+                      title={t('messageInput.removeAttachmentShort')}
                     >
                       <X className="h-3 w-3" strokeWidth={2} />
                     </button>
@@ -1171,11 +1149,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
                           #{attachments.findIndex((item) => item.fileId === attachment.fileId) + 1}
                         </span>
                         <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
-                          {getAttachmentKindLabel(attachment)}
+                          {getAttachmentKindLabel(attachment, t)}
                         </span>
                         <span className="text-[10px] opacity-80">
                           {attachment.uploadState === 'uploading'
-                            ? '上传中...'
+                            ? t('messageInput.uploading')
                             : attachment.errorMessage || formatFileSize(attachment.size)}
                         </span>
                       </div>
@@ -1183,11 +1161,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     </div>
                   </div>
                   <p className="mt-1.5 line-clamp-1 text-[11px] leading-5 text-slate-500">
-                    {buildAttachmentPreviewText(attachment)}
+                    {buildAttachmentPreviewText(attachment, t)}
                   </p>
                   {attachment.uploadState === 'error' && (
                     <p className="mt-1 text-[11px] leading-5 text-red-700">
-                      上传失败，附件已保留，可直接重试。
+                      {t('messageInput.uploadRetained')}
                     </p>
                   )}
                 </div>
@@ -1203,27 +1181,27 @@ const MessageInput: React.FC<MessageInputProps> = ({
                   <span className={`inline-flex items-center rounded-full px-2 py-1 font-medium ${
                     isTeamChat ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'
                   }`}>
-                    {isTeamChat ? '@ 提及接力' : '直接对话'}
+                    {isTeamChat ? t('messageInput.modeMentionRelay') : t('messageInput.modeDirectChat')}
                   </span>
                   {canInterruptAndSend && (
                     <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-1 font-medium text-amber-700">
-                      发送前会先停止当前接力
+                      {t('messageInput.stopCurrentRelayBeforeSend')}
                     </span>
                   )}
                   {hasPendingUploads && (
                     <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-1 font-medium text-amber-700">
-                      附件上传中
+                      {t('messageInput.attachmentsUploading')}
                     </span>
                   )}
                   {isRecording && (
                     <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-1 font-medium text-rose-700">
-                      语音输入中
+                      {t('messageInput.voiceRecording')}
                     </span>
                   )}
                 </div>
                 <span className="px-1 text-xs text-slate-400">
-                  {message.trim().length} 字
-                  {readyAttachments.length > 0 ? ` · ${readyAttachments.length} 个附件` : ''}
+                  {t('messageInput.characterCount', { count: message.trim().length })}
+                  {readyAttachments.length > 0 ? ` · ${t('messageInput.attachmentCount', { count: readyAttachments.length })}` : ''}
                 </span>
               </div>
 
@@ -1233,7 +1211,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
-                placeholder={isTeamChat ? `${placeholder}（输入 @ 可直接提及 Agent）` : placeholder}
+                placeholder={isTeamChat ? `${resolvedPlaceholder} (${t('messageInput.inlineMentionHint')})` : resolvedPlaceholder}
                 disabled={disabled}
                 rows={1}
                 className="w-full resize-none bg-transparent px-1 py-1 text-[15px] leading-7 text-slate-800 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1246,8 +1224,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     onClick={() => fileInputRef.current?.click()}
                     disabled={disabled || hasPendingUploads}
                     className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    aria-label="添加附件"
-                    title="添加附件"
+                    aria-label={t('messageInput.addAttachment')}
+                    title={t('messageInput.addAttachment')}
                   >
                     <Paperclip className="h-4 w-4" strokeWidth={2} />
                   </button>
@@ -1260,8 +1238,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
                         ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100'
                         : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
                     }`}
-                    aria-label={isRecording ? '停止语音输入' : '开始语音输入'}
-                    title={speechRecognitionCtor ? (isRecording ? '停止语音输入' : '开始语音输入') : '当前浏览器不支持语音输入'}
+                    aria-label={isRecording ? t('messageInput.stopVoiceInput') : t('messageInput.startVoiceInput')}
+                    title={speechRecognitionCtor ? (isRecording ? t('messageInput.stopVoiceInput') : t('messageInput.startVoiceInput')) : t('messageInput.browserSpeechUnsupported')}
                   >
                     {isRecording ? (
                       <Square className="h-4 w-4" strokeWidth={2} />
@@ -1270,28 +1248,28 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     )}
                   </button>
                   <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-1">
-                    Enter 发送 / Shift + Enter 换行
+                    {t('messageInput.shortcutEnter')}
                   </span>
                   <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-1">
-                    Cmd/Ctrl + V 或拖拽上传
+                    {t('messageInput.shortcutPaste')}
                   </span>
                   <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-1">
-                    最多 10 个，单个 50 MB
+                    {t('messageInput.shortcutLimit', { count: MAX_ATTACHMENT_COUNT })}
                   </span>
                   {isTeamChat && (
                     <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-violet-700">
-                      @ 指定下一棒
+                      {t('messageInput.shortcutNextBaton')}
                     </span>
                   )}
                 </div>
                 <span>
                   {hasPendingUploads
-                    ? `还有 ${uploadingCount} 个附件正在上传`
+                    ? t('messageInput.uploadingRemaining', { count: uploadingCount })
                     : failedCount > 0
-                      ? `${failedCount} 个附件上传失败，可直接在卡片中重试`
+                      ? t('messageInput.failedUploadHint', { count: failedCount })
                     : canInterruptAndSend
-                      ? '停止当前接力后立即发出新消息'
-                      : (isTeamChat ? '支持多 agent 连续接力，也支持发图/发音频/发文件/拖拽上传' : '支持发图、发音频、发文件、拖拽上传与语音输入')}
+                      ? t('messageInput.stopAndSendHint')
+                      : (isTeamChat ? t('messageInput.teamSupportHint') : t('messageInput.directSupportHint'))}
                 </span>
               </div>
             </div>
@@ -1306,8 +1284,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     ? 'bg-amber-500 hover:bg-amber-600'
                     : 'bg-blue-500 hover:bg-blue-600'
                 }`}
-                aria-label={canInterruptAndSend ? '停止并发送' : '发送消息'}
-                title={canInterruptAndSend ? '停止并发送' : '发送消息'}
+                aria-label={canInterruptAndSend ? t('messageInput.stopAndSend') : t('messageInput.sendMessage')}
+                title={canInterruptAndSend ? t('messageInput.stopAndSend') : t('messageInput.sendMessage')}
               >
                 {canInterruptAndSend ? (
                   <Square className="h-4 w-4" strokeWidth={2} />
@@ -1316,7 +1294,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 )}
               </button>
               <span className="text-[11px] text-slate-400">
-                {canInterruptAndSend ? '停止后发送' : '发送'}
+                {canInterruptAndSend ? t('messageInput.afterStopSend') : t('messageInput.send')}
               </span>
             </div>
           </div>
@@ -1324,10 +1302,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
           <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-[18px] bg-slate-50 px-3 py-2 text-xs text-slate-500">
             <span>
               {isTeamChat
-                ? '建议直接点名 agent，让接力路径更短、更可控；支持上传、粘贴、拖拽图片/音频/办公文件，并在发送前调整顺序。'
-                : '可直接上传、粘贴或拖拽图片、音频、PDF、Word、Excel、PowerPoint；只发附件时会自动补一条分析请求。'}
+                ? t('messageInput.teamFooterHint')
+                : t('messageInput.directFooterHint')}
             </span>
-            <span>{disabled ? '当前离线' : '聊天已就绪'}</span>
+            <span>{disabled ? t('messageInput.offline') : t('messageInput.ready')}</span>
           </div>
         </div>
       </div>

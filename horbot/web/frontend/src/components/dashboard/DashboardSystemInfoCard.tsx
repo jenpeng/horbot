@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader } from '../ui';
 import type { SystemStatus } from '../../types';
+import { useI18n } from '../../contexts/I18nContext';
 import { formatBytes, getProgressColor } from './utils';
 
 interface DashboardSystemInfoCardProps {
@@ -9,7 +10,7 @@ interface DashboardSystemInfoCardProps {
 }
 
 const formatWorkspaceLabel = (workspace?: string) => {
-  if (!workspace) return 'N/A';
+  if (!workspace) return null;
   const segments = workspace.split(/[\\/]/).filter(Boolean);
   return segments.at(-1) || workspace;
 };
@@ -18,13 +19,17 @@ const DashboardSystemInfoCard = ({
   copiedVersion,
   onCopyVersion,
   systemStatus,
-}: DashboardSystemInfoCardProps) => (
-  <Card data-testid="dashboard-system-info-card" className="self-start overflow-hidden border border-surface-200/60 shadow-sm transition-all duration-500 ease-out hover:shadow-lg">
+}: DashboardSystemInfoCardProps) => {
+  const { t } = useI18n();
+  const workspaceLabel = formatWorkspaceLabel(systemStatus?.config.workspace) || t('common.notAvailable');
+
+  return (
+    <Card data-testid="dashboard-system-info-card" className="self-start overflow-hidden border border-surface-200/60 shadow-sm transition-all duration-500 ease-out hover:shadow-lg">
     <CardHeader
       className="px-5 pt-5 pb-0"
       title={(
         <div className="flex items-center gap-2">
-          <span className="text-lg font-semibold text-surface-900 tracking-tight">System Information</span>
+          <span className="text-lg font-semibold text-surface-900 tracking-tight">{t('dashboard.systemInfo.title')}</span>
           <span className="rounded-full bg-primary-100 px-2.5 py-0.5 text-xs font-medium text-primary-700 shadow-sm">
             v{systemStatus?.version?.split('.')[0] || '0'}
           </span>
@@ -40,8 +45,8 @@ const DashboardSystemInfoCard = ({
         >
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">Version</p>
-              <p className="mt-2 font-mono text-sm font-semibold text-surface-900">{systemStatus?.version || 'N/A'}</p>
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">{t('dashboard.systemInfo.version')}</p>
+              <p className="mt-2 font-mono text-sm font-semibold text-surface-900">{systemStatus?.version || t('common.notAvailable')}</p>
             </div>
             <div className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-300 ${
               copiedVersion ? 'bg-emerald-50 text-emerald-600' : 'bg-surface-100 text-surface-400 group-hover:bg-primary-50 group-hover:text-primary-600'
@@ -57,30 +62,30 @@ const DashboardSystemInfoCard = ({
               )}
             </div>
           </div>
-          <p className="mt-3 text-xs text-surface-500">Click to copy the current runtime version.</p>
+          <p className="mt-3 text-xs text-surface-500">{t('dashboard.systemInfo.copyHint')}</p>
         </button>
 
         <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-4">
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">Provider</p>
-          <p className="mt-2 text-sm font-semibold text-surface-900">{systemStatus?.config.provider || 'N/A'}</p>
-          <p className="mt-3 text-xs text-surface-500">Current default provider used by the runtime.</p>
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">{t('dashboard.systemInfo.provider')}</p>
+          <p className="mt-2 text-sm font-semibold text-surface-900">{systemStatus?.config.provider || t('common.notAvailable')}</p>
+          <p className="mt-3 text-xs text-surface-500">{t('dashboard.systemInfo.providerHint')}</p>
         </div>
 
         <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-4">
-          <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">Workspace</p>
-          <p className="mt-2 text-sm font-semibold text-surface-900">{formatWorkspaceLabel(systemStatus?.config.workspace)}</p>
-          <p className="mt-1 truncate text-xs text-surface-500">{systemStatus?.config.workspace || 'N/A'}</p>
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">{t('dashboard.systemInfo.workspace')}</p>
+          <p className="mt-2 text-sm font-semibold text-surface-900">{workspaceLabel}</p>
+          <p className="mt-1 truncate text-xs text-surface-500">{systemStatus?.config.workspace || t('common.notAvailable')}</p>
         </div>
 
         <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">Memory</p>
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">{t('dashboard.systemInfo.memory')}</p>
               <p className="mt-2 text-sm font-semibold text-surface-900">
-                {systemStatus ? formatBytes(systemStatus.system.memory.used) : 'N/A'}
+                {systemStatus ? formatBytes(systemStatus.system.memory.used) : t('common.notAvailable')}
               </p>
               <p className="mt-1 text-xs text-surface-500">
-                / {systemStatus ? formatBytes(systemStatus.system.memory.total) : 'N/A'}
+                / {systemStatus ? formatBytes(systemStatus.system.memory.total) : t('common.notAvailable')}
               </p>
             </div>
             <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-surface-700 shadow-sm">
@@ -98,14 +103,14 @@ const DashboardSystemInfoCard = ({
         <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-4 sm:col-span-2">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">Disk</p>
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-surface-400">{t('dashboard.systemInfo.disk')}</p>
               <p className="mt-2 text-sm font-semibold text-surface-900">
-                {systemStatus?.system.disk ? `${Math.round(systemStatus.system.disk.percent)}% used` : 'N/A'}
+                {systemStatus?.system.disk ? `${Math.round(systemStatus.system.disk.percent)}%` : t('common.notAvailable')}
               </p>
               <p className="mt-1 text-xs text-surface-500">
                 {systemStatus?.system.disk
                   ? `${formatBytes(systemStatus.system.disk.used)} / ${formatBytes(systemStatus.system.disk.total)}`
-                  : 'Disk metrics unavailable'}
+                  : t('dashboard.systemInfo.diskUnavailable')}
               </p>
             </div>
           </div>
@@ -123,6 +128,7 @@ const DashboardSystemInfoCard = ({
       </div>
     </CardContent>
   </Card>
-);
+  );
+};
 
 export default DashboardSystemInfoCard;

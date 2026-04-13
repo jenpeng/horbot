@@ -37,6 +37,18 @@ Useful commands:
 - `Status`: runtime diagnostics
 - `Tokens`: token usage trends
 
+## Interface Language
+
+The current Web UI supports three locales:
+
+- English
+- Simplified Chinese
+- Thai
+
+The language switcher is available in the main navigation area and mobile drawer. The selected locale is persisted in browser storage, so refreshes and restarts keep the same UI language on the same browser.
+
+Core admin pages such as Dashboard, Chat, Teams, Channels, Configuration, Status, and Tokens are covered by the current locale support.
+
 ## Attachments
 
 Chat supports:

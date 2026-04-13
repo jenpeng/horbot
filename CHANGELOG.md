@@ -4,6 +4,12 @@ This file summarizes notable Horbot product and documentation changes. For fine-
 
 ## 2026-04-13
 
+### Localization And Docs
+
+- Added browser-persisted Web UI locale switching across English, Simplified Chinese, and Thai for the current core admin pages
+- Updated README, documentation index, user manuals, and contributing notes to document the current multilingual UI behavior
+- Refreshed English README/doc screenshots from the live local Horbot Web UI instead of reusing older assets
+
 ### Chat And Team Relay
 
 - Web Chat now auto-switches from direct chat into the target team conversation when a DM agent dispatches work through the `message` tool

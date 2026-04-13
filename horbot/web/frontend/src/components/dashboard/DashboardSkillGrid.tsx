@@ -1,23 +1,28 @@
-import { AI_SKILLS } from './constants';
+import { useI18n } from '../../contexts/I18nContext';
+import { getDashboardSkills } from './constants';
 
 interface DashboardSkillGridProps {
   onSkillClick: (skillId: string) => void;
 }
 
-const DashboardSkillGrid = ({ onSkillClick }: DashboardSkillGridProps) => (
-  <div>
-    <div className="mb-5 flex items-center justify-between">
-      <div>
-        <h2 className="text-xl font-semibold text-surface-900 tracking-tight">System Tools</h2>
-        <p className="mt-1.5 text-sm font-light text-surface-500">Diagnostics, logs, and configuration shortcuts</p>
+const DashboardSkillGrid = ({ onSkillClick }: DashboardSkillGridProps) => {
+  const { t } = useI18n();
+  const dashboardSkills = getDashboardSkills(t);
+
+  return (
+    <div>
+      <div className="mb-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-surface-900 tracking-tight">{t('dashboard.tools.title')}</h2>
+          <p className="mt-1.5 text-sm font-light text-surface-500">{t('dashboard.tools.subtitle')}</p>
+        </div>
+        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-surface-100 rounded-full">
+          <span className="w-2 h-2 rounded-full bg-primary-500 animate-pulse" />
+          <span className="text-xs font-medium text-surface-600">{t('dashboard.tools.count', { count: dashboardSkills.length })}</span>
+        </div>
       </div>
-      <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-surface-100 rounded-full">
-        <span className="w-2 h-2 rounded-full bg-primary-500 animate-pulse" />
-        <span className="text-xs font-medium text-surface-600">{AI_SKILLS.length} tools</span>
-      </div>
-    </div>
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
-      {AI_SKILLS.map((skill, index) => (
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
+        {dashboardSkills.map((skill, index) => (
         <div
           key={skill.id}
           onClick={() => onSkillClick(skill.id)}
@@ -64,9 +69,10 @@ const DashboardSkillGrid = ({ onSkillClick }: DashboardSkillGridProps) => (
             <div className="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent opacity-0 group-active:opacity-100 transition-opacity duration-150" />
           </div>
         </div>
-      ))}
+        ))}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 export default DashboardSkillGrid;

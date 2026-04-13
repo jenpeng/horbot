@@ -27,8 +27,11 @@ Horbot does not attempt to be a giant framework. The emphasis is:
 - practical Web UI operations
 - agent-scoped workspace, memory, sessions, and skills
 - compatibility with real operational workflows
+- browser-persisted Web UI language switching for English, Simplified Chinese, and Thai
 
 ## Interface Preview
+
+The screenshots below were captured from the current Horbot Web UI with the locale set to English.
 
 <table align="center">
   <tr align="center">
@@ -36,16 +39,16 @@ Horbot does not attempt to be a giant framework. The emphasis is:
     <th>Chat</th>
   </tr>
   <tr>
-    <td align="center"><img src="./docs/assets/preview-dashboard.png" width="420" alt="Horbot dashboard"></td>
-    <td align="center"><img src="./docs/assets/preview-chat.png" width="420" alt="Horbot chat page"></td>
+    <td align="center"><img src="./docs/assets/en/preview-dashboard.png" width="420" alt="Horbot dashboard"></td>
+    <td align="center"><img src="./docs/assets/en/preview-chat.png" width="420" alt="Horbot chat page"></td>
   </tr>
   <tr align="center">
     <th>Skills</th>
     <th>Teams</th>
   </tr>
   <tr>
-    <td align="center"><img src="./docs/assets/preview-skills.png" width="420" alt="Horbot skills page"></td>
-    <td align="center"><img src="./docs/assets/preview-teams.png" width="420" alt="Horbot teams page"></td>
+    <td align="center"><img src="./docs/assets/en/preview-skills.png" width="420" alt="Horbot skills page"></td>
+    <td align="center"><img src="./docs/assets/en/preview-teams.png" width="420" alt="Horbot teams page"></td>
   </tr>
 </table>
 
@@ -86,6 +89,7 @@ Horbot does not attempt to be a giant framework. The emphasis is:
 ### Operational Tooling
 
 - Web admin UI for configuration, agents, teams, status, skills, channels, tasks, and token usage
+- Built-in UI locale switcher for English, Simplified Chinese, and Thai, with the selection persisted in browser storage
 - Smoke scripts for browser, chat, configuration, and agent asset flows
 - Security defaults for local-only access and admin-token-gated remote access
 

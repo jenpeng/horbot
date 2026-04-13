@@ -1,7 +1,11 @@
+import type { ReactElement } from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { I18nProvider } from '../../contexts/I18nContext';
 import StatusApiPanel from './StatusApiPanel';
 import type { ApiMetricsResponse } from '../../services/status';
+
+const renderWithI18n = (ui: ReactElement) => render(<I18nProvider>{ui}</I18nProvider>);
 
 describe('StatusApiPanel', () => {
   it('shows an empty state when there are no recent requests', () => {
@@ -12,7 +16,7 @@ describe('StatusApiPanel', () => {
       recent_requests: [],
     };
 
-    render(<StatusApiPanel apiMetrics={apiMetrics} />);
+    renderWithI18n(<StatusApiPanel apiMetrics={apiMetrics} />);
 
     expect(screen.getByText('No recent requests')).toBeInTheDocument();
     expect(screen.getByText('API samples will appear here after the backend receives requests.')).toBeInTheDocument();
@@ -35,7 +39,7 @@ describe('StatusApiPanel', () => {
       ],
     };
 
-    render(<StatusApiPanel apiMetrics={apiMetrics} />);
+    renderWithI18n(<StatusApiPanel apiMetrics={apiMetrics} />);
 
     expect(screen.getByText('8')).toBeInTheDocument();
     expect(screen.getByText('123 ms')).toBeInTheDocument();

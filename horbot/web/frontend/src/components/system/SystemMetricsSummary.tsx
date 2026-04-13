@@ -1,5 +1,6 @@
 import { Badge } from '../ui';
 import type { SystemStatus } from '../../types';
+import { useI18n } from '../../contexts/I18nContext';
 import { formatSystemBytes, formatUptime, getProgressColor } from '../../utils/systemStatus';
 
 interface SystemMetricsSummaryProps {
@@ -59,22 +60,24 @@ const SystemMetricsSummary = ({
   showUptime = false,
   showMemoryFootnote = false,
 }: SystemMetricsSummaryProps) => {
+  const { t } = useI18n();
+
   if (!systemStatus) {
     return (
       <div className={rowSpacing(compact)}>
         {showStatus && (
           <div className="flex items-center justify-between">
-            <span className={labelClass(compact)}>Status</span>
-            <span className={valueClass(compact)}>N/A</span>
+            <span className={labelClass(compact)}>{t('system.status')}</span>
+            <span className={valueClass(compact)}>{t('common.notAvailable')}</span>
           </div>
         )}
-        <MetricRow compact={compact} label="CPU Usage" percent={0} value="N/A" />
-        <MetricRow compact={compact} label="Memory Usage" percent={0} value="N/A" />
-        {showDisk && <MetricRow compact={compact} label="Disk Usage" percent={0} value="N/A" />}
+        <MetricRow compact={compact} label={t('system.cpuUsage')} percent={0} value={t('common.notAvailable')} />
+        <MetricRow compact={compact} label={t('system.memoryUsage')} percent={0} value={t('common.notAvailable')} />
+        {showDisk && <MetricRow compact={compact} label={t('system.diskUsage')} percent={0} value={t('common.notAvailable')} />}
         {showUptime && (
           <div className="flex items-center justify-between pt-2 border-t border-surface-100">
-            <span className={labelClass(compact)}>Uptime</span>
-            <span className={valueClass(compact)}>N/A</span>
+            <span className={labelClass(compact)}>{t('system.uptime')}</span>
+            <span className={valueClass(compact)}>{t('common.notAvailable')}</span>
           </div>
         )}
       </div>
@@ -85,23 +88,23 @@ const SystemMetricsSummary = ({
     <div className={rowSpacing(compact)}>
       {showStatus && (
         <div className="flex items-center justify-between">
-          <span className={labelClass(compact)}>Status</span>
+          <span className={labelClass(compact)}>{t('system.status')}</span>
           <Badge variant={systemStatus.status === 'running' ? 'success' : 'error'} size="sm" dot>
-            {systemStatus.status === 'running' ? 'Running' : 'Stopped'}
+            {systemStatus.status === 'running' ? t('system.running') : t('system.stopped')}
           </Badge>
         </div>
       )}
 
       <MetricRow
         compact={compact}
-        label="CPU Usage"
+        label={t('system.cpuUsage')}
         percent={systemStatus.system.cpu_percent}
         value={`${systemStatus.system.cpu_percent.toFixed(1)}%`}
       />
 
       <MetricRow
         compact={compact}
-        label="Memory Usage"
+        label={t('system.memoryUsage')}
         percent={systemStatus.system.memory.percent}
         value={`${Math.round(systemStatus.system.memory.percent)}%`}
         detail={showMemoryFootnote ? `${formatSystemBytes(systemStatus.system.memory.used)} / ${formatSystemBytes(systemStatus.system.memory.total)}` : undefined}
@@ -110,7 +113,7 @@ const SystemMetricsSummary = ({
       {showDisk && (
         <MetricRow
           compact={compact}
-          label="Disk Usage"
+          label={t('system.diskUsage')}
           percent={systemStatus.system.disk.percent}
           value={`${Math.round(systemStatus.system.disk.percent)}%`}
           detail={`${formatSystemBytes(systemStatus.system.disk.used)} / ${formatSystemBytes(systemStatus.system.disk.total)}`}
@@ -119,7 +122,7 @@ const SystemMetricsSummary = ({
 
       {showUptime && (
         <div className="flex items-center justify-between pt-2 border-t border-surface-100">
-          <span className={labelClass(compact)}>Uptime</span>
+          <span className={labelClass(compact)}>{t('system.uptime')}</span>
           <span className={valueClass(compact)}>{formatUptime(systemStatus.uptime_seconds)}</span>
         </div>
       )}

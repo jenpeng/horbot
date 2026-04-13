@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Button } from '../components/ui';
 import { PageLoadingState } from '../components/state';
+import { useI18n } from '../contexts/I18nContext';
 import {
-  STATUS_TABS,
+  getStatusTabs,
   StatusApiPanel,
   StatusLogsPanel,
   StatusOverviewPanel,
@@ -13,7 +14,9 @@ import {
 import { useStatusPageData } from '../hooks';
 
 const StatusPageV2: React.FC = () => {
+  const { intlLocale, t } = useI18n();
   const [activeTab, setActiveTab] = useState<StatusTabId>('overview');
+  const statusTabs = getStatusTabs(t);
   const {
     status,
     logs,
@@ -30,15 +33,21 @@ const StatusPageV2: React.FC = () => {
   } = useStatusPageData(activeTab);
 
   const formatTime = (ms?: number) => {
-    if (!ms) return 'N/A';
-    return new Date(ms).toLocaleString();
+    if (!ms) return t('common.notAvailable');
+    return new Date(ms).toLocaleString(intlLocale);
   };
 
   const formatDurationMs = (value?: number) => {
-    if (!value || Number.isNaN(value)) return '0 ms';
-    if (value >= 1000) return `${(value / 1000).toFixed(2)} s`;
-    return `${value.toFixed(1)} ms`;
+    if (!value || Number.isNaN(value)) return t('status.durationMs', { value: 0 });
+    if (value >= 1000) return t('status.durationSeconds', { value: (value / 1000).toFixed(2) });
+    return t('status.durationMs', { value: value.toFixed(1) });
   };
+
+  const statusLabel = status?.status === 'running'
+    ? t('system.running')
+    : status?.status === 'stopped'
+      ? t('system.stopped')
+      : (status?.status || t('common.unknown'));
 
   if (isLoading) {
     return <PageLoadingState metricCount={3} showTabs />;
@@ -48,18 +57,18 @@ const StatusPageV2: React.FC = () => {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 bg-surface-50 min-h-full">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-surface-900">System Status</h1>
-          <p className="text-sm text-surface-600 mt-1">Monitor your AI assistant</p>
+          <h1 className="text-2xl font-bold text-surface-900">{t('status.title')}</h1>
+          <p className="text-sm text-surface-600 mt-1">{t('status.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${status?.status === 'running' ? 'bg-accent-emerald animate-pulse' : 'bg-accent-red'}`} />
-          <span className="text-sm text-surface-700">{status?.status || 'Unknown'}</span>
+          <span className="text-sm text-surface-700">{statusLabel}</span>
         </div>
       </div>
 
-      <div className="border-b border-surface-200" role="tablist" aria-label="Status tabs">
+      <div className="border-b border-surface-200" role="tablist" aria-label={t('status.tabs')}>
         <nav className="flex gap-8">
-          {STATUS_TABS.map((tab) => (
+          {statusTabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -102,7 +111,7 @@ const StatusPageV2: React.FC = () => {
                 </svg>
               )}
             >
-              重试
+              {t('status.retry')}
             </Button>
           </div>
         </div>

@@ -35,4 +35,15 @@ cd horbot/web/frontend && npm run build
 - prefer targeted fixes over large speculative refactors
 - preserve agent-scoped storage assumptions
 - update docs when user-facing behavior changes
+- keep English and Chinese docs aligned when a change affects end users
 - avoid reintroducing legacy `.horbot/context` or `.horbot/memory` assumptions
+
+## Docs And Screenshots
+
+If a UI change affects README or documentation screenshots, capture them from the running local Web UI instead of using mockups.
+
+English README screenshots can be refreshed with:
+
+```bash
+./.venv/bin/python scripts/capture_readme_screenshots.py --locale en --output-dir docs/assets/en
+```

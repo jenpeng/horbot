@@ -1,4 +1,5 @@
 import React, { useState, useEffect, memo } from 'react';
+import { useI18n } from '../contexts/I18nContext';
 import { configService } from '../services';
 import { Badge, Button } from './ui';
 import type { ProviderConfig } from '../types';
@@ -20,6 +21,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
   onDelete,
   onUpdate,
 }) => {
+  const { t } = useI18n();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
@@ -71,7 +73,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
       setTimeout(() => setSuccess(false), 3000);
     } catch (err: unknown) {
       const errorMsg = (err as { response?: { data?: { detail?: string } }; message?: string })?.response?.data?.detail || 
-                       (err as Error).message || 'Failed to save provider configuration';
+                       (err as Error).message || t('config.providers.saveFailed');
       setError(errorMsg);
     } finally {
       setIsSaving(false);
@@ -88,12 +90,12 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
   };
 
   const apiKeyModeLabel = localSettings.apiKeyMode === 'clear'
-    ? '本次保存将清空已保存密钥'
+    ? t('config.providers.keyClear')
     : localSettings.apiKeyMode === 'replace'
-      ? '本次保存将用新密钥覆盖旧值'
+      ? t('config.providers.keyReplace')
       : isConfigured
-        ? '当前将保留已保存密钥'
-        : '当前尚未配置密钥';
+        ? t('config.providers.keyKeep')
+        : t('config.providers.keyMissing');
 
   return (
     <div
@@ -110,13 +112,13 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
           <div className={`w-2.5 h-2.5 rounded-full ${isConfigured ? 'bg-semantic-success' : 'bg-surface-400'}`} />
           <span className="font-medium text-surface-900 capitalize">{name}</span>
           {isConfigured && (
-            <Badge variant="success" size="sm">已配置</Badge>
+            <Badge variant="success" size="sm">{t('config.providers.configured')}</Badge>
           )}
           {isCustom && (
-            <Badge variant="info" size="sm">自定义</Badge>
+            <Badge variant="info" size="sm">{t('config.providers.custom')}</Badge>
           )}
           {hasChanges && (
-            <Badge variant="warning" size="sm">未保存</Badge>
+            <Badge variant="warning" size="sm">{t('config.providers.unsaved')}</Badge>
           )}
         </div>
         <div className="flex items-center space-x-2">
@@ -145,7 +147,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
 
           {success && (
             <div className="bg-semantic-success/20 border border-semantic-success/50 text-semantic-success p-3 rounded-lg text-sm">
-              Provider 配置已保存。
+              {t('config.providers.saved')}
             </div>
           )}
 
@@ -163,7 +165,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                       : 'bg-surface-100 text-surface-700 hover:bg-surface-200'
                   }`}
                 >
-                  保留现有密钥
+                  {t('config.providers.keepKey')}
                 </button>
               )}
               <button
@@ -176,7 +178,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                     : 'bg-surface-100 text-surface-700 hover:bg-surface-200'
                 }`}
               >
-                {settings?.hasApiKey ? '更新为新密钥' : '设置密钥'}
+                {settings?.hasApiKey ? t('config.providers.replaceKey') : t('config.providers.setKey')}
               </button>
               {settings?.hasApiKey && (
                 <button
@@ -189,7 +191,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                       : 'bg-red-50 text-red-700 hover:bg-red-100'
                   }`}
                 >
-                  清空已保存密钥
+                  {t('config.providers.clearKey')}
                 </button>
               )}
             </div>
@@ -203,8 +205,8 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                 className="mt-3 w-full bg-surface-50 border border-surface-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
                 placeholder={
                   settings?.hasApiKey
-                    ? `当前已配置${settings.apiKeyMasked ? ` (${settings.apiKeyMasked})` : ''}，输入后将覆盖`
-                    : `输入 ${name} 的 API Key`
+                    ? t('config.providers.replacePlaceholderMasked', { mask: settings.apiKeyMasked || '' })
+                    : t('config.providers.replacePlaceholder', { name })
                 }
               />
             )}
@@ -220,24 +222,24 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
             >
               <p className="font-medium">{apiKeyModeLabel}</p>
               {settings?.apiKeyMasked && localSettings.apiKeyMode !== 'replace' && (
-                <p className="mt-1 text-xs">已保存密钥掩码：{settings.apiKeyMasked}</p>
+                <p className="mt-1 text-xs">{t('config.providers.savedMask', { mask: settings.apiKeyMasked })}</p>
               )}
               {localSettings.apiKeyMode === 'replace' && localSettings.apiKey.trim().length === 0 && (
-                <p className="mt-1 text-xs">请输入新的 API Key 后再保存。</p>
+                <p className="mt-1 text-xs">{t('config.providers.enterKeyBeforeSave')}</p>
               )}
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1.5 text-surface-700">API Base URL</label>
+            <label className="block text-sm font-medium mb-1.5 text-surface-700">{t('config.providers.apiBaseUrl')}</label>
             <input
               type="text"
               data-testid="provider-card-api-base-input"
               value={localSettings.apiBase}
               onChange={(e) => setLocalSettings({ ...localSettings, apiBase: e.target.value })}
               className="w-full bg-surface-50 border border-surface-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
-              placeholder="可选：自定义 API 网关地址"
+              placeholder={t('config.providers.apiBasePlaceholder')}
             />
-            <p className="mt-2 text-sm text-surface-500">当你使用代理网关、兼容层或私有部署时，可以在这里覆盖默认 API 地址。</p>
+            <p className="mt-2 text-sm text-surface-500">{t('config.providers.apiBaseHint')}</p>
           </div>
 
           <div className="flex items-center justify-end space-x-2 pt-2">
@@ -252,7 +254,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3m4 7h16" />
                 </svg>
-                删除
+                {t('common.delete')}
               </button>
             )}
             {hasChanges && (
@@ -260,7 +262,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                 onClick={handleReset}
                 className="px-3 py-1.5 text-sm text-surface-600 hover:text-surface-700 transition-colors"
               >
-                重置
+                {t('common.clear')}
               </button>
             )}
             <Button
@@ -275,14 +277,14 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  保存中...
+                  {t('config.providers.saving')}
                 </>
               ) : (
                 <>
                   <svg className="w-3.5 h-3.5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  保存
+                  {t('common.save')}
                 </>
               )}
             </Button>

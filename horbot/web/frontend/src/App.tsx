@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Suspense } from 'react';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
+import { useI18n } from './contexts/I18nContext';
 import { ToastProvider } from './contexts/ToastContext';
 import Toast from './components/Toast';
 import { lazyWithReload } from './utils/lazyWithReload';
@@ -19,6 +20,8 @@ const TeamsPage = lazyWithReload('TeamsPage', () => import('./pages/TeamsPage'))
 const WebMCPBootstrap = lazyWithReload('WebMCPBootstrap', () => import('./components/WebMCPBootstrap'));
 
 function App() {
+  const { t } = useI18n();
+
   return (
     <ErrorBoundary>
       <ToastProvider>
@@ -26,7 +29,7 @@ function App() {
           <WebMCPBootstrap />
         </Suspense>
         <Router>
-          <Suspense fallback={<div className="flex items-center justify-center h-full">加载中...</div>}>
+          <Suspense fallback={<div className="flex items-center justify-center h-full">{t('app.loading')}</div>}>
             <Routes>
               <Route path="/" element={<Layout />}>
                 <Route index element={<DashboardPage />} />

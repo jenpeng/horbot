@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader } from '../ui';
+import { useI18n } from '../../contexts/I18nContext';
 import { formatSystemBytes } from '../../utils/systemStatus';
 import type { SystemStatus } from '../../types';
 
@@ -50,27 +51,31 @@ const ResourceGauge = ({
   </Card>
 );
 
-const StatusResourcesPanel = ({ status }: StatusResourcesPanelProps) => (
-  <div className="grid grid-cols-1 md:grid-cols-3 gap-6" role="tabpanel" id="resources-panel" aria-labelledby="resources-tab">
-    <ResourceGauge
-      title="CPU Usage"
-      percent={status.system.cpu_percent}
-      subtitle="Current CPU utilization"
-      glowClass="hover:shadow-primary-500/10"
-    />
-    <ResourceGauge
-      title="Memory Usage"
-      percent={status.system.memory.percent}
-      subtitle={`${formatSystemBytes(status.system.memory.used)} / ${formatSystemBytes(status.system.memory.total)}`}
-      glowClass="hover:shadow-accent-purple/10"
-    />
-    <ResourceGauge
-      title="Disk Usage"
-      percent={status.system.disk.percent}
-      subtitle={`${formatSystemBytes(status.system.disk.used)} / ${formatSystemBytes(status.system.disk.total)}`}
-      glowClass="hover:shadow-accent-emerald/10"
-    />
-  </div>
-);
+const StatusResourcesPanel = ({ status }: StatusResourcesPanelProps) => {
+  const { t } = useI18n();
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-6" role="tabpanel" id="resources-panel" aria-labelledby="resources-tab">
+      <ResourceGauge
+        title={t('system.cpuUsage')}
+        percent={status.system.cpu_percent}
+        subtitle={t('status.resources.cpuSubtitle')}
+        glowClass="hover:shadow-primary-500/10"
+      />
+      <ResourceGauge
+        title={t('system.memoryUsage')}
+        percent={status.system.memory.percent}
+        subtitle={`${formatSystemBytes(status.system.memory.used)} / ${formatSystemBytes(status.system.memory.total)}`}
+        glowClass="hover:shadow-accent-purple/10"
+      />
+      <ResourceGauge
+        title={t('system.diskUsage')}
+        percent={status.system.disk.percent}
+        subtitle={`${formatSystemBytes(status.system.disk.used)} / ${formatSystemBytes(status.system.disk.total)}`}
+        glowClass="hover:shadow-accent-emerald/10"
+      />
+    </div>
+  );
+};
 
 export default StatusResourcesPanel;

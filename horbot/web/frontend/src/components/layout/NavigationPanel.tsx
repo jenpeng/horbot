@@ -2,6 +2,8 @@ import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { PanelLeftClose } from 'lucide-react';
 import { navItems } from './NavConfig';
+import { useI18n } from '../../contexts/I18nContext';
+import LanguageSwitcher from './LanguageSwitcher';
 
 interface NavigationPanelProps {
   isCollapsed?: boolean;
@@ -13,6 +15,7 @@ const NavigationPanel: React.FC<NavigationPanelProps> = React.memo(({
   onToggleCollapse
 }) => {
   const location = useLocation();
+  const { t } = useI18n();
 
   return (
     <>
@@ -24,7 +27,7 @@ const NavigationPanel: React.FC<NavigationPanelProps> = React.memo(({
         `}
       >
         {/* Header */}
-        <div className={`flex items-center h-14 border-b border-black/[0.04] shrink-0 ${isCollapsed ? 'justify-center px-2' : 'justify-between px-4'}`}>
+        <div className={`flex items-center h-14 border-b border-black/[0.04] shrink-0 ${isCollapsed ? 'justify-center px-2' : 'justify-between gap-3 px-4'}`}>
           {/* Logo和标题 */}
           <div className={`flex items-center gap-3 transition-all duration-300 ${isCollapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>
             <img 
@@ -32,17 +35,32 @@ const NavigationPanel: React.FC<NavigationPanelProps> = React.memo(({
               alt="Logo" 
               className="w-8 h-8 rounded-lg shadow-sm shrink-0 object-cover"
             />
-            <span className="text-base font-semibold text-surface-900 whitespace-nowrap">Horbot</span>
+            <span className="text-base font-semibold text-surface-900 whitespace-nowrap">{t('brand.name')}</span>
           </div>
           
-          {/* 展开/折叠按钮 */}
-          <button
-            onClick={onToggleCollapse}
-            className={`flex items-center justify-center w-10 h-10 rounded-lg hover:bg-surface-100 transition-colors shrink-0 ${isCollapsed ? '' : 'ml-auto'}`}
-            aria-label={isCollapsed ? "展开导航栏" : "折叠导航栏"}
-          >
-            <PanelLeftClose className={`text-surface-400 transition-transform duration-300 ${isCollapsed ? 'rotate-180' : ''}`} />
-          </button>
+          {!isCollapsed && (
+            <div className="ml-auto flex items-center gap-2">
+              <LanguageSwitcher compact />
+              <button
+                onClick={onToggleCollapse}
+                className="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-surface-100 transition-colors shrink-0"
+                aria-label={t('sidebar.collapse')}
+                title={t('sidebar.collapse')}
+              >
+                <PanelLeftClose className="text-surface-400 transition-transform duration-300" />
+              </button>
+            </div>
+          )}
+          {isCollapsed && (
+            <button
+              onClick={onToggleCollapse}
+              className="flex items-center justify-center w-10 h-10 rounded-lg hover:bg-surface-100 transition-colors shrink-0"
+              aria-label={t('sidebar.expand')}
+              title={t('sidebar.expand')}
+            >
+              <PanelLeftClose className="rotate-180 text-surface-400 transition-transform duration-300" />
+            </button>
+          )}
         </div>
 
         {/* Navigation - 展开状态 */}
@@ -74,7 +92,7 @@ const NavigationPanel: React.FC<NavigationPanelProps> = React.memo(({
                   </span>
                   
                   <span className={`flex-1 text-sm whitespace-nowrap leading-10 ${isActive ? 'font-medium text-surface-900' : 'text-surface-600 group-hover:text-surface-900'}`}>
-                    {item.label}
+                    {t(item.labelKey)}
                   </span>
                 </NavLink>
               );
@@ -85,6 +103,7 @@ const NavigationPanel: React.FC<NavigationPanelProps> = React.memo(({
         {/* Navigation - 折叠状态 */}
         <nav className={`flex-1 overflow-y-auto scrollbar-hide absolute left-0 top-14 bottom-0 w-[68px] transition-opacity duration-300 ${isCollapsed ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
           <div className="flex flex-col items-center py-2">
+            <LanguageSwitcher compact className="mb-2" />
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
@@ -93,7 +112,7 @@ const NavigationPanel: React.FC<NavigationPanelProps> = React.memo(({
                 <NavLink
                   key={item.path}
                   to={item.path}
-                  title={item.label}
+                  title={t(item.labelKey)}
                   className={`
                     w-10 h-10 rounded-lg flex items-center justify-center mb-1
                     transition-all duration-200
@@ -119,8 +138,8 @@ const NavigationPanel: React.FC<NavigationPanelProps> = React.memo(({
                 U
               </div>
               <div className="flex-1 min-w-0 text-left">
-                <p className="text-sm font-medium text-surface-900 truncate">用户</p>
-                <p className="text-xs text-surface-500">免费版</p>
+                <p className="text-sm font-medium text-surface-900 truncate">{t('common.user')}</p>
+                <p className="text-xs text-surface-500">{t('common.freeTier')}</p>
               </div>
             </button>
           </div>

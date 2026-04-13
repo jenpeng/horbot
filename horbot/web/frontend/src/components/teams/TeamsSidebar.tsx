@@ -1,4 +1,5 @@
 import type { AgentInfo, TeamInfo } from '../../pages/teams/types';
+import { useI18n } from '../../contexts/I18nContext';
 
 interface AgentStatusMeta {
   tone: string;
@@ -41,12 +42,14 @@ const TeamsSidebar = ({
   getAgentProfileLabel,
   getAgentPermissionLabel,
   getAgentStatusMeta,
-}: TeamsSidebarProps) => (
+}: TeamsSidebarProps) => {
+  const { t } = useI18n();
+  return (
   <div className="w-64 border-r border-surface-200 bg-white overflow-y-auto">
     <div className="p-4">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-medium text-surface-500 uppercase tracking-wider">
-          团队列表
+          {t('teams.sidebar.teamList')}
         </h2>
         <button
           onClick={onCreateTeam}
@@ -59,7 +62,7 @@ const TeamsSidebar = ({
       </div>
       {teams.length === 0 ? (
         <div className="text-sm text-surface-500 text-center py-8">
-          暂无团队配置
+          {t('teams.sidebar.noTeams')}
         </div>
       ) : (
         <div className="space-y-2">
@@ -89,7 +92,7 @@ const TeamsSidebar = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-surface-900 truncate">{team.name}</p>
-                  <p className="text-xs text-surface-500">{team.members.length} 成员</p>
+                  <p className="text-xs text-surface-500">{t('teams.sidebar.memberCount', { count: team.members.length })}</p>
                 </div>
               </button>
               <button
@@ -117,7 +120,7 @@ const TeamsSidebar = ({
     <div className="p-4 border-t border-surface-100">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-medium text-surface-500 uppercase tracking-wider">
-          所有 Agent
+          {t('teams.sidebar.allAgents')}
         </h2>
         <button
           onClick={onCreateAgent}
@@ -158,7 +161,7 @@ const TeamsSidebar = ({
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-surface-900 truncate">{agent.name}</p>
                   <div className="flex items-center gap-2">
-                    <p className="text-xs text-surface-500 truncate">{agent.description || agent.model || '等待首次配置'}</p>
+                    <p className="text-xs text-surface-500 truncate">{agent.description || agent.model || t('teams.sidebar.waitingSetup')}</p>
                     {profileLabel && (
                       <span className={`shrink-0 ${getBadgeClassName('neutral', 'sm')}`}>
                         {profileLabel}
@@ -197,6 +200,7 @@ const TeamsSidebar = ({
       </div>
     </div>
   </div>
-);
+  );
+};
 
 export default TeamsSidebar;

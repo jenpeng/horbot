@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { channelsService } from '../services';
+import { useI18n } from '../contexts/I18nContext';
 import type {
   ChannelCatalogEntry,
   ChannelEndpoint,
@@ -24,6 +25,8 @@ interface EndpointFormState {
   config: Record<string, unknown>;
   source: EndpointFormSource;
 }
+
+type TranslateFn = (key: string, values?: Record<string, number | string>) => string;
 
 const defaultResponse: ChannelEndpointsResponse = {
   endpoints: [],
@@ -72,27 +75,6 @@ const statusVariant = (status: ChannelEndpoint['status']) => {
     return 'warning';
   }
   return 'default';
-};
-
-const statusLabel = (status: ChannelEndpoint['status']) => {
-  if (status === 'ready') {
-    return '可用';
-  }
-  if (status === 'incomplete') {
-    return '待完善';
-  }
-  return '已停用';
-};
-
-const formatDateTime = (value?: string | null) => {
-  if (!value) {
-    return '暂无';
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString('zh-CN', { hour12: false });
 };
 
 const hasConfiguredValue = (value: unknown) => {
@@ -191,144 +173,144 @@ const detectConnectionErrorKind = (rawError: string): ConnectionErrorKind => {
   return 'generic';
 };
 
-const getChannelSpecificHints = (channelType: string, kind: ConnectionErrorKind): string[] => {
+const getChannelSpecificHints = (t: TranslateFn, channelType: string, kind: ConnectionErrorKind): string[] => {
   switch (channelType) {
     case 'feishu':
       if (kind === 'missing') {
         return [
-          '至少补齐 App ID 和 App Secret；如果启用了事件订阅，再检查 Encrypt Key 和 Verification Token 是否与飞书后台一致。',
-          '如果这是企业内网环境，确认是否需要开启“跳过 SSL 校验”来绕过公司代理证书注入。',
+          t('channels.hint.feishu.missing1'),
+          t('channels.hint.feishu.missing2'),
         ];
       }
       if (kind === 'credential') {
         return [
-          '去飞书开放平台的“凭证与基础信息”核对 App ID、App Secret 是否来自同一个应用，避免把测试应用和生产应用混用。',
-          '如果最近在飞书后台重置过密钥，记得同步更新这里的配置后再测试。',
+          t('channels.hint.feishu.credential1'),
+          t('channels.hint.feishu.credential2'),
         ];
       }
       if (kind === 'permission') {
         return [
-          '去飞书开放平台检查应用权限、机器人能力和事件订阅是否已开启，尤其是消息接收、通讯录或群聊相关权限。',
-          '如果平台提示 scope 不足，先在飞书后台补齐权限并重新发布应用，再回来重试。',
+          t('channels.hint.feishu.permission1'),
+          t('channels.hint.feishu.permission2'),
         ];
       }
       if (kind === 'ssl') {
         return [
-          '如果当前网络经过公司代理或 HTTPS 检查设备，先确认代理证书是否可信；必要时仅在受信任内网里临时启用“跳过 SSL 校验”。',
+          t('channels.hint.feishu.ssl1'),
         ];
       }
       return [
-        '如果账号本身没问题，再去飞书开放平台查看应用状态、可用性和最近调用日志。',
+        t('channels.hint.feishu.generic1'),
       ];
 
     case 'sharecrm':
       if (kind === 'missing') {
         return [
-          '至少补齐 App ID 和 App Secret；如果你走的不是默认网关，还要确认 Gateway Base URL 已填写正确。',
-          '建议直接对照纷享销客 IM Gateway 后台里的机器人配置逐项核对字段名。',
+          t('channels.hint.sharecrm.missing1'),
+          t('channels.hint.sharecrm.missing2'),
         ];
       }
       if (kind === 'credential' || kind === 'permission') {
         return [
-          '去纷享销客 IM Gateway / 开放平台检查当前 bot 的 App ID、App Secret 是否已启用且未过期。',
-          '确认该机器人账号具备获取 token、接收会话和发送消息所需权限。',
+          t('channels.hint.sharecrm.credential1'),
+          t('channels.hint.sharecrm.credential2'),
         ];
       }
       return [
-        '如果报的是网关或 404/5xx 类错误，优先核对 Gateway Base URL 是否仍然指向正确环境，再检查平台侧服务状态。',
+        t('channels.hint.sharecrm.generic1'),
       ];
 
     case 'wecom':
       if (kind === 'missing') {
         return [
-          '至少补齐 Bot ID 和 Secret；如果走企业微信官方 AI Bot WebSocket 网关，再确认 WebSocket URL 没有填错。',
-          '如果这是刚创建的新机器人，先确认企业微信后台已经完成发布并可用。',
+          t('channels.hint.wecom.missing1'),
+          t('channels.hint.wecom.missing2'),
         ];
       }
       if (kind === 'credential' || kind === 'permission') {
         return [
-          '去企业微信 AI Bot 管理后台核对 Bot ID、Secret 是否来自同一个机器人，并确认该机器人已授予消息接收与发送权限。',
-          '如果连接建立后立即被关闭，优先排查密钥、权限和机器人状态，而不是本机网络。',
+          t('channels.hint.wecom.credential1'),
+          t('channels.hint.wecom.credential2'),
         ];
       }
       return [
-        '如果 WebSocket 握手阶段失败，先检查当前网络是否能访问 openws.work.weixin.qq.com，再核对企业代理或内网出站策略。',
+        t('channels.hint.wecom.generic1'),
       ];
 
     case 'telegram':
       if (kind === 'credential' || kind === 'missing') {
         return [
-          '直接在浏览器或命令行调用 `https://api.telegram.org/bot<TOKEN>/getMe`，先独立验证这枚 Bot Token 是否有效。',
-          '如果 BotFather 刚重新生成过 token，需要把旧 token 全部替换掉。',
+          t('channels.hint.telegram.credential1'),
+          t('channels.hint.telegram.credential2'),
         ];
       }
       return [
-        '如果网络在国内或受限环境，优先检查代理是否可用，以及 Telegram API 是否被当前网络出口拦截。',
+        t('channels.hint.telegram.generic1'),
       ];
 
     case 'slack':
       if (kind === 'credential' || kind === 'missing') {
         return [
-          '去 Slack App 管理后台核对 Bot Token 和 App Token 是否来自同一个应用，避免把不同 workspace 的 token 混在一起。',
-          '如果最近重新安装过应用，记得使用新的 OAuth Token。',
+          t('channels.hint.slack.credential1'),
+          t('channels.hint.slack.credential2'),
         ];
       }
       if (kind === 'permission') {
         return [
-          '去 Slack App 后台检查 OAuth scopes、Event Subscriptions 和 Socket Mode 是否已开启，尤其是消息读取和回复相关 scope。',
-          '如果 `auth.test` 能过但真实收发不通，通常是 scope 或事件订阅没有配齐。',
+          t('channels.hint.slack.permission1'),
+          t('channels.hint.slack.permission2'),
         ];
       }
       return [
-        '保存前最好再确认一次目标 workspace 已正确安装该应用，而不是只在开发工作区里可用。',
+        t('channels.hint.slack.generic1'),
       ];
 
     case 'discord':
       if (kind === 'credential' || kind === 'missing') {
         return [
-          '去 Discord Developer Portal 检查 Bot Token 是否已被重置；如果重置过，这里的旧 token 会立刻失效。',
+          t('channels.hint.discord.credential1'),
         ];
       }
       if (kind === 'permission') {
         return [
-          '去 Discord Developer Portal 检查 Privileged Gateway Intents，尤其是 Message Content Intent 是否已开启。',
-          '再确认目标服务器里机器人角色本身具备读取频道和发送消息权限。',
+          t('channels.hint.discord.permission1'),
+          t('channels.hint.discord.permission2'),
         ];
       }
       return [
-        '如果只是连接通过但收不到消息，优先排查 intents 和服务器角色权限，而不是 token 本身。',
+        t('channels.hint.discord.generic1'),
       ];
 
     case 'email':
       if (kind === 'missing') {
         return [
-          'IMAP/SMTP 主机、账号、密码和发件地址都需要成套配置，缺一项都会导致测试失败。',
+          t('channels.hint.email.missing1'),
         ];
       }
       if (kind === 'credential') {
         return [
-          '很多邮箱不能直接用登录密码，而必须使用 IMAP/SMTP 授权码；先去邮箱后台确认开启了 IMAP/SMTP 并生成授权码。',
-          '如果只改了收件或发件一侧配置，也会导致一半可用一半失败，建议成对核对 IMAP 和 SMTP。 ',
+          t('channels.hint.email.credential1'),
+          t('channels.hint.email.credential2'),
         ];
       }
       if (kind === 'ssl') {
         return [
-          '检查 IMAP/SMTP 的 SSL/TLS 组合和端口是否匹配，例如 IMAP 993 + SSL、SMTP 587 + STARTTLS。',
+          t('channels.hint.email.ssl1'),
         ];
       }
       return [
-        '如果是企业邮箱，再检查是否有 IP 白名单、异地登录限制或安全策略拦截。 ',
+        t('channels.hint.email.generic1'),
       ];
 
     case 'dingtalk':
       if (kind === 'credential' || kind === 'missing') {
         return [
-          '去钉钉开放平台核对 Client ID / Client Secret，确认当前应用已开通 Stream 模式并处于可用状态。',
+          t('channels.hint.dingtalk.credential1'),
         ];
       }
       if (kind === 'permission') {
         return [
-          '检查钉钉机器人消息接收、会话访问等权限是否已授权给当前应用。',
+          t('channels.hint.dingtalk.permission1'),
         ];
       }
       return [];
@@ -336,27 +318,27 @@ const getChannelSpecificHints = (channelType: string, kind: ConnectionErrorKind)
     case 'matrix':
       if (kind === 'credential' || kind === 'missing') {
         return [
-          '先用当前 homeserver 调 `/_matrix/client/v3/account/whoami` 验证 access token 是否有效，并确认 user_id 属于同一实例。',
+          t('channels.hint.matrix.credential1'),
         ];
       }
       return [
-        '如果 homeserver 走自建部署，优先检查地址路径、反向代理和证书配置是否正确。',
+        t('channels.hint.matrix.generic1'),
       ];
 
     case 'mochat':
       if (kind === 'credential' || kind === 'missing') {
         return [
-          '核对 Mochat Base URL、Claw Token 和 Agent User ID 是否对应同一个环境实例。',
+          t('channels.hint.mochat.credential1'),
         ];
       }
       return [
-        '如果 `/api/health` 都打不通，先看 Mochat 服务自身是否在线，再排查反向代理或访问控制。',
+        t('channels.hint.mochat.generic1'),
       ];
 
     case 'qq':
       if (kind === 'credential' || kind === 'missing') {
         return [
-          '去 QQ 开放平台核对 App ID 和 Secret，确认机器人应用已启用并且密钥未失效。',
+          t('channels.hint.qq.credential1'),
         ];
       }
       return [];
@@ -364,11 +346,11 @@ const getChannelSpecificHints = (channelType: string, kind: ConnectionErrorKind)
     case 'whatsapp':
       if (kind === 'credential' || kind === 'missing') {
         return [
-          '如果 bridge 开启了鉴权，确认这里的 Bridge Token 与桥接服务配置一致。',
+          t('channels.hint.whatsapp.credential1'),
         ];
       }
       return [
-        '先直接访问 bridge 的 `/health` 接口，确认桥接服务在线，再看账号侧是否已完成扫码或会话绑定。',
+        t('channels.hint.whatsapp.generic1'),
       ];
 
     default:
@@ -376,7 +358,7 @@ const getChannelSpecificHints = (channelType: string, kind: ConnectionErrorKind)
   }
 };
 
-const getConnectionFeedback = (result?: ConnectionResultLike | null, channelType?: string | null) => {
+const getConnectionFeedback = (t: TranslateFn, result?: ConnectionResultLike | null, channelType?: string | null) => {
   if (!result) {
     return null;
   }
@@ -388,11 +370,11 @@ const getConnectionFeedback = (result?: ConnectionResultLike | null, channelType
   if (result.status === 'ok') {
     return {
       tone: 'success' as const,
-      title: '连接验证通过',
-      summary: '当前账号配置可用，可以进入下一步保存或开始真实收发联调。',
+      title: t('channels.feedback.ok.title'),
+      summary: t('channels.feedback.ok.summary'),
       hints: [
-        '保存后建议马上从目标通道发一条测试消息，确认真实路由与回复链路也正常。',
-        '如果这是生产账号，建议再补充 allow_from 或群策略，避免刚接通就暴露给全部来源。',
+        t('channels.feedback.ok.hint1'),
+        t('channels.feedback.ok.hint2'),
       ],
     };
   }
@@ -401,15 +383,15 @@ const getConnectionFeedback = (result?: ConnectionResultLike | null, channelType
   const kind = (backendKind || detectConnectionErrorKind(rawError)) as ConnectionErrorKind;
   const channelHints = backendRemediation.length > 0
     ? backendRemediation
-    : getChannelSpecificHints(resolvedChannelType, kind);
+    : getChannelSpecificHints(t, resolvedChannelType, kind);
 
   if (kind === 'missing') {
     return {
       tone: 'warning' as const,
-      title: '必填凭据还没有补齐',
-      summary: '当前失败更像是配置项缺失，而不是账号真的失效。先补全关键字段，再做真实连接测试。',
+      title: t('channels.feedback.missing.title'),
+      summary: t('channels.feedback.missing.summary'),
       hints: [
-        '优先把当前通道的必填字段补齐，再重新测试，避免被无效报错干扰判断。',
+        t('channels.feedback.missing.hint1'),
         ...channelHints,
       ],
     };
@@ -418,11 +400,11 @@ const getConnectionFeedback = (result?: ConnectionResultLike | null, channelType
   if (kind === 'credential') {
     return {
       tone: 'warning' as const,
-      title: '凭据校验失败',
-      summary: '更像是账号密钥、Token、App Secret 或权限范围不正确，而不是单纯的网络波动。',
+      title: t('channels.feedback.credential.title'),
+      summary: t('channels.feedback.credential.summary'),
       hints: [
-        '确认 App ID、App Secret、Bot Token 等是否对应同一个应用实例。',
-        '如果第三方平台支持权限范围配置，检查当前应用是否已开通所需接口权限。',
+        t('channels.feedback.credential.hint1'),
+        t('channels.feedback.credential.hint2'),
         ...channelHints,
       ],
     };
@@ -431,10 +413,10 @@ const getConnectionFeedback = (result?: ConnectionResultLike | null, channelType
   if (kind === 'permission') {
     return {
       tone: 'warning' as const,
-      title: '平台权限不足',
-      summary: '当前账号可能能连上平台，但缺少接口 scope、事件订阅或会话访问权限，所以校验没有通过。',
+      title: t('channels.feedback.permission.title'),
+      summary: t('channels.feedback.permission.summary'),
       hints: [
-        '先检查第三方平台控制台里的权限范围、事件订阅、机器人能力或应用发布状态。',
+        t('channels.feedback.permission.hint1'),
         ...channelHints,
       ],
     };
@@ -443,11 +425,11 @@ const getConnectionFeedback = (result?: ConnectionResultLike | null, channelType
   if (kind === 'timeout') {
     return {
       tone: 'warning' as const,
-      title: '连接超时',
-      summary: '请求已经发出，但在预期时间内没有收到平台响应，通常是网络抖动或平台响应慢。',
+      title: t('channels.feedback.timeout.title'),
+      summary: t('channels.feedback.timeout.summary'),
       hints: [
-        '先重新测试一次，确认不是瞬时网络问题。',
-        '如果多次超时，检查本机网络、代理、VPN 或第三方平台当前可用性。',
+        t('channels.feedback.timeout.hint1'),
+        t('channels.feedback.timeout.hint2'),
         ...channelHints,
       ],
     };
@@ -456,11 +438,11 @@ const getConnectionFeedback = (result?: ConnectionResultLike | null, channelType
   if (kind === 'dns') {
     return {
       tone: 'warning' as const,
-      title: '域名解析异常',
-      summary: '系统在访问目标平台前就失败了，通常是 DNS、代理或网络出口问题。',
+      title: t('channels.feedback.dns.title'),
+      summary: t('channels.feedback.dns.summary'),
       hints: [
-        '确认当前机器能访问对应平台域名，必要时检查 DNS、代理或公司网络策略。',
-        '如果你在受限网络环境中运行，建议先验证浏览器里是否能打开对应平台。',
+        t('channels.feedback.dns.hint1'),
+        t('channels.feedback.dns.hint2'),
         ...channelHints,
       ],
     };
@@ -469,11 +451,11 @@ const getConnectionFeedback = (result?: ConnectionResultLike | null, channelType
   if (kind === 'ssl') {
     return {
       tone: 'warning' as const,
-      title: '证书或 SSL 校验失败',
-      summary: '连接已经到达目标服务，但在 HTTPS/证书校验阶段失败。',
+      title: t('channels.feedback.ssl.title'),
+      summary: t('channels.feedback.ssl.summary'),
       hints: [
-        '检查当前网络是否有 HTTPS 劫持、企业代理或自签证书注入。',
-        '如果当前通道支持跳过 SSL 校验，仅建议在受信任内网环境里临时使用。',
+        t('channels.feedback.ssl.hint1'),
+        t('channels.feedback.ssl.hint2'),
         ...channelHints,
       ],
     };
@@ -482,11 +464,11 @@ const getConnectionFeedback = (result?: ConnectionResultLike | null, channelType
   if (kind === 'rate_limit') {
     return {
       tone: 'warning' as const,
-      title: '平台限流或频控',
-      summary: '当前请求被平台的限流、频控或安全策略挡住了，不一定是凭据本身有问题。',
+      title: t('channels.feedback.rateLimit.title'),
+      summary: t('channels.feedback.rateLimit.summary'),
       hints: [
-        '先间隔一段时间再重试，避免短时间连续测试触发更严格限制。',
-        '如果这是正式环境账号，去对应平台后台查看调用频率限制或安全风控记录。',
+        t('channels.feedback.rateLimit.hint1'),
+        t('channels.feedback.rateLimit.hint2'),
         ...channelHints,
       ],
     };
@@ -494,17 +476,18 @@ const getConnectionFeedback = (result?: ConnectionResultLike | null, channelType
 
   return {
     tone: 'warning' as const,
-    title: '连接测试未通过',
-    summary: '账号或网络还有问题，暂时不建议直接保存为正式通道实例。',
+    title: t('channels.feedback.generic.title'),
+    summary: t('channels.feedback.generic.summary'),
     hints: [
-      '先根据原始错误检查凭据、网络、平台状态，再重新测试。',
-      '如果问题持续存在，建议先在平台控制台或官方测试工具中验证这组账号是否可用。',
+      t('channels.feedback.generic.hint1'),
+      t('channels.feedback.generic.hint2'),
       ...channelHints,
     ],
   };
 };
 
 const ChannelsPage: React.FC = () => {
+  const { intlLocale, t } = useI18n();
   const [data, setData] = useState<ChannelEndpointsResponse>(defaultResponse);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -518,6 +501,21 @@ const ChannelsPage: React.FC = () => {
   const [testResult, setTestResult] = useState<ChannelEndpointTestResponse | null>(null);
   const [draftTestResult, setDraftTestResult] = useState<ChannelEndpointDraftTestResponse | null>(null);
   const [draftStep, setDraftStep] = useState(1);
+  const getStatusLabel = (status: ChannelEndpoint['status']) => {
+    if (status === 'ready') return t('common.online');
+    if (status === 'incomplete') return t('dashboard.channels.missingConfig');
+    return t('common.notAvailable');
+  };
+  const formatDateTimeLocal = (value?: string | null) => {
+    if (!value) {
+      return t('common.notAvailable');
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+    return date.toLocaleString(intlLocale, { hour12: false });
+  };
 
   const loadEndpoints = async (showRefreshLoader = false, preferredEndpointId?: string | null) => {
     if (showRefreshLoader) {
@@ -568,7 +566,7 @@ const ChannelsPage: React.FC = () => {
       setTestResult(null);
     } catch (err) {
       console.error('Failed to fetch channel endpoints:', err);
-      setError('通道配置加载失败');
+      setError(t('channels.loadFailed'));
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -598,8 +596,8 @@ const ChannelsPage: React.FC = () => {
   const draftMissingFields = requiredFieldKeys.filter(fieldKey => !hasConfiguredValue(form?.config?.[fieldKey]));
   const draftTestPassed = draftTestResult?.result.status === 'ok';
   const canRunDraftTest = Boolean(isDraft && draftStepTwoReady && form?.type);
-  const draftConnectionFeedback = getConnectionFeedback(draftTestResult?.result, form?.type);
-  const savedConnectionFeedback = getConnectionFeedback(testResult?.result, form?.type);
+  const draftConnectionFeedback = getConnectionFeedback(t, draftTestResult?.result, form?.type);
+  const savedConnectionFeedback = getConnectionFeedback(t, testResult?.result, form?.type);
 
   const renderChannelField = (field: ChannelCatalogEntry['fields'][number]) => {
     const rawValue = form?.config?.[field.key];
@@ -728,11 +726,11 @@ const ChannelsPage: React.FC = () => {
     }
 
     if (!payload.type) {
-      setError('请选择通道类型');
+      setError(t('channels.errorSelectType'));
       return;
     }
     if (form?.source === 'draft' && !draftTestPassed) {
-      setError('新建通道前请先完成连接测试并确保测试通过');
+      setError(t('channels.errorDraftTestRequired'));
       return;
     }
 
@@ -749,7 +747,7 @@ const ChannelsPage: React.FC = () => {
       await loadEndpoints(false, savedEndpoint?.id || form?.id || null);
     } catch (err) {
       console.error('Failed to save channel endpoint:', err);
-      setError('保存通道配置失败');
+      setError(t('channels.errorSaveFailed'));
     } finally {
       setIsSaving(false);
     }
@@ -767,7 +765,7 @@ const ChannelsPage: React.FC = () => {
       await loadEndpoints(false, null);
     } catch (err) {
       console.error('Failed to delete channel endpoint:', err);
-      setError('删除通道实例失败');
+      setError(t('channels.errorDeleteFailed'));
     } finally {
       setIsDeleting(false);
     }
@@ -798,7 +796,7 @@ const ChannelsPage: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to test channel endpoint:', err);
-      setError('测试连接失败');
+      setError(t('channels.errorTestFailed'));
     } finally {
       setIsTesting(false);
     }
@@ -806,7 +804,7 @@ const ChannelsPage: React.FC = () => {
 
   const getAgentLabel = (agentId: string) => {
     const agent = data.agents.find(item => item.id === agentId);
-    return agent ? `${agent.name} · ${agent.provider || '未设置 provider'}` : '未绑定 Agent';
+    return agent ? `${agent.name} · ${agent.provider || t('channels.providerNotSet')}` : t('channels.noBoundAgentLabel');
   };
 
   const currentSummary = eventsData?.summary || data.endpoints.find(item => item.id === selectedEndpointId)?.runtime || null;
@@ -835,18 +833,18 @@ const ChannelsPage: React.FC = () => {
           <div className="space-y-2">
             <Badge variant="primary" size="sm">Channels</Badge>
             <div>
-              <h1 className="text-3xl font-semibold text-surface-900">按 Agent 管理外部通道</h1>
+              <h1 className="text-3xl font-semibold text-surface-900">{t('channels.pageTitle')}</h1>
               <p className="mt-2 max-w-3xl text-sm text-surface-600">
-                每个通道实例都可以独立绑定到一个 Agent。legacy 全局通道仍可继续使用，但建议逐步迁移到实例化配置。
+                {t('channels.pageSubtitle')}
               </p>
             </div>
           </div>
           <div className="flex flex-wrap gap-3">
             <Button variant="secondary" onClick={() => void loadEndpoints(true, selectedEndpointId)} isLoading={isRefreshing}>
-              刷新
+              {t('common.refresh')}
             </Button>
             <Button variant="primary" onClick={handleCreateEndpoint}>
-              新建通道实例
+              {t('channels.newInstanceTitle')}
             </Button>
           </div>
         </div>
@@ -855,25 +853,25 @@ const ChannelsPage: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="border-surface-200">
           <CardContent className="p-5">
-            <p className="text-sm text-surface-500">实例总数</p>
+            <p className="text-sm text-surface-500">{t('channels.metricTotal')}</p>
             <p className="mt-2 text-3xl font-semibold text-surface-900">{data.counts.total}</p>
           </CardContent>
         </Card>
         <Card className="border-accent-emerald/20 bg-accent-emerald/5">
           <CardContent className="p-5">
-            <p className="text-sm text-surface-500">启用中</p>
+            <p className="text-sm text-surface-500">{t('channels.metricEnabled')}</p>
             <p className="mt-2 text-3xl font-semibold text-accent-emerald">{data.counts.enabled}</p>
           </CardContent>
         </Card>
         <Card className="border-primary-200 bg-primary-50/80">
           <CardContent className="p-5">
-            <p className="text-sm text-surface-500">已就绪</p>
+            <p className="text-sm text-surface-500">{t('channels.metricReady')}</p>
             <p className="mt-2 text-3xl font-semibold text-primary-700">{data.counts.ready}</p>
           </CardContent>
         </Card>
         <Card className="border-accent-orange/20 bg-accent-orange/5">
           <CardContent className="p-5">
-            <p className="text-sm text-surface-500">待完善</p>
+            <p className="text-sm text-surface-500">{t('channels.metricIncomplete')}</p>
             <p className="mt-2 text-3xl font-semibold text-accent-orange">{data.counts.incomplete}</p>
           </CardContent>
         </Card>
@@ -881,9 +879,9 @@ const ChannelsPage: React.FC = () => {
 
       <section className="space-y-4 rounded-[24px] border border-surface-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-1">
-          <h2 className="text-lg font-semibold text-surface-900">Agent 通道路由概览</h2>
+          <h2 className="text-lg font-semibold text-surface-900">{t('channels.routeOverviewTitle')}</h2>
           <p className="text-sm text-surface-500">
-            先看这里，就能快速判断每个 Agent 当前接了哪些外部入口，以及哪些实例还没有完成绑定。
+            {t('channels.routeOverviewDescription')}
           </p>
         </div>
 
@@ -894,11 +892,11 @@ const ChannelsPage: React.FC = () => {
                 <div>
                   <p className="text-sm font-semibold text-surface-900">{agent.name}</p>
                   <p className="mt-1 text-xs text-surface-500">
-                    {agent.provider || '未设置 provider'} · {agent.model || '未设置模型'}
+                    {agent.provider || t('channels.providerNotSet')} · {agent.model || t('channels.modelNotSet')}
                   </p>
                 </div>
                 <Badge variant={agent.readyCount > 0 ? 'success' : 'default'} size="sm">
-                  {agent.endpoints.length} 个实例
+                  {t('channels.instanceCount', { count: agent.endpoints.length })}
                 </Badge>
               </div>
 
@@ -915,13 +913,13 @@ const ChannelsPage: React.FC = () => {
                         </p>
                       </div>
                       <Badge variant={statusVariant(endpoint.status)} size="sm">
-                        {statusLabel(endpoint.status)}
+                        {getStatusLabel(endpoint.status)}
                       </Badge>
                     </div>
                   ))
                 ) : (
                   <div className="rounded-xl border border-dashed border-surface-300 bg-white px-3 py-4 text-sm text-surface-500">
-                    该 Agent 还没有绑定外部通道。
+                    {t('channels.agentNoEndpoints')}
                   </div>
                 )}
               </div>
@@ -931,11 +929,11 @@ const ChannelsPage: React.FC = () => {
           <div className="rounded-2xl border border-dashed border-surface-300 bg-surface-50/50 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-surface-900">未绑定实例</p>
-                <p className="mt-1 text-xs text-surface-500">这些实例已创建，但还没有路由到具体 Agent。</p>
+                <p className="text-sm font-semibold text-surface-900">{t('channels.unboundTitle')}</p>
+                <p className="mt-1 text-xs text-surface-500">{t('channels.unboundDescription')}</p>
               </div>
               <Badge variant={unboundEndpoints.length > 0 ? 'warning' : 'default'} size="sm">
-                {unboundEndpoints.length} 个
+                {t('channels.instanceCount', { count: unboundEndpoints.length })}
               </Badge>
             </div>
             <div className="mt-4 space-y-2">
@@ -950,7 +948,7 @@ const ChannelsPage: React.FC = () => {
                 ))
               ) : (
                 <div className="rounded-xl border border-surface-200 bg-white px-3 py-4 text-sm text-surface-500">
-                  当前没有未绑定实例。
+                  {t('channels.unboundEmpty')}
                 </div>
               )}
             </div>
@@ -969,8 +967,8 @@ const ChannelsPage: React.FC = () => {
           <CardContent className="p-4">
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-surface-900">通道实例列表</h2>
-                <p className="text-sm text-surface-500">选择一个实例查看或编辑绑定关系与账号凭据。</p>
+                <h2 className="text-lg font-semibold text-surface-900">{t('channels.instanceListTitle')}</h2>
+                <p className="text-sm text-surface-500">{t('channels.instanceListDescription')}</p>
               </div>
             </div>
 
@@ -995,7 +993,7 @@ const ChannelsPage: React.FC = () => {
                             {endpoint.name || endpoint.type}
                           </p>
                           <Badge variant={endpoint.source === 'legacy' ? 'warning' : 'info'} size="sm">
-                            {endpoint.source === 'legacy' ? 'Legacy' : 'Custom'}
+                            {endpoint.source === 'legacy' ? t('channels.legacyBadge') : t('channels.customBadge')}
                           </Badge>
                         </div>
                         <p className="mt-1 text-xs text-surface-500">
@@ -1003,13 +1001,13 @@ const ChannelsPage: React.FC = () => {
                         </p>
                       </div>
                       <Badge variant={statusVariant(endpoint.status)} size="sm">
-                        {statusLabel(endpoint.status)}
+                        {getStatusLabel(endpoint.status)}
                       </Badge>
                     </div>
                     <div className="mt-3 space-y-1 text-xs text-surface-500">
-                      <p>绑定 Agent：{getAgentLabel(endpoint.agent_id)}</p>
+                      <p>{t('channels.bindAgent')}: {getAgentLabel(endpoint.agent_id)}</p>
                       {endpoint.missing_fields.length > 0 && (
-                        <p>缺失字段：{endpoint.missing_fields.join('、')}</p>
+                        <p>{t('channels.missingFields')}: {endpoint.missing_fields.join(', ')}</p>
                       )}
                     </div>
                   </button>
@@ -1018,8 +1016,8 @@ const ChannelsPage: React.FC = () => {
 
               {data.endpoints.length === 0 && (
                 <Empty
-                  title="还没有通道实例"
-                  description="先创建一个通道实例，再将它绑定到具体 Agent。"
+                  title={t('channels.emptyNoInstancesTitle')}
+                  description={t('channels.emptyNoInstancesDescription')}
                 />
               )}
             </div>
@@ -1034,14 +1032,18 @@ const ChannelsPage: React.FC = () => {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="text-xl font-semibold text-surface-900">
-                        {form.source === 'draft' ? '新建通道实例' : form.name || form.type}
+                        {form.source === 'draft' ? t('channels.newInstanceTitle') : form.name || form.type}
                       </h2>
                       <Badge variant={form.source === 'legacy' ? 'warning' : 'info'} size="sm">
-                        {form.source === 'legacy' ? 'Legacy 全局配置' : form.source === 'draft' ? '新实例' : 'Custom 实例'}
+                        {form.source === 'legacy'
+                          ? t('channels.legacyGlobalBadge')
+                          : form.source === 'draft'
+                            ? t('channels.newInstanceBadge')
+                            : t('channels.customInstanceBadge')}
                       </Badge>
                     </div>
                     <p className="mt-2 text-sm text-surface-500">
-                      {selectedCatalog?.description || '为该 Agent 配置独立的外部通道账号。'}
+                      {selectedCatalog?.description || t('channels.detailDescriptionDefault')}
                     </p>
                   </div>
                   <div className="flex gap-3">
@@ -1049,7 +1051,7 @@ const ChannelsPage: React.FC = () => {
                       <>
                         {draftStep > 1 && (
                           <Button variant="secondary" onClick={() => setDraftStep(current => Math.max(1, current - 1))}>
-                            上一步
+                            {t('common.previous')}
                           </Button>
                         )}
                         {draftStep < 3 && (
@@ -1058,7 +1060,7 @@ const ChannelsPage: React.FC = () => {
                             onClick={() => setDraftStep(current => Math.min(3, current + 1))}
                             disabled={(draftStep === 1 && !draftStepOneReady) || (draftStep === 2 && !draftStepTwoReady)}
                           >
-                            下一步
+                            {t('common.next')}
                           </Button>
                         )}
                         {draftStep === 3 && (
@@ -1069,10 +1071,10 @@ const ChannelsPage: React.FC = () => {
                               isLoading={isTesting}
                               disabled={!canRunDraftTest}
                             >
-                              {draftTestResult ? '重新测试' : '开始测试'}
+                              {draftTestResult ? t('channels.retest') : t('channels.startTest')}
                             </Button>
                             <Button variant="primary" onClick={handleSave} isLoading={isSaving} disabled={!draftTestPassed}>
-                              保存
+                              {t('common.save')}
                             </Button>
                           </>
                         )}
@@ -1081,16 +1083,16 @@ const ChannelsPage: React.FC = () => {
                       <>
                         {form.id && (
                           <Button variant="secondary" onClick={handleTestConnection} isLoading={isTesting}>
-                            {testResult ? '重新测试连接' : '测试连接'}
+                            {testResult ? t('channels.retestConnection') : t('channels.testConnection')}
                           </Button>
                         )}
                         {form.source === 'custom' && form.id && (
                           <Button variant="danger" onClick={handleDelete} isLoading={isDeleting}>
-                            删除
+                            {t('common.delete')}
                           </Button>
                         )}
                         <Button variant="primary" onClick={handleSave} isLoading={isSaving}>
-                          保存
+                          {t('common.save')}
                         </Button>
                       </>
                     )}
@@ -1101,16 +1103,16 @@ const ChannelsPage: React.FC = () => {
                   <>
                     <section className="space-y-4 rounded-[24px] border border-surface-200 bg-surface-50/70 p-5">
                       <div className="flex flex-col gap-1">
-                        <h3 className="text-base font-semibold text-surface-900">创建向导</h3>
+                        <h3 className="text-base font-semibold text-surface-900">{t('channels.wizardTitle')}</h3>
                         <p className="text-sm text-surface-500">
-                          先选类型和目标 Agent，再填写凭据，最后测试连接并保存，避免一上来就面对整张大表单。
+                          {t('channels.wizardDescription')}
                         </p>
                       </div>
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                         {[
-                          { id: 1, title: '选择类型与 Agent', ready: draftStepOneReady },
-                          { id: 2, title: '填写凭据', ready: draftStepTwoReady },
-                          { id: 3, title: '测试并保存', ready: draftTestPassed },
+                          { id: 1, title: t('channels.wizardStepChoose'), ready: draftStepOneReady },
+                          { id: 2, title: t('channels.wizardStepCredentials'), ready: draftStepTwoReady },
+                          { id: 3, title: t('channels.wizardStepTest'), ready: draftTestPassed },
                         ].map(step => {
                           const isCurrent = draftStep === step.id;
                           const isDone = draftStep > step.id || (step.id === 3 && draftTestPassed);
@@ -1134,7 +1136,7 @@ const ChannelsPage: React.FC = () => {
                                 <div>
                                   <p className="text-sm font-semibold text-surface-900">{step.title}</p>
                                   <p className="mt-1 text-xs text-surface-500">
-                                    {step.id === 1 ? '确定入口和接手 Agent' : step.id === 2 ? '完成必填账号信息' : '先验证账号再入库'}
+                                    {step.id === 1 ? t('channels.wizardStepChooseHint') : step.id === 2 ? t('channels.wizardStepCredentialsHint') : t('channels.wizardStepTestHint')}
                                   </p>
                                 </div>
                               </div>
@@ -1147,30 +1149,31 @@ const ChannelsPage: React.FC = () => {
                     {draftStep === 1 && (
                       <section className="space-y-4 rounded-[24px] border border-surface-200 bg-white p-5">
                         <div>
-                          <h3 className="text-base font-semibold text-surface-900">第一步：选择通道类型和绑定 Agent</h3>
+                          <h3 className="text-base font-semibold text-surface-900">{t('channels.stepOneTitle')}</h3>
                           <p className="text-sm text-surface-500">
-                            这里只做路由决策，不在这一步填写复杂凭据。
+                            {t('channels.stepOneDescription')}
                           </p>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <Select
-                            label="通道类型"
+                            label={t('channels.channelType')}
+                            
                             value={form.type}
                             onChange={(event) => handleTypeChange(event.target.value)}
                             options={data.catalog.map(item => ({ value: item.type, label: item.label }))}
                           />
                           <Select
-                            label="绑定 Agent"
+                            label={t('channels.bindAgent')}
                             value={form.agent_id}
                             onChange={(event) => handleFieldChange('agent_id', event.target.value)}
                             options={[
-                              { value: '', label: '请选择 Agent' },
+                              { value: '', label: t('channels.placeholderAgent') },
                               ...data.agents.map(agent => ({
                                 value: agent.id,
-                                label: `${agent.name} · ${agent.provider || '未设置 provider'} · ${agent.model || '未设置模型'}`,
+                                label: `${agent.name} · ${agent.provider || t('channels.providerNotSet')} · ${agent.model || t('channels.modelNotSet')}`,
                               })),
                             ]}
-                            hint="后续来自这个通道账号的外部消息会优先路由到这里选中的 Agent。"
+                            hint={t('channels.bindAgentHint')}
                           />
                           <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-4 md:col-span-2">
                             <label className="flex items-center gap-3">
@@ -1180,10 +1183,10 @@ const ChannelsPage: React.FC = () => {
                                 checked={form.enabled}
                                 onChange={(event) => handleFieldChange('enabled', event.target.checked)}
                               />
-                              <span className="text-sm font-medium text-surface-700">创建后立即启用该通道实例</span>
+                              <span className="text-sm font-medium text-surface-700">{t('channels.createEnabled')}</span>
                             </label>
                             <p className="mt-2 text-sm text-surface-500">
-                              如果只是先录入账号，暂时不想接流量，也可以先关掉。
+                              {t('channels.createEnabledHint')}
                             </p>
                           </div>
                         </div>
@@ -1194,33 +1197,35 @@ const ChannelsPage: React.FC = () => {
                       <>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <Input
-                            label="实例名称"
+                            label={t('channels.instanceName')}
                             value={form.name}
                             onChange={(event) => handleFieldChange('name', event.target.value)}
-                            placeholder={`例如：${selectedCatalog?.label || '通道'}销售一号`}
-                            hint="建议用业务角色或账号用途命名，后面排查路由时更直观。"
+                            placeholder={t('channels.placeholderInstanceName')}
+                            hint={t('channels.instanceNameHint')}
                           />
                           <Textarea
-                            label="允许来源"
+                            label={t('channels.allowFromLabel')}
                             value={form.allow_from_text}
                             onChange={(event) => handleFieldChange('allow_from_text', event.target.value)}
                             rows={4}
-                            placeholder="每行一个用户标识，留空表示不限制。"
-                            hint="支持逐行填写，也支持用逗号分隔。"
+                            placeholder={t('channels.placeholderAllowFrom')}
+                            hint={t('channels.allowFromHint')}
                           />
                         </div>
 
                         <section className="space-y-4 rounded-[24px] border border-surface-200 bg-surface-50/70 p-5">
                           <div className="flex items-center justify-between">
                             <div>
-                              <h3 className="text-base font-semibold text-surface-900">第二步：填写必填凭据</h3>
+                              <h3 className="text-base font-semibold text-surface-900">{t('channels.stepTwoTitle')}</h3>
                               <p className="text-sm text-surface-500">
-                                先把真正影响连通性的字段填完，再决定是否补充其它可选参数。
+                                {t('channels.stepTwoDescription')}
                               </p>
                             </div>
                             {selectedCatalog && (
                               <Badge variant={draftStepTwoReady ? 'success' : 'warning'} size="sm">
-                                {requiredFieldKeys.length > 0 ? `必填：${requiredFieldKeys.join('、')}` : '无必填字段'}
+                                {requiredFieldKeys.length > 0
+                                  ? t('channels.requiredFields', { fields: requiredFieldKeys.join(', ') })
+                                  : t('channels.noRequiredFields')}
                               </Badge>
                             )}
                           </div>
@@ -1234,9 +1239,9 @@ const ChannelsPage: React.FC = () => {
                               {optionalCatalogFields.length > 0 && (
                                 <div className="space-y-3 rounded-2xl border border-dashed border-surface-300 bg-white px-4 py-4">
                                   <div>
-                                    <h4 className="text-sm font-semibold text-surface-900">可选参数</h4>
+                                    <h4 className="text-sm font-semibold text-surface-900">{t('channels.optionalTitle')}</h4>
                                     <p className="text-sm text-surface-500">
-                                      这些字段通常用于高级策略、兼容性或体验微调，不是首次接通的必要前置条件。
+                                      {t('channels.optionalDescription')}
                                     </p>
                                   </div>
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1247,8 +1252,8 @@ const ChannelsPage: React.FC = () => {
                             </>
                           ) : (
                             <Empty
-                              title="当前通道类型没有可渲染的字段"
-                              description="请先选择一个通道类型。"
+                              title={t('channels.emptyNoFieldsTitle')}
+                              description={t('channels.emptyNoFieldsDescription')}
                             />
                           )}
                         </section>
@@ -1258,9 +1263,9 @@ const ChannelsPage: React.FC = () => {
                     {draftStep === 3 && (
                       <section className="space-y-4 rounded-[24px] border border-surface-200 bg-white p-5">
                         <div>
-                          <h3 className="text-base font-semibold text-surface-900">第三步：测试连接并保存</h3>
+                          <h3 className="text-base font-semibold text-surface-900">{t('channels.stepThreeTitle')}</h3>
                           <p className="text-sm text-surface-500">
-                            先用当前草稿做一次真实连接测试。通过后再保存，避免把无效账号直接写进配置。
+                            {t('channels.stepThreeDescription')}
                           </p>
                         </div>
 
@@ -1268,67 +1273,67 @@ const ChannelsPage: React.FC = () => {
                           <div className="space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                               <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-4">
-                                <p className="text-xs text-surface-500">通道类型</p>
+                                <p className="text-xs text-surface-500">{t('channels.channelType')}</p>
                                 <p className="mt-1 text-sm font-semibold text-surface-900">{selectedCatalog?.label || form.type}</p>
                               </div>
                               <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-4">
-                                <p className="text-xs text-surface-500">目标 Agent</p>
+                                <p className="text-xs text-surface-500">{t('channels.targetAgent')}</p>
                                 <p className="mt-1 text-sm font-semibold text-surface-900">{getAgentLabel(form.agent_id)}</p>
                               </div>
                               <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-4">
-                                <p className="text-xs text-surface-500">必填字段状态</p>
-                                <p className="mt-1 text-sm font-semibold text-surface-900">{draftStepTwoReady ? '已完整' : '仍有缺失'}</p>
+                                <p className="text-xs text-surface-500">{t('channels.requiredFieldsStatus')}</p>
+                                <p className="mt-1 text-sm font-semibold text-surface-900">{draftStepTwoReady ? t('channels.requiredFieldsComplete') : t('channels.requiredFieldsMissing')}</p>
                               </div>
                             </div>
 
                             <div className="rounded-2xl border border-surface-200 bg-surface-50/70 px-4 py-4">
                               <div className="flex items-center justify-between gap-3">
                                 <div>
-                                  <h4 className="text-sm font-semibold text-surface-900">测试前检查清单</h4>
+                                  <h4 className="text-sm font-semibold text-surface-900">{t('channels.preflightTitle')}</h4>
                                   <p className="mt-1 text-sm text-surface-500">
-                                    先确认前置条件是否满足，再开始真实连接测试。
+                                    {t('channels.preflightDescription')}
                                   </p>
                                 </div>
                                 <Badge variant={draftStepTwoReady ? 'success' : 'warning'} size="sm">
-                                  {draftStepTwoReady ? '可开始测试' : '需先补齐'}
+                                  {draftStepTwoReady ? t('channels.preflightReady') : t('channels.preflightIncomplete')}
                                 </Badge>
                               </div>
                               <div className="mt-4 space-y-3">
                                 <div className="flex items-start justify-between gap-3 rounded-xl border border-surface-200 bg-white px-3 py-3">
                                   <div>
-                                    <p className="text-sm font-medium text-surface-900">目标 Agent 已确定</p>
-                                    <p className="mt-1 text-xs text-surface-500">这个账号收到的消息会优先分发到当前选中的 Agent。</p>
+                                    <p className="text-sm font-medium text-surface-900">{t('channels.checkAgentReadyTitle')}</p>
+                                    <p className="mt-1 text-xs text-surface-500">{t('channels.checkAgentReadyDescription')}</p>
                                   </div>
                                   <Badge variant={form.agent_id ? 'success' : 'warning'} size="sm">
-                                    {form.agent_id ? '已完成' : '未完成'}
+                                    {form.agent_id ? t('channels.completed') : t('channels.incomplete')}
                                   </Badge>
                                 </div>
                                 <div className="flex items-start justify-between gap-3 rounded-xl border border-surface-200 bg-white px-3 py-3">
                                   <div>
-                                    <p className="text-sm font-medium text-surface-900">必填凭据已填写</p>
+                                    <p className="text-sm font-medium text-surface-900">{t('channels.checkRequiredReadyTitle')}</p>
                                     <p className="mt-1 text-xs text-surface-500">
                                       {draftMissingFields.length > 0
-                                        ? `仍缺少：${draftMissingFields.join('、')}`
-                                        : '当前所选通道的必填字段都已填写。'}
+                                        ? t('channels.checkRequiredReadyMissing', { fields: draftMissingFields.join(', ') })
+                                        : t('channels.checkRequiredReadyDone')}
                                     </p>
                                   </div>
                                   <Badge variant={draftStepTwoReady ? 'success' : 'warning'} size="sm">
-                                    {draftStepTwoReady ? '已完成' : `${draftMissingFields.length} 项缺失`}
+                                    {draftStepTwoReady ? t('channels.completed') : t('channels.missingCount', { count: draftMissingFields.length })}
                                   </Badge>
                                 </div>
                                 <div className="flex items-start justify-between gap-3 rounded-xl border border-surface-200 bg-white px-3 py-3">
                                   <div>
-                                    <p className="text-sm font-medium text-surface-900">最近测试结果</p>
+                                    <p className="text-sm font-medium text-surface-900">{t('channels.checkRecentTestTitle')}</p>
                                     <p className="mt-1 text-xs text-surface-500">
                                       {draftTestPassed
-                                        ? '最近一次草稿测试已通过，可以直接保存。'
+                                        ? t('channels.checkRecentTestPassed')
                                         : draftTestResult
-                                          ? '最近一次草稿测试失败，建议修正凭据后重新测试。'
-                                          : '还没有执行过草稿测试。'}
+                                          ? t('channels.checkRecentTestFailed')
+                                          : t('channels.checkRecentTestNever')}
                                     </p>
                                   </div>
                                   <Badge variant={draftTestPassed ? 'success' : draftTestResult ? 'warning' : 'default'} size="sm">
-                                    {draftTestPassed ? '已通过' : draftTestResult ? '未通过' : '未测试'}
+                                    {draftTestPassed ? t('channels.passed') : draftTestResult ? t('channels.failed') : t('channels.notTested')}
                                   </Badge>
                                 </div>
                               </div>
@@ -1336,7 +1341,7 @@ const ChannelsPage: React.FC = () => {
 
                             {isTesting && (
                               <div className="rounded-2xl border border-primary-200 bg-primary-50 px-4 py-4 text-sm text-primary-700">
-                                正在测试连接。系统会使用当前草稿配置发起真实连通性检查，完成后会自动刷新结果。
+                                {t('channels.testingConnectionBanner')}
                               </div>
                             )}
 
@@ -1347,9 +1352,9 @@ const ChannelsPage: React.FC = () => {
                                   : 'border-accent-orange/30 bg-accent-orange/5 text-accent-orange'
                               }`}>
                                 <div className="flex flex-wrap items-center gap-3">
-                                  <span>测试时间：{formatDateTime(draftTestResult.tested_at)}</span>
-                                  <span>延迟：{draftTestResult.result.latency_ms} ms</span>
-                                  <span>结果：{draftTestResult.result.status === 'ok' ? '通过' : '失败'}</span>
+                                  <span>{t('channels.testedAt', { value: formatDateTimeLocal(draftTestResult.tested_at) })}</span>
+                                  <span>{t('channels.latency', { value: draftTestResult.result.latency_ms })}</span>
+                                  <span>{t('channels.testResultLabel', { value: draftTestResult.result.status === 'ok' ? t('channels.passed') : t('channels.failed') })}</span>
                                 </div>
                                 {draftConnectionFeedback && (
                                   <>
@@ -1357,7 +1362,7 @@ const ChannelsPage: React.FC = () => {
                                     <p className="mt-1">{draftConnectionFeedback.summary}</p>
                                     {draftTestResult.result.error && draftTestResult.result.status !== 'ok' && (
                                       <div className="mt-3 rounded-xl border border-current/15 bg-white/60 px-3 py-3 text-xs leading-6 text-surface-700">
-                                        原始错误：{draftTestResult.result.error}
+                                        {t('channels.rawError', { error: draftTestResult.result.error })}
                                       </div>
                                     )}
                                     <div className="mt-3 space-y-2">
@@ -1375,9 +1380,9 @@ const ChannelsPage: React.FC = () => {
 
                           <div className="space-y-4 rounded-2xl border border-surface-200 bg-surface-50/70 px-4 py-4">
                             <div>
-                              <h4 className="text-sm font-semibold text-surface-900">下一步建议</h4>
+                              <h4 className="text-sm font-semibold text-surface-900">{t('channels.nextSuggestion')}</h4>
                               <p className="mt-1 text-sm text-surface-500">
-                                系统会根据当前状态明确告诉你下一步应该做什么。
+                                {t('channels.nextSuggestionDescription')}
                               </p>
                             </div>
                             <div className={`rounded-xl border px-3 py-3 text-sm ${
@@ -1390,12 +1395,12 @@ const ChannelsPage: React.FC = () => {
                                     : 'border-primary-200 bg-primary-50 text-primary-700'
                             }`}>
                               {!draftStepTwoReady
-                                ? '还不能开始测试。请先回到上一步补齐必填凭据。'
+                                ? t('channels.nextActionNeedCredentials')
                                 : draftTestPassed
-                                  ? '测试已经通过。现在可以直接保存这个通道实例。'
+                                  ? t('channels.nextActionSaveReady')
                                   : draftTestResult
-                                    ? '最近一次测试失败了。建议修正凭据后点击“重新测试”。'
-                                    : '所有前置条件都已满足，现在可以点击“开始测试”。'}
+                                    ? t('channels.nextActionRetryAfterFailure')
+                                    : t('channels.nextActionCanTest')}
                             </div>
                             <div className="flex flex-col gap-3">
                               <Button
@@ -1404,7 +1409,7 @@ const ChannelsPage: React.FC = () => {
                                 isLoading={isTesting}
                                 disabled={!canRunDraftTest}
                               >
-                                {isTesting ? '正在测试连接...' : draftTestResult ? '重新测试连接' : '开始测试连接'}
+                                {isTesting ? t('channels.testing') : draftTestResult ? t('channels.retestConnection') : t('channels.startTestConnection')}
                               </Button>
                               <Button
                                 variant="primary"
@@ -1412,12 +1417,13 @@ const ChannelsPage: React.FC = () => {
                                 isLoading={isSaving}
                                 disabled={!draftTestPassed}
                               >
-                                {draftTestPassed ? '保存这个通道实例' : '测试通过后才能保存'}
+                                {draftTestPassed ? t('channels.saveInstance') : t('channels.saveAfterPass')}
                               </Button>
                             </div>
                             <div className="rounded-xl border border-surface-200 bg-white px-3 py-3 text-sm text-surface-600">
-                              保存策略：
-                              当前向导要求先测试成功再保存。这样创建出来的实例默认就是“可连通”的，后面在路由排查时不会混入半成品配置。
+                              <span className="font-medium text-surface-800">{t('channels.savePolicyTitle')}</span>
+                              {' '}
+                              {t('channels.savePolicyDescription')}
                             </div>
                           </div>
                         </div>
@@ -1428,31 +1434,31 @@ const ChannelsPage: React.FC = () => {
                   <>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <Input
-                        label="实例名称"
+                        label={t('channels.instanceName')}
                         value={form.name}
                         onChange={(event) => handleFieldChange('name', event.target.value)}
-                        placeholder="例如：飞书销售一号"
-                        hint="建议用业务视角命名，方便看出这个账号接到哪类外部消息。"
+                        placeholder={t('channels.placeholderInstanceName')}
+                        hint={t('channels.instanceNameBusinessHint')}
                       />
                       <Select
-                        label="通道类型"
+                        label={t('channels.channelType')}
                         value={form.type}
                         onChange={(event) => handleTypeChange(event.target.value)}
                         disabled={form.source !== 'draft'}
                         options={data.catalog.map(item => ({ value: item.type, label: item.label }))}
                       />
                       <Select
-                        label="绑定 Agent"
+                        label={t('channels.bindAgent')}
                         value={form.agent_id}
                         onChange={(event) => handleFieldChange('agent_id', event.target.value)}
                         options={[
-                          { value: '', label: '暂不绑定' },
+                          { value: '', label: t('channels.noBoundAgent') },
                           ...data.agents.map(agent => ({
                             value: agent.id,
-                            label: `${agent.name} · ${agent.provider || '未设置 provider'} · ${agent.model || '未设置模型'}`,
+                            label: `${agent.name} · ${agent.provider || t('channels.providerNotSet')} · ${agent.model || t('channels.modelNotSet')}`,
                           })),
                         ]}
-                        hint="外部消息会优先路由到这里选择的 Agent。"
+                        hint={t('channels.bindAgentRouteHint')}
                       />
                       <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-4">
                         <label className="flex items-center gap-3">
@@ -1462,36 +1468,36 @@ const ChannelsPage: React.FC = () => {
                             checked={form.enabled}
                             onChange={(event) => handleFieldChange('enabled', event.target.checked)}
                           />
-                          <span className="text-sm font-medium text-surface-700">启用该通道实例</span>
+                          <span className="text-sm font-medium text-surface-700">{t('channels.createEnabled')}</span>
                         </label>
                         <p className="mt-2 text-sm text-surface-500">
-                          关闭后会保留配置，但不会实际接收和发送外部消息。
+                          {t('channels.disableHint')}
                         </p>
                       </div>
                     </div>
 
                     <Textarea
-                      label="允许来源"
+                      label={t('channels.allowFromLabel')}
                       value={form.allow_from_text}
                       onChange={(event) => handleFieldChange('allow_from_text', event.target.value)}
                       rows={4}
-                      placeholder="每行一个用户标识，留空表示不限制。"
-                      hint="支持逐行填写，也支持用逗号分隔。"
+                      placeholder={t('channels.placeholderAllowFrom')}
+                      hint={t('channels.allowFromHint')}
                     />
 
                     <section className="space-y-4 rounded-[24px] border border-surface-200 bg-surface-50/70 p-5">
                       <div className="flex items-center justify-between">
                         <div>
-                          <h3 className="text-base font-semibold text-surface-900">账号凭据与通道参数</h3>
+                          <h3 className="text-base font-semibold text-surface-900">{t('channels.credentialsTitle')}</h3>
                           <p className="text-sm text-surface-500">
-                            这里只配置这个通道实例自己的账号信息，不再走全局 configuration。
+                            {t('channels.credentialsDescription')}
                           </p>
                         </div>
                         {selectedCatalog && (
                           <Badge variant={draftStepTwoReady ? 'success' : 'warning'} size="sm">
                             {selectedCatalog.required_fields.length > 0
-                              ? `必填：${selectedCatalog.required_fields.join('、')}`
-                              : '无必填字段'}
+                              ? t('channels.requiredFields', { fields: selectedCatalog.required_fields.join(', ') })
+                              : t('channels.noRequiredFields')}
                           </Badge>
                         )}
                       </div>
@@ -1502,29 +1508,29 @@ const ChannelsPage: React.FC = () => {
                         </div>
                       ) : (
                         <Empty
-                          title="当前通道类型没有可渲染的字段"
-                          description="请先选择一个通道类型。"
+                          title={t('channels.emptyNoFieldsTitle')}
+                          description={t('channels.emptyNoFieldsDescription')}
                         />
                       )}
                     </section>
 
                     {form.source === 'legacy' && (
                       <div className="rounded-2xl border border-accent-orange/30 bg-accent-orange/5 px-4 py-4 text-sm text-accent-orange">
-                        这是从旧版全局 `channels.*` 自动投影出来的 legacy 配置。可以直接编辑继续使用，也可以新建 custom 实例后逐步迁移。
+                        {t('channels.legacyNotice')}
                       </div>
                     )}
 
                     <section className="space-y-4 rounded-[24px] border border-surface-200 bg-white p-5">
                       <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                         <div>
-                          <h3 className="text-base font-semibold text-surface-900">运行状态与最近事件</h3>
+                          <h3 className="text-base font-semibold text-surface-900">{t('channels.runtimeTitle')}</h3>
                           <p className="text-sm text-surface-500">
-                            这里会显示最近的收发、测试连接和错误事件，便于判断当前通道是否真正可用。
+                            {t('channels.runtimeDescription')}
                           </p>
                         </div>
                         {testResult && (
                           <Badge variant={testResult.result.status === 'ok' ? 'success' : 'warning'} size="sm">
-                            最近测试：{testResult.result.status === 'ok' ? '通过' : '失败'}
+                            {t('channels.recentTestLabel', { value: testResult.result.status === 'ok' ? t('channels.passed') : t('channels.failed') })}
                           </Badge>
                         )}
                       </div>
@@ -1532,20 +1538,20 @@ const ChannelsPage: React.FC = () => {
                       {currentSummary && (
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                           <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-3">
-                            <p className="text-xs text-surface-500">收到消息</p>
+                            <p className="text-xs text-surface-500">{t('channels.metricReceived')}</p>
                             <p className="mt-1 text-xl font-semibold text-surface-900">{currentSummary.messages_received}</p>
                           </div>
                           <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-3">
-                            <p className="text-xs text-surface-500">发送消息</p>
+                            <p className="text-xs text-surface-500">{t('channels.metricSent')}</p>
                             <p className="mt-1 text-xl font-semibold text-surface-900">{currentSummary.messages_sent}</p>
                           </div>
                           <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-3">
-                            <p className="text-xs text-surface-500">错误次数</p>
+                            <p className="text-xs text-surface-500">{t('channels.metricErrors')}</p>
                             <p className="mt-1 text-xl font-semibold text-accent-red">{currentSummary.errors}</p>
                           </div>
                           <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-3">
-                            <p className="text-xs text-surface-500">最近事件</p>
-                            <p className="mt-1 text-sm font-medium text-surface-900">{formatDateTime(currentSummary.last_event_at)}</p>
+                            <p className="text-xs text-surface-500">{t('channels.metricLastEvent')}</p>
+                            <p className="mt-1 text-sm font-medium text-surface-900">{formatDateTimeLocal(currentSummary.last_event_at)}</p>
                           </div>
                         </div>
                       )}
@@ -1557,8 +1563,8 @@ const ChannelsPage: React.FC = () => {
                             : 'border-accent-orange/30 bg-accent-orange/5 text-accent-orange'
                         }`}>
                           <div className="flex flex-wrap items-center gap-3">
-                            <span>测试时间：{formatDateTime(testResult.tested_at)}</span>
-                            <span>延迟：{testResult.result.latency_ms} ms</span>
+                            <span>{t('channels.testedAt', { value: formatDateTimeLocal(testResult.tested_at) })}</span>
+                            <span>{t('channels.latency', { value: testResult.result.latency_ms })}</span>
                           </div>
                           {savedConnectionFeedback && (
                             <>
@@ -1566,7 +1572,7 @@ const ChannelsPage: React.FC = () => {
                               <p className="mt-1">{savedConnectionFeedback.summary}</p>
                               {testResult.result.error && testResult.result.status !== 'ok' && (
                                 <div className="mt-3 rounded-xl border border-current/15 bg-white/60 px-3 py-3 text-xs leading-6 text-surface-700">
-                                  原始错误：{testResult.result.error}
+                                  {t('channels.rawError', { error: testResult.result.error })}
                                 </div>
                               )}
                               <div className="mt-3 space-y-2">
@@ -1589,16 +1595,16 @@ const ChannelsPage: React.FC = () => {
                                 <Badge variant={event.status === 'ok' ? 'success' : event.status === 'error' ? 'error' : 'default'} size="sm">
                                   {event.event_type}
                                 </Badge>
-                                <span className="text-xs text-surface-500">{formatDateTime(event.timestamp)}</span>
+                                <span className="text-xs text-surface-500">{formatDateTimeLocal(event.timestamp)}</span>
                               </div>
                               <p className="mt-2 text-sm text-surface-900">{event.message}</p>
                             </div>
                           ))
                         ) : (
                           <Empty
-                            title="暂无运行事件"
-                            description="保存配置、测试连接或实际收发消息后，这里会开始积累运行轨迹。"
-                          />
+                          title={t('channels.emptyNoEventsTitle')}
+                          description={t('channels.emptyNoEventsDescription')}
+                        />
                         )}
                       </div>
                     </section>
@@ -1607,8 +1613,8 @@ const ChannelsPage: React.FC = () => {
               </div>
             ) : (
               <Empty
-                title="没有可编辑的通道"
-                description="请先创建一个通道实例。"
+                title={t('channels.emptyNoEditableTitle')}
+                description={t('channels.emptyNoEditableDescription')}
               />
             )}
           </CardContent>

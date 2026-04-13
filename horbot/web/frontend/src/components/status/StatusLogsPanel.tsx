@@ -1,5 +1,6 @@
 import { Badge, Button, Card, CardContent, CardHeader } from '../ui';
 import { PanelEmptyState } from '../state';
+import { useI18n } from '../../contexts/I18nContext';
 import type { LogEntry } from '../../services/status';
 
 interface StatusLogsPanelProps {
@@ -18,10 +19,13 @@ const StatusLogsPanel = ({
   setLogLevel,
   setLogLines,
   fetchLogs,
-}: StatusLogsPanelProps) => (
+}: StatusLogsPanelProps) => {
+  const { t } = useI18n();
+
+  return (
   <div role="tabpanel" id="logs-panel" aria-labelledby="logs-tab">
     <Card padding="lg">
-      <CardHeader title="System Logs" />
+      <CardHeader title={t('status.logs.title')} />
       <CardContent>
         <div className="flex flex-wrap justify-between items-center mb-4 gap-3">
           <div className="flex flex-wrap gap-3">
@@ -30,9 +34,9 @@ const StatusLogsPanel = ({
                 value={logLevel}
                 onChange={(e) => setLogLevel(e.target.value)}
                 className="bg-white border border-surface-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 text-surface-900 appearance-none pr-8"
-                aria-label="Filter by log level"
+                aria-label={t('status.logs.filterByLevel')}
               >
-                <option value="">All Levels</option>
+                <option value="">{t('status.logs.allLevels')}</option>
                 <option value="DEBUG">DEBUG</option>
                 <option value="INFO">INFO</option>
                 <option value="WARNING">WARNING</option>
@@ -50,12 +54,12 @@ const StatusLogsPanel = ({
                 value={logLines}
                 onChange={(e) => setLogLines(Number(e.target.value))}
                 className="bg-white border border-surface-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 text-surface-900 appearance-none pr-8"
-                aria-label="Number of log lines"
+                aria-label={t('status.logs.numberOfLines')}
               >
-                <option value={50}>50 lines</option>
-                <option value={100}>100 lines</option>
-                <option value={200}>200 lines</option>
-                <option value={500}>500 lines</option>
+                <option value={50}>{t('status.logs.linesOption', { count: 50 })}</option>
+                <option value={100}>{t('status.logs.linesOption', { count: 100 })}</option>
+                <option value={200}>{t('status.logs.linesOption', { count: 200 })}</option>
+                <option value={500}>{t('status.logs.linesOption', { count: 500 })}</option>
               </select>
               <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
                 <svg className="w-4 h-4 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -65,7 +69,7 @@ const StatusLogsPanel = ({
             </div>
             {logLevel && (
               <Badge variant="info" size="sm">
-                Filtered: {logLevel}
+                {t('status.logs.filtered', { level: logLevel })}
               </Badge>
             )}
           </div>
@@ -79,15 +83,15 @@ const StatusLogsPanel = ({
               </svg>
             )}
           >
-            Refresh
+            {t('common.refresh')}
           </Button>
         </div>
 
         <div className="bg-surface-50 rounded-lg p-4 max-h-[600px] overflow-y-auto font-mono text-xs border border-surface-200">
           {logs.length === 0 ? (
             <PanelEmptyState
-              title="No logs available"
-              description="Logs will appear here after the backend emits runtime output."
+              title={t('status.logs.noLogs')}
+              description={t('status.logs.noLogsBody')}
             />
           ) : (
             <div className="space-y-1">
@@ -109,6 +113,7 @@ const StatusLogsPanel = ({
       </CardContent>
     </Card>
   </div>
-);
+  );
+};
 
 export default StatusLogsPanel;

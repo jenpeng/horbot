@@ -1,19 +1,81 @@
 import { Link } from 'react-router-dom';
 import { Badge, Card, CardContent, CardHeader } from '../ui';
 import type { DashboardActivitySummary } from '../../types';
+import { useI18n } from '../../contexts/I18nContext';
 import { ACTIVITY_ICONS } from './constants';
 
 interface DashboardActivityCardProps {
   activities: DashboardActivitySummary[];
 }
 
-const DashboardActivityCard = ({ activities }: DashboardActivityCardProps) => (
-  <Card data-testid="dashboard-activity-card" className="xl:col-span-2 self-start overflow-hidden border border-surface-200/60 shadow-sm transition-shadow duration-500 ease-out hover:shadow-lg">
+const localizeDashboardActivity = (
+  activity: DashboardActivitySummary,
+  t: (key: string, values?: Record<string, number | string>) => string,
+) => {
+  const localizeTime = (time: string) => {
+    switch (time) {
+      case '刚刚':
+        return t('dashboard.activity.time.justNow');
+      case '当前':
+        return t('dashboard.activity.time.current');
+      case '持续中':
+        return t('dashboard.activity.time.ongoing');
+      default:
+        return time;
+    }
+  };
+
+  switch (activity.id) {
+    case 'system-running':
+      return {
+        message: t('dashboard.activity.message.systemRunning'),
+        time: localizeTime(activity.time),
+      };
+    case 'agent-ready':
+      return {
+        message: t('dashboard.activity.message.agentReady'),
+        time: localizeTime(activity.time),
+      };
+    case 'cron-running': {
+      const count = Number(activity.message.match(/(\d+)/)?.[1] || 0);
+      return {
+        message: t('dashboard.activity.message.cronRunning', { count }),
+        time: localizeTime(activity.time),
+      };
+    }
+    case 'channels-enabled': {
+      const numbers = activity.message.match(/\d+/g) || [];
+      const enabled = Number(numbers[0] || 0);
+      const ready = Number(numbers[1] || 0);
+      return {
+        message: t('dashboard.activity.message.channelsEnabled', { enabled, ready }),
+        time: localizeTime(activity.time),
+      };
+    }
+    default:
+      if (activity.id.startsWith('alert-')) {
+        return {
+          message: activity.message,
+          time: localizeTime(activity.time),
+        };
+      }
+      return {
+        message: activity.message,
+        time: localizeTime(activity.time),
+      };
+  }
+};
+
+const DashboardActivityCard = ({ activities }: DashboardActivityCardProps) => {
+  const { t } = useI18n();
+
+  return (
+    <Card data-testid="dashboard-activity-card" className="xl:col-span-2 self-start overflow-hidden border border-surface-200/60 shadow-sm transition-shadow duration-500 ease-out hover:shadow-lg">
     <CardHeader
       className="mb-4 px-5 pt-5"
       title={(
         <div className="flex items-center gap-2">
-          <span className="text-lg font-semibold text-surface-900 tracking-tight">Recent Activity</span>
+          <span className="text-lg font-semibold text-surface-900 tracking-tight">{t('dashboard.activity.title')}</span>
           <span className="px-2 py-0.5 text-xs font-medium bg-primary-100 text-primary-700 rounded-full shadow-sm">
             {activities.length}
           </span>
@@ -21,7 +83,7 @@ const DashboardActivityCard = ({ activities }: DashboardActivityCardProps) => (
       )}
       action={(
         <Link to="/status" className="text-sm font-medium text-primary-600 hover:text-primary-700 transition-colors flex items-center gap-1.5 group">
-          View More
+          {t('dashboard.activity.viewMore')}
           <svg className="w-4 h-4 transform group-hover:translate-x-1 transition-transform duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
           </svg>
@@ -31,7 +93,9 @@ const DashboardActivityCard = ({ activities }: DashboardActivityCardProps) => (
     <CardContent padding="none">
       {activities.length > 0 ? (
         <div className="grid gap-3 px-5 pb-5 sm:grid-cols-2">
-          {activities.map((activity, index) => (
+          {activities.map((activity, index) => {
+            const localized = localizeDashboardActivity(activity, t);
+            return (
             <div
               key={activity.id}
               data-testid={`dashboard-activity-${activity.id}`}
@@ -54,13 +118,13 @@ const DashboardActivityCard = ({ activities }: DashboardActivityCardProps) => (
                 </div>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[14px] font-medium leading-6 text-surface-900 tracking-wide">{activity.message}</p>
+                <p className="text-[14px] font-medium leading-6 text-surface-900 tracking-wide">{localized.message}</p>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
                   <p className="text-[12px] text-surface-400 flex items-center gap-1.5 group-hover:text-surface-500 transition-colors duration-300">
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    {activity.time}
+                    {localized.time}
                   </p>
                   <Badge
                     variant={
@@ -74,19 +138,19 @@ const DashboardActivityCard = ({ activities }: DashboardActivityCardProps) => (
                     className="text-[10px] px-2 py-0.5 font-medium"
                   >
                     {activity.status === 'success' ? (
-                      <><svg className="w-2.5 h-2.5 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>Success</>
+                      <><svg className="w-2.5 h-2.5 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>{t('dashboard.activity.status.success')}</>
                     ) : activity.status === 'warning' ? (
-                      <><svg className="w-2.5 h-2.5 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.595c.75 1.334-.213 2.996-1.742 2.996H3.48c-1.53 0-2.492-1.662-1.742-2.996L8.257 3.1zM11 8a1 1 0 10-2 0v3a1 1 0 102 0V8zm-1 7a1.25 1.25 0 100-2.5A1.25 1.25 0 0010 15z" clipRule="evenodd" /></svg>Warning</>
+                      <><svg className="w-2.5 h-2.5 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.595c.75 1.334-.213 2.996-1.742 2.996H3.48c-1.53 0-2.492-1.662-1.742-2.996L8.257 3.1zM11 8a1 1 0 10-2 0v3a1 1 0 102 0V8zm-1 7a1.25 1.25 0 100-2.5A1.25 1.25 0 0010 15z" clipRule="evenodd" /></svg>{t('dashboard.activity.status.warning')}</>
                     ) : activity.status === 'error' ? (
-                      <><svg className="w-2.5 h-2.5 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>Failed</>
+                      <><svg className="w-2.5 h-2.5 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>{t('dashboard.activity.status.error')}</>
                     ) : (
-                      <><svg className="w-2.5 h-2.5 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>Info</>
+                      <><svg className="w-2.5 h-2.5 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>{t('dashboard.activity.status.info')}</>
                     )}
                   </Badge>
                 </div>
               </div>
             </div>
-          ))}
+          )})}
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-14 px-6">
@@ -98,12 +162,13 @@ const DashboardActivityCard = ({ activities }: DashboardActivityCardProps) => (
             </div>
             <div className="absolute inset-0 w-24 h-24 rounded-full bg-primary-100/50 animate-pulse opacity-0" />
           </div>
-          <p className="text-surface-600 font-medium text-center">No recent activity</p>
-          <p className="text-surface-400 text-sm text-center mt-1">Activity records will appear after system starts</p>
+          <p className="text-surface-600 font-medium text-center">{t('dashboard.activity.emptyTitle')}</p>
+          <p className="text-surface-400 text-sm text-center mt-1">{t('dashboard.activity.emptyDescription')}</p>
         </div>
       )}
     </CardContent>
   </Card>
-);
+  );
+};
 
 export default DashboardActivityCard;

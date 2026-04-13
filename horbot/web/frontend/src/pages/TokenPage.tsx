@@ -2,12 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { tokensService } from '../services';
 import { Card, CardHeader, CardContent } from '../components/ui';
 import { Button, IconButton } from '../components/ui/Button';
+import { useI18n } from '../contexts/I18nContext';
 import { formatNumber } from '../utils/format';
 import type { TokenUsageStats } from '../types';
 
 type TimeRange = '7d' | '30d' | 'all';
 
 const TokenPage: React.FC = () => {
+  const { intlLocale, t } = useI18n();
   const [stats, setStats] = useState<TokenUsageStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,12 +33,12 @@ const TokenPage: React.FC = () => {
       const response = await tokensService.getStats(params);
       setStats(response);
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : '获取 Token 统计失败';
+      const errorMessage = err instanceof Error ? err.message : t('tokens.errorLoadFailed');
       setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
-  }, [dateRange]);
+  }, [dateRange, t]);
 
   useEffect(() => {
     fetchStats();
@@ -44,13 +46,13 @@ const TokenPage: React.FC = () => {
 
   const formatChartDate = (dateStr: string): string => {
     const date = new Date(dateStr);
-    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+    return date.toLocaleDateString(intlLocale, { month: 'short', day: 'numeric' });
   };
 
   const timeRangeOptions: { value: TimeRange; label: string }[] = [
-    { value: '7d', label: '近 7 天' },
-    { value: '30d', label: '近 30 天' },
-    { value: 'all', label: '全部' },
+    { value: '7d', label: t('tokens.range7d') },
+    { value: '30d', label: t('tokens.range30d') },
+    { value: 'all', label: t('tokens.rangeAll') },
   ];
   const averageTokensPerRequest = stats && stats.total_requests > 0
     ? Math.round(stats.total_tokens / stats.total_requests)
@@ -69,7 +71,7 @@ const TokenPage: React.FC = () => {
             <div className="w-3 h-3 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
             <div className="w-3 h-3 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
           </div>
-          <span className="text-surface-600 text-sm">加载数据中...</span>
+          <span className="text-surface-600 text-sm">{t('tokens.loading')}</span>
         </div>
       </div>
     );
@@ -80,8 +82,8 @@ const TokenPage: React.FC = () => {
       <div className="flex-shrink-0 p-6 border-b border-surface-200 bg-white">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold text-surface-900">Token 使用统计</h2>
-            <p className="text-sm text-surface-600 mt-1">观察请求量、输入输出规模与近期开销趋势</p>
+            <h2 className="text-2xl font-bold text-surface-900">{t('tokens.title')}</h2>
+            <p className="text-sm text-surface-600 mt-1">{t('tokens.subtitle')}</p>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex bg-surface-100 border border-surface-200 rounded-lg p-1">
@@ -104,8 +106,8 @@ const TokenPage: React.FC = () => {
               disabled={isLoading}
               variant="default"
               size="md"
-              title="刷新数据"
-              aria-label="刷新数据"
+              title={t('tokens.refresh')}
+              aria-label={t('tokens.refresh')}
             >
               <svg className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -131,9 +133,9 @@ const TokenPage: React.FC = () => {
               <Card hover className="group xl:col-span-2">
                 <div className="flex items-start justify-between gap-4 mb-5">
                   <div>
-                    <span className="text-sm text-primary-600 font-medium">总 Token</span>
+                    <span className="text-sm text-primary-600 font-medium">{t('tokens.totalTokens')}</span>
                     <p className="text-4xl font-bold text-surface-900 mt-2">{formatNumber(stats.total_tokens)}</p>
-                    <p className="text-sm text-surface-600 mt-2">当前时间范围内累计的输入与输出总量</p>
+                    <p className="text-sm text-surface-600 mt-2">{t('tokens.totalTokensHint')}</p>
                   </div>
                   <div className="p-3 bg-primary-100 rounded-2xl group-hover:bg-primary-200 transition-colors">
                     <svg className="w-6 h-6 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -143,11 +145,11 @@ const TokenPage: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="rounded-2xl bg-surface-50 border border-surface-200 px-4 py-3">
-                    <div className="text-xs font-medium text-surface-500">输入 Token</div>
+                    <div className="text-xs font-medium text-surface-500">{t('tokens.inputTokens')}</div>
                     <div className="mt-1 text-2xl font-semibold text-surface-900">{formatNumber(stats.total_input_tokens)}</div>
                   </div>
                   <div className="rounded-2xl bg-surface-50 border border-surface-200 px-4 py-3">
-                    <div className="text-xs font-medium text-surface-500">输出 Token</div>
+                    <div className="text-xs font-medium text-surface-500">{t('tokens.outputTokens')}</div>
                     <div className="mt-1 text-2xl font-semibold text-surface-900">{formatNumber(stats.total_output_tokens)}</div>
                   </div>
                 </div>
@@ -155,7 +157,7 @@ const TokenPage: React.FC = () => {
 
               <Card hover className="group">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-primary-600 font-medium">API 请求</span>
+                  <span className="text-sm text-primary-600 font-medium">{t('tokens.apiRequests')}</span>
                   <div className="p-2 bg-primary-100 rounded-lg group-hover:bg-primary-200 transition-colors">
                     <svg className="w-5 h-5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -163,12 +165,12 @@ const TokenPage: React.FC = () => {
                   </div>
                 </div>
                 <p className="text-3xl font-bold text-surface-900 mb-1">{stats.total_requests.toLocaleString()}</p>
-                <p className="text-xs text-surface-600">总调用次数</p>
+                <p className="text-xs text-surface-600">{t('tokens.apiRequestsHint')}</p>
               </Card>
 
               <Card hover className="group">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm text-primary-600 font-medium">平均 Token</span>
+                  <span className="text-sm text-primary-600 font-medium">{t('tokens.averageTokens')}</span>
                   <div className="p-2 bg-primary-100 rounded-lg group-hover:bg-primary-200 transition-colors">
                     <svg className="w-5 h-5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -176,7 +178,7 @@ const TokenPage: React.FC = () => {
                   </div>
                 </div>
                 <p className="text-3xl font-bold text-surface-900 mb-1">{averageTokensPerRequest.toLocaleString()}</p>
-                <p className="text-xs text-surface-600">每次请求平均</p>
+                <p className="text-xs text-surface-600">{t('tokens.averageTokensHint')}</p>
               </Card>
             </div>
 
@@ -184,22 +186,22 @@ const TokenPage: React.FC = () => {
               <Card>
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-sm text-primary-600 font-medium">活跃天数</div>
+                    <div className="text-sm text-primary-600 font-medium">{t('tokens.activeDays')}</div>
                     <div className="mt-1 text-2xl font-semibold text-surface-900">{activeDays}</div>
-                    <div className="mt-1 text-xs text-surface-500">所选范围内至少产生过一次 token 的日期数</div>
+                    <div className="mt-1 text-xs text-surface-500">{t('tokens.activeDaysHint')}</div>
                   </div>
                   <div className="rounded-2xl bg-surface-50 border border-surface-200 px-3 py-2 text-right">
-                    <div className="text-xs text-surface-500">趋势样本</div>
-                    <div className="text-sm font-semibold text-surface-800">{stats.by_day.length} 天</div>
+                    <div className="text-xs text-surface-500">{t('tokens.trendSample')}</div>
+                    <div className="text-sm font-semibold text-surface-800">{t('tokens.trendSampleDays', { count: stats.by_day.length })}</div>
                   </div>
                 </div>
               </Card>
               <Card>
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-sm text-primary-600 font-medium">输出占比</div>
+                    <div className="text-sm text-primary-600 font-medium">{t('tokens.outputShare')}</div>
                     <div className="mt-1 text-2xl font-semibold text-surface-900">{outputShare}%</div>
-                    <div className="mt-1 text-xs text-surface-500">输出 token 在总 token 中的占比</div>
+                    <div className="mt-1 text-xs text-surface-500">{t('tokens.outputShareHint')}</div>
                   </div>
                   <div className="w-24 h-24 rounded-full border-8 border-surface-100 flex items-center justify-center text-sm font-semibold text-primary-700">
                     {outputShare}%
@@ -214,14 +216,14 @@ const TokenPage: React.FC = () => {
                 variant={activeTab === 'overview' ? 'primary' : 'secondary'}
                 size="md"
               >
-                概览
+                {t('tokens.tabOverview')}
               </Button>
               <Button
                 onClick={() => setActiveTab('details')}
                 variant={activeTab === 'details' ? 'primary' : 'secondary'}
                 size="md"
               >
-                详细数据
+                {t('tokens.tabDetails')}
               </Button>
             </div>
 
@@ -230,7 +232,7 @@ const TokenPage: React.FC = () => {
                 {stats.by_day.length > 0 && (
                   <Card className="mb-6">
                     <CardHeader 
-                      title="每日使用趋势"
+                      title={t('tokens.dailyTrend')}
                       action={
                         <svg className="w-5 h-5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -251,9 +253,9 @@ const TokenPage: React.FC = () => {
                                 >
                                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-white border border-surface-200 rounded-lg px-3 py-2 text-xs whitespace-nowrap z-10 shadow-lg">
                                     <div className="font-semibold text-surface-900">{formatChartDate(dayData.date)}</div>
-                                    <div className="text-primary-600 font-medium">{formatNumber(dayData.total)} tokens</div>
-                                    <div className="text-surface-600">{formatNumber(dayData.input)} 输入</div>
-                                    <div className="text-surface-600">{formatNumber(dayData.output)} 输出</div>
+                                    <div className="text-primary-600 font-medium">{t('tokens.tooltipTotalTokens', { count: formatNumber(dayData.total) })}</div>
+                                    <div className="text-surface-600">{t('tokens.tooltipInputTokens', { count: formatNumber(dayData.input) })}</div>
+                                    <div className="text-surface-600">{t('tokens.tooltipOutputTokens', { count: formatNumber(dayData.output) })}</div>
                                   </div>
                                 </div>
                               </div>
@@ -268,14 +270,14 @@ const TokenPage: React.FC = () => {
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <Card>
-                    <CardHeader title="按提供商" />
+                    <CardHeader title={t('tokens.byProvider')} />
                     <CardContent>
                       {Object.keys(stats.by_provider).length === 0 ? (
                         <div className="text-center py-8 text-surface-500">
                           <svg className="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
                           </svg>
-                          暂无数据
+                          {t('tokens.noData')}
                         </div>
                       ) : (
                         <div className="space-y-4">
@@ -297,8 +299,8 @@ const TokenPage: React.FC = () => {
                                     />
                                   </div>
                                   <div className="flex justify-between text-xs text-surface-500 mt-1.5">
-                                    <span>{formatNumber(data.input)} 输入</span>
-                                    <span>{formatNumber(data.output)} 输出</span>
+                                    <span>{t('tokens.inputCount', { count: formatNumber(data.input) })}</span>
+                                    <span>{t('tokens.outputCount', { count: formatNumber(data.output) })}</span>
                                   </div>
                                 </div>
                               );
@@ -309,14 +311,14 @@ const TokenPage: React.FC = () => {
                   </Card>
 
                   <Card>
-                    <CardHeader title="按模型" />
+                    <CardHeader title={t('tokens.byModel')} />
                     <CardContent>
                       {Object.keys(stats.by_model).length === 0 ? (
                         <div className="text-center py-8 text-surface-500">
                           <svg className="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                           </svg>
-                          暂无数据
+                          {t('tokens.noData')}
                         </div>
                       ) : (
                         <div className="space-y-4">
@@ -339,8 +341,8 @@ const TokenPage: React.FC = () => {
                                     />
                                   </div>
                                   <div className="flex justify-between text-xs text-surface-500 mt-1.5">
-                                    <span>{formatNumber(data.input)} 输入</span>
-                                    <span>{formatNumber(data.output)} 输出</span>
+                                    <span>{t('tokens.inputCount', { count: formatNumber(data.input) })}</span>
+                                    <span>{t('tokens.outputCount', { count: formatNumber(data.output) })}</span>
                                   </div>
                                 </div>
                               );
@@ -357,12 +359,12 @@ const TokenPage: React.FC = () => {
                   <table className="w-full">
                     <thead className="bg-surface-100">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-primary-600 uppercase tracking-wider">日期</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-primary-600 uppercase tracking-wider">提供商</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-primary-600 uppercase tracking-wider">模型</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-primary-600 uppercase tracking-wider">输入 Token</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-primary-600 uppercase tracking-wider">输出 Token</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-primary-600 uppercase tracking-wider">总 Token</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-primary-600 uppercase tracking-wider">{t('tokens.tableDate')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-primary-600 uppercase tracking-wider">{t('tokens.tableProvider')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-primary-600 uppercase tracking-wider">{t('tokens.tableModel')}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-primary-600 uppercase tracking-wider">{t('tokens.tableInputTokens')}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-primary-600 uppercase tracking-wider">{t('tokens.tableOutputTokens')}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-primary-600 uppercase tracking-wider">{t('tokens.tableTotalTokens')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-surface-200">
@@ -383,7 +385,7 @@ const TokenPage: React.FC = () => {
                 </div>
                 {stats.by_day.length * Object.keys(stats.by_model).length > 20 && (
                   <div className="px-4 py-3 bg-surface-50 text-center text-sm text-surface-500 border-t border-surface-200">
-                    显示前 20 条记录
+                    {t('tokens.showingFirstRecords', { count: 20 })}
                   </div>
                 )}
               </Card>
@@ -396,8 +398,8 @@ const TokenPage: React.FC = () => {
             <svg className="w-16 h-16 mx-auto mb-4 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            <h3 className="text-lg font-medium text-surface-700 mb-2">暂无使用数据</h3>
-            <p className="text-surface-500">开始使用 AI 对话后，统计数据将显示在这里</p>
+            <h3 className="text-lg font-medium text-surface-700 mb-2">{t('tokens.emptyTitle')}</h3>
+            <p className="text-surface-500">{t('tokens.emptyBody')}</p>
           </div>
         )}
       </div>

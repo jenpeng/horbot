@@ -2,6 +2,8 @@ import React, { useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { X, Search } from 'lucide-react';
 import { navItems } from './NavConfig';
+import { useI18n } from '../../contexts/I18nContext';
+import LanguageSwitcher from './LanguageSwitcher';
 
 interface MobileDrawerProps {
   isOpen: boolean;
@@ -10,6 +12,7 @@ interface MobileDrawerProps {
 
 const MobileDrawer: React.FC<MobileDrawerProps> = React.memo(({ isOpen, onClose }) => {
   const location = useLocation();
+  const { t } = useI18n();
 
   useEffect(() => {
     if (isOpen) {
@@ -55,15 +58,18 @@ const MobileDrawer: React.FC<MobileDrawerProps> = React.memo(({ isOpen, onClose 
               />
               <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-semantic-success rounded-full border-2 border-white" />
             </div>
-            <h2 className="text-lg font-semibold text-surface-900">Horbot</h2>
+            <h2 className="text-lg font-semibold text-surface-900">{t('brand.name')}</h2>
           </div>
-          <button 
-            onClick={onClose}
-            className="w-9 h-9 rounded-xl hover:bg-surface-100 flex items-center justify-center text-surface-500 hover:text-surface-700 transition-colors"
-            aria-label="关闭菜单"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <LanguageSwitcher compact />
+            <button 
+              onClick={onClose}
+              className="w-9 h-9 rounded-xl hover:bg-surface-100 flex items-center justify-center text-surface-500 hover:text-surface-700 transition-colors"
+              aria-label={t('mobile.closeMenu')}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <div className="px-4 py-4">
@@ -71,7 +77,7 @@ const MobileDrawer: React.FC<MobileDrawerProps> = React.memo(({ isOpen, onClose 
             <Search className="w-4 h-4 text-surface-500" />
             <input 
               type="text" 
-              placeholder="搜索..." 
+              placeholder={t('common.searchPlaceholder')}
               className="flex-1 bg-transparent text-sm text-surface-900 placeholder-surface-500 outline-none"
             />
           </div>
@@ -79,7 +85,7 @@ const MobileDrawer: React.FC<MobileDrawerProps> = React.memo(({ isOpen, onClose 
 
         <nav className="flex-1 overflow-y-auto px-3 scrollbar-thin">
           <div className="mb-3 px-3">
-            <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider">导航菜单</p>
+            <p className="text-xs font-semibold text-surface-500 uppercase tracking-wider">{t('mobile.navigation')}</p>
           </div>
           <div className="space-y-1">
             {navItems.map((item) => {
@@ -109,7 +115,7 @@ const MobileDrawer: React.FC<MobileDrawerProps> = React.memo(({ isOpen, onClose 
                   `}>
                     <Icon className="w-5 h-5" />
                   </span>
-                  <span>{item.label}</span>
+                  <span>{t(item.labelKey)}</span>
                   {isActive && (
                     <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-gradient-to-b from-primary-500 to-accent-indigo rounded-r-full" />
                   )}
@@ -126,8 +132,8 @@ const MobileDrawer: React.FC<MobileDrawerProps> = React.memo(({ isOpen, onClose 
               <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-semantic-success rounded-full border-2 border-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-surface-900 truncate">用户</p>
-              <p className="text-xs text-surface-500">免费版</p>
+              <p className="text-sm font-semibold text-surface-900 truncate">{t('common.user')}</p>
+              <p className="text-xs text-surface-500">{t('common.freeTier')}</p>
             </div>
           </div>
         </div>
