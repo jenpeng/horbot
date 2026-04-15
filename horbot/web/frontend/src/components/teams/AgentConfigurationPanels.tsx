@@ -14,8 +14,9 @@ interface AgentConfigurationPanelsProps {
   assetLoading: boolean;
   assetError: string;
   assetSuccess: string;
-  assetSaving: 'soul' | 'user' | null;
+  assetSaving: 'agents' | 'soul' | 'user' | null;
   assetDrafts: {
+    agents: string;
     soul: string;
     user: string;
   };
@@ -28,8 +29,8 @@ interface AgentConfigurationPanelsProps {
   };
   onSaveSummary: () => void;
   onSummaryDraftChange: (key: SummarySectionKey, value: string) => void;
-  onSaveAssetFile: (fileKind: 'soul' | 'user') => void;
-  onAssetDraftChange: (fileKind: 'soul' | 'user', value: string) => void;
+  onSaveAssetFile: (fileKind: 'agents' | 'soul' | 'user') => void;
+  onAssetDraftChange: (fileKind: 'agents' | 'soul' | 'user', value: string) => void;
 }
 
 const AgentConfigurationPanels = ({
@@ -148,7 +149,31 @@ const AgentConfigurationPanels = ({
               ? t('teams.agentConfig.pendingNotice')
               : t('teams.agentConfig.readyNotice')}
           </div>
-          <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="mt-4 grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <div className="rounded-2xl border border-surface-200 bg-surface-50 p-4 transition-shadow" data-focus-anchor="agent-file-agents">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-semibold text-surface-900">AGENTS.md</h4>
+                  <p className="text-xs text-surface-500 break-all">{agentAssets?.files?.agents?.path || t('teams.agentConfig.notLoaded')}</p>
+                </div>
+                <button
+                  onClick={() => onSaveAssetFile('agents')}
+                  data-testid="agent-save-agents"
+                  disabled={assetSaving === 'agents'}
+                  className="px-3 py-2 bg-amber-600 text-white rounded-xl hover:bg-amber-700 disabled:opacity-60 transition-colors"
+                >
+                  {assetSaving === 'agents' ? t('teams.agentConfig.saving') : t('teams.agentConfig.saveAgents')}
+                </button>
+              </div>
+              <textarea
+                data-testid="agent-agents-editor"
+                value={assetDrafts.agents}
+                onChange={(e) => onAssetDraftChange('agents', e.target.value)}
+                className="mt-4 h-72 w-full rounded-xl border border-surface-300 bg-white px-3 py-3 text-sm text-surface-800 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                placeholder={t('teams.agentConfig.agentsPlaceholder')}
+              />
+            </div>
+
             <div className="rounded-2xl border border-surface-200 bg-surface-50 p-4 transition-shadow" data-focus-anchor="agent-file-soul">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -199,8 +224,8 @@ const AgentConfigurationPanels = ({
           </div>
         </div>
       ) : (
-        <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
-          {['SOUL.md', 'USER.md'].map((label) => (
+        <div className="mt-4 grid grid-cols-1 xl:grid-cols-3 gap-4">
+          {['AGENTS.md', 'SOUL.md', 'USER.md'].map((label) => (
             <div key={label} className="rounded-2xl border border-surface-200 bg-surface-50 p-4">
               <div className="animate-pulse">
                 <div className="flex items-center justify-between gap-3">

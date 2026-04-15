@@ -303,6 +303,106 @@ class BoundChannelDispatchTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("<!-- outbound_via: gateway_http -->", memory_text)
             self.assertEqual(len(captured), 1)
 
+    async def test_tool_audit_events_are_persisted_to_execution_history(self):
+        target_file: Path | None = None
+
+        class ToolAuditProvider(LLMProvider):
+            def __init__(self) -> None:
+                super().__init__(api_key="stub", api_base="stub://local")
+
+            async def chat(self, messages, **kwargs):
+                if not any(message.get("role") == "tool" for message in messages):
+                    return LLMResponse(
+                        content="",
+                        tool_calls=[
+                            ToolCallRequest(
+                                id="tool_audit_read_file",
+                                name="read_file",
+                                arguments={"path": str(target_file) if target_file is not None else "notes.txt"},
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    )
+                return LLMResponse(content="读取完成")
+
+            def get_default_model(self) -> str:
+                return "stub-model"
+
+        config = Config()
+        provider = ToolAuditProvider()
+        bus = MessageBus()
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+            os.environ,
+            {HORBOT_ROOT_ENV: str(Path(tmpdir) / ".horbot")},
+            clear=False,
+        ):
+            workspace = Path(tmpdir) / "workspace"
+            workspace.mkdir(parents=True, exist_ok=True)
+            target_file = workspace / "notes.txt"
+            target_file.write_text("hello from tool audit\n", encoding="utf-8")
+            session_manager = SessionManager(workspace=Path(tmpdir) / "sessions")
+            loop = AgentLoop(
+                bus=bus,
+                provider=provider,
+                workspace=workspace,
+                model="stub-model",
+                max_iterations=config.agents.defaults.max_tool_iterations,
+                temperature=config.agents.defaults.temperature,
+                max_tokens=config.agents.defaults.max_tokens,
+                memory_window=config.agents.defaults.memory_window,
+                brave_api_key=config.tools.web.search.api_key,
+                restrict_to_workspace=config.tools.restrict_to_workspace,
+                mcp_servers={},
+                channels_config=config.channels,
+                exec_config=config.tools.exec,
+                session_manager=session_manager,
+                use_hierarchical_context=True,
+                enable_hot_reload=False,
+                agent_id="agent-01",
+                agent_name="Agent 01",
+                team_ids=[],
+            )
+
+            response = await loop.process_message(
+                InboundMessage(
+                    channel="web",
+                    sender_id="tester",
+                    chat_id="dm_agent-01",
+                    content="请读取 notes.txt",
+                ),
+                session_key="web:dm_agent-01",
+            )
+
+            await loop.cleanup()
+
+            self.assertEqual(response.content, "读取完成")
+
+            agent_memory_root = Path(tmpdir) / ".horbot" / "agents" / "agent-01" / "memory"
+            execution_files = sorted(
+                (
+                    path for path in (agent_memory_root / "executions" / "recent").glob("*.json")
+                    if path.name != "README.md"
+                ),
+                key=lambda path: path.stat().st_mtime,
+            )
+            self.assertTrue(execution_files)
+
+            audit_logs = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in execution_files
+                if json.loads(path.read_text(encoding="utf-8")).get("type") == "tool_audit"
+            ]
+            self.assertTrue(audit_logs)
+            audit_log = audit_logs[-1]
+            self.assertEqual(audit_log["tool_name"], "read_file")
+            self.assertEqual(audit_log["audit_event"]["event_type"], "tool_result")
+            self.assertEqual(audit_log["audit_event"]["session_key"], "web:dm_agent-01")
+            self.assertEqual(audit_log["audit_event"]["origin"], "process_message")
+            self.assertEqual(audit_log["audit_event"]["source_channel"], "web")
+            self.assertEqual(audit_log["audit_event"]["source_chat_id"], "dm_agent-01")
+            self.assertFalse(audit_log["guard_blocked"])
+
 
 if __name__ == "__main__":
     unittest.main()

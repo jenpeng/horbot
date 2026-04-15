@@ -36,6 +36,8 @@ interface AgentInfo {
   id: string;
   name: string;
   description?: string;
+  external?: boolean;
+  team_enabled?: boolean;
   profile?: string;
   is_main?: boolean;
   setup_required?: boolean;
@@ -172,6 +174,12 @@ interface HistorySearchMatch {
 }
 
 type RelayGroupState = RelayTimelineStep['state'];
+
+interface ConversationHealth {
+  tone: 'warning' | 'danger';
+  approxTokens: number;
+  turnCount: number;
+}
 
 interface RelayRenderGroupItem {
   type: 'group';
@@ -591,6 +599,26 @@ const buildSearchPreview = (value?: string, maxLength: number = 96): string => {
   }
   return `${normalized.slice(0, Math.max(1, maxLength - 1))}…`;
 };
+
+const estimateConversationTokens = (messages: UIMessage[]): number => {
+  const totalChars = messages.reduce((sum, message) => (
+    sum + cleanHistoryMessageContent(message.content || '').length
+  ), 0);
+  return Math.ceil(totalChars / 4);
+};
+
+const formatApproxTokenCount = (count: number): string => (
+  count >= 1000 ? `${Math.round(count / 1000)}k` : `${count}`
+);
+
+const resolveTurnRequestId = (turn: MessageTurn): string | undefined => (
+  [...turn.assistantMessages].reverse().find((message) => !!message.requestId)?.requestId
+  || turn.userMessage?.requestId
+);
+
+const formatRequestIdBadge = (requestId?: string): string => (
+  requestId ? requestId.slice(0, 8) : ''
+);
 
 const hasLegacyTimeBoundary = (
   currentTurn: MessageTurnAccumulator,
@@ -1086,6 +1114,7 @@ const ChatPage: React.FC = () => {
   const toast = useToast();
   const executionStepFallbackTitle = t('chat.executionStep');
   const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [externalAgents, setExternalAgents] = useState<AgentInfo[]>([]);
   const [teams, setTeams] = useState<TeamInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [historyLoadingConversationId, setHistoryLoadingConversationId] = useState<string | null>(null);
@@ -1097,6 +1126,7 @@ const ChatPage: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [showReconnect, setShowReconnect] = useState(false);
   const [lastFailedRequest, setLastFailedRequest] = useState<RetryRequest | null>(null);
+  const [lastFailedTurnId, setLastFailedTurnId] = useState<string | null>(null);
   const [lastInterruptedRequest, setLastInterruptedRequest] = useState<RetryRequest | null>(null);
   const [lastInterruptedTurnId, setLastInterruptedTurnId] = useState<string | null>(null);
   const [lastInterruptedMessageId, setLastInterruptedMessageId] = useState<string | null>(null);
@@ -1110,6 +1140,11 @@ const ChatPage: React.FC = () => {
   const [historySearchIndex, setHistorySearchIndex] = useState(0);
   const [isHistorySearchOpen, setIsHistorySearchOpen] = useState(false);
   const [isNearBottom, setIsNearBottom] = useState(true);
+
+  const directAgents = useMemo(
+    () => [...agents, ...externalAgents],
+    [agents, externalAgents],
+  );
   
   const currentConversationId = useConversationStore((state: ConversationState) => state.currentConversationId);
   const conversations = useConversationStore((state: ConversationState) => state.conversations);
@@ -1483,7 +1518,7 @@ const ChatPage: React.FC = () => {
         const agentId = msg.metadata?.agent_id;
         let agentName = msg.metadata?.agent_name;
         if (!agentName || agentName === t('chat.assistantFallback')) {
-          const agent = agents.find((a) => a.id === agentId);
+          const agent = directAgents.find((a) => a.id === agentId);
           if (agent) {
             agentName = agent.name;
           }
@@ -1510,7 +1545,7 @@ const ChatPage: React.FC = () => {
           retryable: providerError?.retryable ?? normalizedError.isProviderError,
         };
       })
-  ), [agents, mergeLocalizedExecutionSteps, t]);
+  ), [directAgents, mergeLocalizedExecutionSteps, t]);
 
   const getConversationStreamRegistry = useCallback((conversationId: string) => {
     let registry = liveConversationStreamsRef.current.get(conversationId);
@@ -1671,10 +1706,24 @@ const ChatPage: React.FC = () => {
 
   const refreshAgents = useCallback(async () => {
     try {
-      const response = await fetch('/api/agents');
-      const payload = await response.json();
+      const [agentsResponse, externalAgentsResponse] = await Promise.all([
+        fetch('/api/agents'),
+        fetch('/api/external-agents'),
+      ]);
+      const [payload, externalPayload] = await Promise.all([
+        agentsResponse.json(),
+        externalAgentsResponse.json(),
+      ]);
       if (payload.agents) {
         setAgents(payload.agents);
+      }
+      if (externalPayload.external_agents) {
+        setExternalAgents(
+          externalPayload.external_agents.map((agent: AgentInfo) => ({
+            ...agent,
+            external: true,
+          })),
+        );
       }
     } catch (error) {
       console.error('Failed to refresh agents:', error);
@@ -1690,17 +1739,27 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     const initialize = async () => {
       try {
-        const [agentsResponse, teamsResponse] = await Promise.all([
+        const [agentsResponse, externalAgentsResponse, teamsResponse] = await Promise.all([
           fetch('/api/agents'),
+          fetch('/api/external-agents'),
           fetch('/api/teams'),
         ]);
-        const [agentsData, teamsData] = await Promise.all([
+        const [agentsData, externalAgentsData, teamsData] = await Promise.all([
           agentsResponse.json(),
+          externalAgentsResponse.json(),
           teamsResponse.json(),
         ]);
 
         if (agentsData.agents) {
           setAgents(agentsData.agents);
+        }
+        if (externalAgentsData.external_agents) {
+          setExternalAgents(
+            externalAgentsData.external_agents.map((agent: AgentInfo) => ({
+              ...agent,
+              external: true,
+            })),
+          );
         }
         if (teamsData.teams) {
           setTeams(teamsData.teams);
@@ -1748,7 +1807,7 @@ const ChatPage: React.FC = () => {
   }, [isHistorySearchOpen]);
 
   useEffect(() => {
-    if (agents.length === 0) {
+    if (directAgents.length === 0) {
       return;
     }
 
@@ -1757,7 +1816,7 @@ const ChatPage: React.FC = () => {
     const urlTeamId = params.get('team');
 
     if (!currentConversationId && urlAgentId) {
-      const targetAgent = agents.find((agent) => agent.id === urlAgentId);
+      const targetAgent = directAgents.find((agent) => agent.id === urlAgentId);
       if (targetAgent) {
         setSelectedAgentId(targetAgent.id);
         setSelectedTeamId(null);
@@ -1782,7 +1841,7 @@ const ChatPage: React.FC = () => {
       return;
     }
 
-    const defaultAgent = agents[0];
+    const defaultAgent = directAgents[0];
     if (!defaultAgent) {
       return;
     }
@@ -1790,7 +1849,7 @@ const ChatPage: React.FC = () => {
     const conv = getOrCreateDMConversation(defaultAgent.id, defaultAgent.name);
     setCurrentConversation(conv.id);
     setSelectedAgentId(defaultAgent.id);
-  }, [agents, teams, currentConversationId, getOrCreateDMConversation, getOrCreateTeamConversation, setCurrentConversation]);
+  }, [directAgents, teams, currentConversationId, getOrCreateDMConversation, getOrCreateTeamConversation, setCurrentConversation]);
   
   const loadConversationHistory = useCallback((convId: string) => {
     const existingRequest = historyLoadPromisesRef.current.get(convId);
@@ -1828,6 +1887,47 @@ const ChatPage: React.FC = () => {
     historyLoadPromisesRef.current.set(convId, request);
     return request;
   }, [formatConversationHistoryMessages, setMessages, getMessages, mergeConversationHistory, scrollToBottom]);
+
+  const settleTimedOutRequestFromHistory = useCallback(async (
+    convId: string,
+    requestId: string,
+    streamEntries: StreamMessageEntry[],
+  ): Promise<boolean> => {
+    const maxAttempts = 4;
+    const retryDelayMs = 900;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        const response = await fetch(`/api/conversations/${convId}/messages`);
+        const data = await response.json();
+        const rawMessages: Array<Record<string, unknown>> = Array.isArray(data.messages) ? data.messages : [];
+        const matchedAssistantMessage = rawMessages.find((message: Record<string, unknown>) => (
+          message
+          && typeof message === 'object'
+          && (message as { role?: string }).role === 'assistant'
+          && typeof (message as { metadata?: { request_id?: string } }).metadata?.request_id === 'string'
+          && (message as { metadata?: { request_id?: string } }).metadata?.request_id === requestId
+          && typeof (message as { content?: string }).content === 'string'
+          && cleanHistoryMessageContent((message as { content?: string }).content || '').trim().length > 0
+        ));
+
+        if (matchedAssistantMessage) {
+          reconcileConversationAfterDone(convId, streamEntries);
+          return true;
+        }
+      } catch (historyError) {
+        console.error('Failed to confirm timed-out request from history:', historyError);
+      }
+
+      if (attempt < maxAttempts - 1) {
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, retryDelayMs);
+        });
+      }
+    }
+
+    return false;
+  }, [reconcileConversationAfterDone]);
 
   const clearRelayHistoryRefresh = useCallback((convId: string) => {
     const intervalId = relayHistoryRefreshIntervalsRef.current.get(convId);
@@ -1903,7 +2003,7 @@ const ChatPage: React.FC = () => {
       conversationIdToOpen = conversation.id;
     } else if (normalizedConversationId.startsWith('dm_')) {
       const targetAgentId = normalizedConversationId.slice('dm_'.length);
-      const agent = agents.find((item) => item.id === targetAgentId);
+      const agent = directAgents.find((item) => item.id === targetAgentId);
       if (!agent) {
         return;
       }
@@ -1931,7 +2031,7 @@ const ChatPage: React.FC = () => {
       const sourceConversationName = currentConversation?.name?.trim() || t('chat.currentDirectConversation');
       const destinationConversationName = (
         teams.find((team) => `team_${team.id}` === conversationIdToOpen)?.name
-        || agents.find((agent) => `dm_${agent.id}` === conversationIdToOpen)?.name
+        || directAgents.find((agent) => `dm_${agent.id}` === conversationIdToOpen)?.name
         || conversationIdToOpen
       ).trim();
       showBatonNavigationNotice({
@@ -1944,7 +2044,7 @@ const ChatPage: React.FC = () => {
       });
     }
   }, [
-    agents,
+    directAgents,
     currentConversation,
     ensureRelayHistoryRefresh,
     getOrCreateDMConversation,
@@ -2563,7 +2663,7 @@ const ChatPage: React.FC = () => {
   }, [currentConversation]);
   
   const handleSelectAgent = useCallback((agentId: string) => {
-    const agent = agents.find(a => a.id === agentId);
+    const agent = directAgents.find(a => a.id === agentId);
     if (agent) {
       const conv = getOrCreateDMConversation(agentId, agent.name);
       setCurrentConversation(conv.id);
@@ -2571,7 +2671,7 @@ const ChatPage: React.FC = () => {
       setSelectedAgentId(agentId);
       setSelectedTeamId(null);
     }
-  }, [agents, getOrCreateDMConversation, loadConversationHistory, setCurrentConversation]);
+  }, [directAgents, getOrCreateDMConversation, loadConversationHistory, setCurrentConversation]);
   
   const handleSelectTeam = useCallback((teamId: string) => {
     const team = teams.find(t => t.id === teamId);
@@ -2610,6 +2710,10 @@ const ChatPage: React.FC = () => {
       mentionedAgents,
       files: normalizedFiles,
     };
+    let requestHadFailure = false;
+    const markRequestFailed = () => {
+      requestHadFailure = true;
+    };
     
     const userMessage: UIMessage = {
       id: generateId(),
@@ -2624,6 +2728,7 @@ const ChatPage: React.FC = () => {
     setStreamState('connecting');
     setShowReconnect(false);
     setLastFailedRequest(null);
+    setLastFailedTurnId(null);
     setLastInterruptedRequest(null);
     setLastInterruptedTurnId(null);
     setLastInterruptedMessageId(null);
@@ -2669,11 +2774,12 @@ const ChatPage: React.FC = () => {
           teamId: currentConversation.type === ConversationType.TEAM ? currentConversation.targetId : undefined,
           groupChat: currentConversation.type === ConversationType.TEAM,
           mentionedAgents,
-          timeout: 120000,
+          timeout: 240000,
           connectTimeout: 15000,
           onStateChange: (state) => {
             setStreamState(state);
             if (state === 'timeout' || state === 'error') {
+              markRequestFailed();
               setShowReconnect(true);
             }
           },
@@ -3056,7 +3162,9 @@ const ChatPage: React.FC = () => {
               });
               removeTypingAgent(currentConversation.id, agentId || agentMsg.agentId);
               if (isProviderError) {
+                markRequestFailed();
                 setLastFailedRequest(retryRequest);
+                setLastFailedTurnId(userMessage.id);
                 setShowReconnect(true);
               }
             }
@@ -3065,6 +3173,11 @@ const ChatPage: React.FC = () => {
           else if (eventType === 'done') {
             setIsLoading(false);
             setStreamState(null);
+            if (!requestHadFailure) {
+              setShowReconnect(false);
+              setLastFailedRequest(null);
+              setLastFailedTurnId(null);
+            }
             reconcileConversationAfterDone(
               currentConversation.id,
               Array.from(agentMessages.values()),
@@ -3094,6 +3207,7 @@ const ChatPage: React.FC = () => {
                 role: 'assistant',
                 content: errorContent,
                 turnId,
+                requestId: requestRef.id || undefined,
                 agentId: resolvedAgentId,
                 agentName: undefined,
                 isStreaming: false,
@@ -3123,6 +3237,7 @@ const ChatPage: React.FC = () => {
                 isStreaming: false,
                 isThinking: false,
                 statusMessage: undefined,
+                requestId: requestRef.id || undefined,
                 executionSteps: agentMsg.executionSteps,
                 isError: true,
                 errorKind: errorKind,
@@ -3135,7 +3250,9 @@ const ChatPage: React.FC = () => {
               });
             }
             removeTypingAgent(currentConversation.id, resolvedAgentId);
+            markRequestFailed();
             setLastFailedRequest(retryRequest);
+            setLastFailedTurnId(userMessage.id);
             setShowReconnect(true);
           }
           // 用户手动停止或服务端终止
@@ -3190,6 +3307,19 @@ const ChatPage: React.FC = () => {
             removeTypingAgent(currentConversation.id, agentMsg.agentId);
           });
         } else {
+          if (error instanceof ChatStreamError && error.code === 'timeout' && requestRef.id) {
+            const settledFromHistory = await settleTimedOutRequestFromHistory(
+              currentConversation.id,
+              requestRef.id,
+              Array.from(agentMessages.values()),
+            );
+            if (settledFromHistory) {
+              setShowReconnect(false);
+              setLastFailedRequest(null);
+              setLastFailedTurnId(null);
+              return;
+            }
+          }
           console.error('Chat error:', error);
           const failure = resolveStreamFailureMessage(t, error);
           if (agentMessages.size === 0) {
@@ -3198,6 +3328,7 @@ const ChatPage: React.FC = () => {
               role: 'assistant',
               content: failure.content,
               timestamp: new Date().toISOString(),
+              requestId: requestRef.id || undefined,
               isStreaming: false,
               isThinking: false,
               isError: true,
@@ -3223,6 +3354,7 @@ const ChatPage: React.FC = () => {
               isStreaming: false,
               isThinking: false,
               statusMessage: undefined,
+              requestId: requestRef.id || undefined,
               executionSteps: agentMsg.executionSteps,
               isError: true,
               errorKind: failure.errorKind,
@@ -3235,7 +3367,9 @@ const ChatPage: React.FC = () => {
             });
             removeTypingAgent(currentConversation.id, agentMsg.agentId);
           });
+          markRequestFailed();
           setLastFailedRequest(retryRequest);
+          setLastFailedTurnId(userMessage.id);
           setShowReconnect(true);
         }
       } finally {
@@ -3267,13 +3401,13 @@ const ChatPage: React.FC = () => {
         activeStreamPromiseRef.current = null;
       }
       const currentDmAgent = currentConversation.type === ConversationType.DM
-        ? agents.find((agent) => agent.id === currentConversation.agentIds?.[0])
+        ? directAgents.find((agent) => agent.id === currentConversation.agentIds?.[0])
         : undefined;
       if (currentConversation.type === ConversationType.DM && currentDmAgent && (currentDmAgent.setup_required || currentDmAgent.bootstrap_setup_pending)) {
         void refreshAgents();
       }
     }
-  }, [currentConversation, agents, addMessage, updateMessage, addTypingAgent, removeTypingAgent, isOnline, requestStopGeneration, waitForActiveStreamToSettle, toast, showInterruptNotice, refreshAgents, openDispatchedWebConversation, reconcileConversationAfterDone, t]);
+  }, [currentConversation, directAgents, addMessage, updateMessage, addTypingAgent, removeTypingAgent, isOnline, requestStopGeneration, waitForActiveStreamToSettle, toast, showInterruptNotice, refreshAgents, openDispatchedWebConversation, reconcileConversationAfterDone, t]);
 
   const handleRetryLastRequest = useCallback(async () => {
     if (!currentConversation || !lastFailedRequest || isLoading) return;
@@ -3293,12 +3427,19 @@ const ChatPage: React.FC = () => {
     await handleSendMessage(lastInterruptedRequest.content, lastInterruptedRequest.mentionedAgents, lastInterruptedRequest.files);
   }, [currentConversation, lastInterruptedRequest, isLoading, dismissInterruptNotice, handleSendMessage]);
   
-  const getAgentName = (agentId?: string) => {
+  const getAgentName = useCallback((agentId?: string) => {
     if (!agentId) return undefined;
-    return agents.find(a => a.id === agentId)?.name;
-  };
+    return directAgents.find(a => a.id === agentId)?.name;
+  }, [directAgents]);
 
   const messageTurns = useMemo(() => buildMessageTurns(messages), [messages]);
+  const lastFailedTurnRequestId = useMemo(() => {
+    if (!lastFailedTurnId) {
+      return undefined;
+    }
+    const failedTurn = messageTurns.find((turn) => turn.userMessage?.id === lastFailedTurnId);
+    return failedTurn ? resolveTurnRequestId(failedTurn) : undefined;
+  }, [lastFailedTurnId, messageTurns]);
   const historySearchMatches = useMemo<HistorySearchMatch[]>(() => {
     const query = normalizeSearchText(historySearchQuery);
     if (!query) {
@@ -3642,11 +3783,11 @@ const ChatPage: React.FC = () => {
 
   const currentDirectAgent = useMemo(() => {
     if (currentConversation?.type !== ConversationType.DM) {
-      return selectedAgentId ? agents.find((agent) => agent.id === selectedAgentId) : undefined;
+      return selectedAgentId ? directAgents.find((agent) => agent.id === selectedAgentId) : undefined;
     }
     const conversationAgentId = currentConversation.agentIds?.[0];
-    return agents.find((agent) => agent.id === conversationAgentId) || (selectedAgentId ? agents.find((agent) => agent.id === selectedAgentId) : undefined);
-  }, [agents, currentConversation, selectedAgentId]);
+    return directAgents.find((agent) => agent.id === conversationAgentId) || (selectedAgentId ? directAgents.find((agent) => agent.id === selectedAgentId) : undefined);
+  }, [directAgents, currentConversation, selectedAgentId]);
 
   const currentTeamMembers = useMemo(() => {
     if (currentConversation?.type !== ConversationType.TEAM) {
@@ -3655,8 +3796,16 @@ const ChatPage: React.FC = () => {
 
     const liveTeam = teams.find((team) => team.id === currentConversation.targetId);
     const memberIds = liveTeam?.members || currentConversation.agentIds || [];
-    return agents.filter((agent) => memberIds.includes(agent.id));
-  }, [agents, currentConversation, teams]);
+    return directAgents.filter((agent) => memberIds.includes(agent.id));
+  }, [currentConversation, directAgents, teams]);
+
+  const currentTeamMentionableAgents = useMemo(() => {
+    if (currentConversation?.type !== ConversationType.TEAM) {
+      return [];
+    }
+
+    return currentTeamMembers;
+  }, [currentConversation?.type, currentTeamMembers]);
 
   const currentDirectAgentProfilePreset = useMemo(
     () => getAgentProfilePreset(t, currentDirectAgent?.profile),
@@ -3731,6 +3880,28 @@ const ChatPage: React.FC = () => {
     : currentDirectAgentProfilePreset
       ? t('chat.currentConversationSummaryDirectProfile', { label: currentDirectAgentProfilePreset.label })
       : t('chat.currentConversationSummaryDirect');
+  const currentConversationHealth = useMemo<ConversationHealth | null>(() => {
+    const turnCount = messageTurns.length;
+    const approxTokens = estimateConversationTokens(messages);
+
+    if (approxTokens >= 16000 || turnCount >= 24) {
+      return {
+        tone: 'danger',
+        approxTokens,
+        turnCount,
+      };
+    }
+
+    if (approxTokens >= 10000 || turnCount >= 16) {
+      return {
+        tone: 'warning',
+        approxTokens,
+        turnCount,
+      };
+    }
+
+    return null;
+  }, [messageTurns.length, messages]);
 
   const handleHistorySearchMove = useCallback((direction: 'prev' | 'next') => {
     if (historySearchMatches.length === 0) {
@@ -3817,10 +3988,15 @@ const ChatPage: React.FC = () => {
       return {
         tone: 'warning',
         message: t('chat.sessionRetryLastMessage'),
+        detailLabel: lastFailedTurnRequestId ? t('chat.requestIdLabel') : undefined,
+        detailValue: lastFailedTurnRequestId,
         actionLabel: t('chat.retryLastMessage'),
         onAction: handleRetryLastRequest,
         dismissible: true,
-        onDismiss: () => setShowReconnect(false),
+        onDismiss: () => {
+          setShowReconnect(false);
+          setLastFailedTurnId(null);
+        },
       };
     }
 
@@ -3933,6 +4109,7 @@ const ChatPage: React.FC = () => {
     showReconnect,
     canRetryCurrentConversation,
     handleRetryLastRequest,
+    lastFailedTurnRequestId,
     interruptNotice,
     canResumeInterruptedRequest,
     lastInterruptedRequest,
@@ -3960,7 +4137,7 @@ const ChatPage: React.FC = () => {
           <div className="mb-4">
             <h3 className="px-2 py-1 text-xs font-medium text-slate-500 uppercase tracking-wider">{t('chat.directSection')}</h3>
             <div className="space-y-1 mt-1">
-              {agents.map((agent) => {
+              {directAgents.map((agent) => {
                 const isSelected = selectedAgentId === agent.id;
                 return (
                   <button
@@ -3976,7 +4153,14 @@ const ChatPage: React.FC = () => {
                       {agent.name.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{agent.name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium truncate">{agent.name}</p>
+                        {agent.external && (
+                          <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
+                            {t('chat.externalBadge')}
+                          </span>
+                        )}
+                      </div>
                       {agent.description && (
                         <p className="text-xs text-slate-500 truncate">{agent.description}</p>
                       )}
@@ -4043,6 +4227,8 @@ const ChatPage: React.FC = () => {
                     <p className="text-xs text-slate-500">
                       {currentConversation.type === ConversationType.TEAM
                         ? t('chat.teamHeaderDescription', { count: currentTeamMembers.length })
+                        : currentDirectAgent?.external
+                          ? t('chat.externalHeaderDescription')
                         : currentDirectAgentProfilePreset
                           ? `${currentDirectAgentProfilePreset.label} · ${currentDirectAgentProfilePreset.summary}`
                           : t('chat.directHeaderDescription')}
@@ -4051,6 +4237,11 @@ const ChatPage: React.FC = () => {
                       {currentConversation.type !== ConversationType.TEAM && currentDirectAgentProfilePreset && (
                         <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${currentDirectAgentProfilePreset.accent}`}>
                           {t('chat.profileBadge')} · {currentDirectAgentProfilePreset.label}
+                        </span>
+                      )}
+                      {currentConversation.type !== ConversationType.TEAM && currentDirectAgent?.external && (
+                        <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+                          {t('chat.externalBadge')}
                         </span>
                       )}
                       {currentConversation.type !== ConversationType.TEAM && currentDirectAgentPermissionPreset && (
@@ -4408,6 +4599,37 @@ const ChatPage: React.FC = () => {
                         {t('chat.teamRelayHint')}
                       </p>
                     )}
+                    {currentConversationHealth && (
+                      <div
+                        data-testid="chat-conversation-health"
+                        className={`mt-3 rounded-2xl border px-3 py-2 ${
+                          currentConversationHealth.tone === 'danger'
+                            ? 'border-amber-300 bg-amber-50/90'
+                            : 'border-sky-200 bg-sky-50/90'
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            currentConversationHealth.tone === 'danger'
+                              ? 'bg-amber-100 text-amber-900'
+                              : 'bg-sky-100 text-sky-800'
+                          }`}>
+                            {currentConversationHealth.tone === 'danger'
+                              ? t('chat.contextHealthBadgeDanger')
+                              : t('chat.contextHealthBadgeWarning')}
+                          </span>
+                          <span className="text-xs text-slate-700">
+                            {t('chat.contextHealthStats', {
+                              tokens: formatApproxTokenCount(currentConversationHealth.approxTokens),
+                              turns: currentConversationHealth.turnCount,
+                            })}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-xs text-slate-600">
+                          {t('chat.contextHealthHint')}
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {messageTurns.map((turn, idx) => {
@@ -4492,6 +4714,15 @@ const ChatPage: React.FC = () => {
                       ? relayTimelineSteps.find((step) => step.groupIndex === highlightedGroupIndex)
                       : null;
 
+                    const turnRetryPending = Boolean(
+                      showReconnect
+                      && canRetryCurrentConversation
+                      && lastFailedTurnId
+                      && turn.userMessage?.id === lastFailedTurnId,
+                    );
+                    const turnRequestId = resolveTurnRequestId(turn);
+                    const turnRequestBadge = formatRequestIdBadge(turnRequestId);
+
                     return (
                       <section
                         key={`${turn.id}-${idx}`}
@@ -4499,8 +4730,10 @@ const ChatPage: React.FC = () => {
                         data-turn-id={turn.id}
                         data-expanded={isExpanded ? 'true' : 'false'}
                         className={`rounded-[22px] border px-3 py-2.5 shadow-sm ${
-                          turn.hasError
-                            ? 'border-red-200 bg-red-50/60'
+                          turnRetryPending
+                            ? 'border-amber-200 bg-amber-50/60'
+                            : turn.hasError
+                              ? 'border-red-200 bg-red-50/60'
                             : 'border-slate-200 bg-white'
                         }`}
                       >
@@ -4515,8 +4748,24 @@ const ChatPage: React.FC = () => {
                               </span>
                             )}
                             {turn.hasError && (
-                              <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">
-                                {t('chat.turnHasFailure')}
+                              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                                turnRetryPending
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-red-100 text-red-700'
+                              }`}>
+                                {turnRetryPending ? t('chat.turnRetryPending') : t('chat.turnHasFailure')}
+                              </span>
+                            )}
+                            {turn.hasError && turnRequestId && turnRequestBadge && (
+                              <span
+                                title={turnRequestId}
+                                className={`inline-flex items-center rounded-full border px-2 py-1 font-mono text-[11px] font-medium ${
+                                  turnRetryPending
+                                    ? 'border-amber-200 bg-white text-amber-800'
+                                    : 'border-red-200 bg-white text-red-700'
+                                }`}
+                              >
+                                {t('chat.requestIdBadge', { id: turnRequestBadge })}
                               </span>
                             )}
                             {isInterruptedTurn && (
@@ -4594,9 +4843,9 @@ const ChatPage: React.FC = () => {
                                     ? 'border-sky-200 bg-sky-50/90'
                                     : waitingRelayStep
                                       ? 'border-amber-200 bg-amber-50/90'
-                                      : relayTimelineFailedCount > 0
-                                        ? 'border-red-200 bg-red-50/90'
-                                        : 'border-emerald-200 bg-emerald-50/90'
+                                        : relayTimelineFailedCount > 0
+                                          ? (turnRetryPending ? 'border-amber-200 bg-amber-50/90' : 'border-red-200 bg-red-50/90')
+                                          : 'border-emerald-200 bg-emerald-50/90'
                                 }`}>
                                   <div className="flex flex-wrap items-center gap-2 text-xs">
                                     <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-slate-700 shadow-sm">
@@ -4608,7 +4857,7 @@ const ChatPage: React.FC = () => {
                                         : waitingRelayStep
                                           ? 'bg-amber-100 text-amber-700'
                                           : relayTimelineFailedCount > 0
-                                            ? 'bg-red-100 text-red-700'
+                                            ? (turnRetryPending ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-700')
                                             : 'bg-emerald-100 text-emerald-700'
                                     }`}>
                                       {activeRelayStep
@@ -4616,7 +4865,7 @@ const ChatPage: React.FC = () => {
                                         : waitingRelayStep
                                           ? t('chat.statusWaiting')
                                           : relayTimelineFailedCount > 0
-                                            ? t('chat.timelineHasFailure')
+                                            ? (turnRetryPending ? t('chat.timelineRetryPending') : t('chat.timelineHasFailure'))
                                             : t('chat.statusDone')}
                                     </span>
                                     <span className="inline-flex items-center rounded-full bg-white/80 px-2.5 py-1 font-medium text-slate-600">
@@ -4950,6 +5199,7 @@ const ChatPage: React.FC = () => {
                                       isUser={false}
                                       formatTime={formatTime}
                                       onRetryMessage={(message) => handleRetryMessage(message as UIMessage)}
+                                      showRetryPending={turnRetryPending}
                                     >
                                       <MessageExecutionCard
                                         steps={groupExecutionSteps}
@@ -4967,9 +5217,9 @@ const ChatPage: React.FC = () => {
                     );
                   })}
                   
-                  <TypingIndicator
+                    <TypingIndicator
                     agentNames={typingAgents
-                      .map((id: string) => agents.find(a => a.id === id)?.name)
+                      .map((id: string) => directAgents.find(a => a.id === id)?.name)
                       .filter(Boolean) as string[]
                     }
                   />
@@ -4994,7 +5244,7 @@ const ChatPage: React.FC = () => {
               <MessageInput
                 conversationType={currentConversation.type}
                 conversationName={currentConversation.name}
-                agents={currentConversation.type === ConversationType.TEAM ? currentTeamMembers : agents}
+                agents={currentConversation.type === ConversationType.TEAM ? currentTeamMentionableAgents : directAgents}
                 onSend={handleSendMessage}
                 disabled={!isOnline}
                 isLoading={isLoading}

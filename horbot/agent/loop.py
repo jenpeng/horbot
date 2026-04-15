@@ -47,6 +47,13 @@ if TYPE_CHECKING:
 
 
 class AgentLoop:
+    WEB_INTERACTIVE_COMPACT_MAX_TOKENS = 30000
+    MAX_AUTO_CONTINUE_ROUNDS = 2
+    AUTO_CONTINUE_PROMPT = (
+        "请从上一条 assistant 回复中断的位置继续输出，不要重复已经给出的内容。"
+        "如果上一条回复其实已经完整结束，只回复 __COMPLETE__。"
+    )
+
     """
     The agent loop is the core processing engine.
 
@@ -287,6 +294,7 @@ class AgentLoop:
         self._checkpoint_manager = CheckpointManager(workspace=self.workspace)
         self._state_manager = StateManager(workspace=self.workspace)
         self._audit_logger = AuditLogger(workspace=self.workspace)
+        self.tools.set_audit_event_callback(self._persist_tool_audit_event)
         
         self._task_analyzer = TaskAnalyzer(
             complexity_threshold=0.35,
@@ -834,6 +842,60 @@ class AgentLoop:
             metadata["source_chat_kind"] = "external"
         return metadata
 
+    def _tool_audit_context(
+        self,
+        session_key: str | None,
+        *,
+        origin: str,
+        channel: str | None = None,
+        chat_id: str | None = None,
+    ) -> dict[str, Any]:
+        context = {
+            "session_key": session_key,
+            "origin": origin,
+            "agent_id": self._agent_id,
+            "agent_name": self._agent_name,
+            "team_ids": list(self._team_ids),
+            "workspace": str(self.workspace),
+        }
+        if channel:
+            context["source_channel"] = channel
+        if chat_id:
+            context["source_chat_id"] = chat_id
+        if session_key:
+            context.update(self._build_execution_source_metadata(session_key))
+        return context
+
+    def _persist_tool_audit_event(self, event: dict[str, Any]) -> None:
+        session_key = str(event.get("session_key") or "system:tool_audit")
+        execution_log = {
+            "type": "tool_audit",
+            "task": f"tool:{event.get('tool_name', 'unknown')}",
+            "result": event.get("result") or event.get("error"),
+            "tool_name": event.get("tool_name"),
+            "tools_used": [event.get("tool_name")] if event.get("tool_name") else [],
+            "timestamp": event.get("timestamp") or datetime.now().isoformat(),
+            "message_count": 1,
+            "audit_event": event,
+            "guard_blocked": bool(event.get("guard_blocked")),
+            "guard_reasons": list(event.get("guard_reasons") or []),
+            "permission_level": event.get("permission_level"),
+            "duration_ms": event.get("duration_ms"),
+            "error": event.get("error"),
+            "agent_id": self._agent_id,
+            "agent_name": self._agent_name,
+            "team_ids": list(self._team_ids),
+        }
+        try:
+            memory = self._memory_store()
+            memory.add_execution_memory(
+                execution_log,
+                session_key,
+                index_as_memory=False,
+            )
+        except Exception as exc:
+            logger.debug("Failed to persist tool audit event: {}", exc)
+
     def _build_execution_outbound_metadata(self) -> dict[str, Any]:
         message_tool = self.tools.get("message")
         if not isinstance(message_tool, MessageTool):
@@ -962,6 +1024,73 @@ class AgentLoop:
         use_legacy_mode = should_run_planning and analysis.plan_type == "informational"
         return should_run_planning, use_legacy_mode
 
+    async def _apply_context_compaction(
+        self,
+        messages: list[dict],
+        *,
+        iteration: int,
+        session_key: str | None = None,
+        on_step_start: Callable[..., Awaitable[None]] | None = None,
+        on_step_complete: Callable[..., Awaitable[None]] | None = None,
+    ) -> tuple[list[dict], int]:
+        """Compact oversized conversation context before provider calls."""
+        config = self._get_config()
+        compact_config = getattr(getattr(config, "agents", None), "defaults", None)
+        compact_config = getattr(compact_config, "context_compact", None)
+        if not compact_config or not compact_config.enabled:
+            return messages, 0
+
+        compact_max_tokens = compact_config.max_tokens
+        is_web_interactive_session = bool(session_key and session_key.startswith("web:"))
+        if is_web_interactive_session:
+            compact_max_tokens = min(
+                compact_max_tokens,
+                self.WEB_INTERACTIVE_COMPACT_MAX_TOKENS,
+            )
+
+        estimated_tokens_before_compact = estimate_tokens(messages)
+        if estimated_tokens_before_compact <= compact_max_tokens:
+            return messages, compact_max_tokens
+
+        if is_web_interactive_session:
+            logger.info(
+                "Web interactive context compaction triggered early: estimated_tokens={} threshold={}",
+                estimated_tokens_before_compact,
+                compact_max_tokens,
+            )
+
+        compression_result = compact_context(
+            messages=messages,
+            max_tokens=compact_max_tokens,
+            preserve_recent=compact_config.preserve_recent,
+            compress_tool_results_flag=compact_config.compress_tool_results,
+            return_details=True,
+        )
+        if isinstance(compression_result, CompressionResult):
+            messages = compression_result.messages
+            if compression_result.was_compressed and on_step_start and on_step_complete:
+                compression_step_id = f"compression_{iteration}"
+                await on_step_start(compression_step_id, "compression", "上下文压缩中...")
+                await on_step_complete(compression_step_id, "completed", {
+                    "original_tokens": compression_result.original_tokens,
+                    "compressed_tokens": compression_result.compressed_tokens,
+                    "reduction_percent": compression_result.reduction_percent,
+                })
+        else:
+            messages = compression_result
+
+        return messages, compact_max_tokens
+
+    @staticmethod
+    def _strip_ephemeral_messages(messages: list[dict]) -> list[dict]:
+        """Drop internal continuation messages before persisting conversation history."""
+        cleaned: list[dict] = []
+        for message in messages:
+            if message.get("_ephemeral"):
+                continue
+            cleaned.append({k: v for k, v in message.items() if k != "_ephemeral"})
+        return cleaned
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -1000,6 +1129,8 @@ class AgentLoop:
         confirmations = pending_confirmations or {}
         reset_count = 0
         max_resets = 3
+        auto_continue_round = 0
+        continued_prefix = ""
         
         self.tools.set_web_search_enabled(web_search)
         
@@ -1064,29 +1195,13 @@ class AgentLoop:
             if on_status:
                 await on_status("正在思考...")
 
-            # Apply context compression if enabled
-            config = self._get_config()
-            compact_config = getattr(config.agents.defaults, 'context_compact', None)
-            if compact_config and compact_config.enabled:
-                compression_result = compact_context(
-                    messages=messages,
-                    max_tokens=compact_config.max_tokens,
-                    preserve_recent=compact_config.preserve_recent,
-                    compress_tool_results_flag=compact_config.compress_tool_results,
-                    return_details=True,
-                )
-                if isinstance(compression_result, CompressionResult):
-                    messages = compression_result.messages
-                    if compression_result.was_compressed and on_step_start and on_step_complete:
-                        compression_step_id = f"compression_{iteration}"
-                        await on_step_start(compression_step_id, "compression", "上下文压缩中...")
-                        await on_step_complete(compression_step_id, "completed", {
-                            "original_tokens": compression_result.original_tokens,
-                            "compressed_tokens": compression_result.compressed_tokens,
-                            "reduction_percent": compression_result.reduction_percent,
-                        })
-                else:
-                    messages = compression_result
+            messages, _ = await self._apply_context_compaction(
+                messages,
+                iteration=iteration,
+                session_key=session_key,
+                on_step_start=on_step_start,
+                on_step_complete=on_step_complete,
+            )
 
             import time
             llm_start = time.time()
@@ -1096,6 +1211,12 @@ class AgentLoop:
                     user_message,
                     include_web_search=web_search,
                 )
+            progress_prefix = continued_prefix
+
+            async def _progress_with_prefix(content: str) -> None:
+                if on_progress:
+                    await on_progress(f"{progress_prefix}{content}")
+
             response = await self.provider.chat(
                 messages=messages,
                 tools=tools,
@@ -1104,7 +1225,7 @@ class AgentLoop:
                 max_tokens=selected_max_tokens,
                 file_ids=file_ids,
                 files=files,
-                on_content_delta=on_progress,
+                on_content_delta=_progress_with_prefix if on_progress else None,
             )
             llm_elapsed = time.time() - llm_start
             logger.info("LLM call took {:.2f}s (iteration {})", llm_elapsed, iteration)
@@ -1205,22 +1326,55 @@ class AgentLoop:
                 clean = self._strip_think(response.content) or ""
                 if not clean:
                     clean = self._fallback_from_recent_tool_result(messages)
-                messages = self.context.add_assistant_message(
-                    messages, clean, reasoning_content=response.reasoning_content,
-                )
-                final_content = clean
-                error_info = response.error_info
-                
-                # Send progress update for the final response
-                if on_progress and clean:
-                    await on_progress(clean)
-                
+
                 # Complete response step
                 if on_step_complete:
                     await on_step_complete(response_step_id, "success", {
                         "content": clean[:200] + "..." if len(clean) > 200 else clean
                     })
-                
+
+                if (
+                    response.finish_reason == "length"
+                    and clean
+                    and auto_continue_round < self.MAX_AUTO_CONTINUE_ROUNDS
+                ):
+                    auto_continue_round += 1
+                    continued_prefix = f"{continued_prefix}{clean}"
+                    logger.info(
+                        "Assistant response truncated by length; auto-continuing round {}/{}",
+                        auto_continue_round,
+                        self.MAX_AUTO_CONTINUE_ROUNDS,
+                    )
+                    if on_progress:
+                        await on_progress(continued_prefix)
+                    if on_status:
+                        await on_status("回复较长，正在自动压缩上下文并继续输出...")
+                    messages.append({
+                        "role": "assistant",
+                        "content": clean,
+                        "_ephemeral": True,
+                    })
+                    messages.append({
+                        "role": "user",
+                        "content": self.AUTO_CONTINUE_PROMPT,
+                        "_ephemeral": True,
+                    })
+                    continue
+
+                if continued_prefix and clean.strip() == "__COMPLETE__":
+                    clean = continued_prefix
+                else:
+                    clean = f"{continued_prefix}{clean}" if continued_prefix else clean
+                messages = self._strip_ephemeral_messages(messages)
+                messages = self.context.add_assistant_message(
+                    messages, clean, reasoning_content=response.reasoning_content,
+                )
+                final_content = clean
+                error_info = response.error_info
+
+                if on_progress and clean:
+                    await on_progress(clean)
+
                 break
 
         if final_content is None:
@@ -1300,23 +1454,31 @@ class AgentLoop:
         lock = self._get_message_lock(resolved_session_key)
         async with lock:
             try:
-                return await self._message_processor.process_message(
-                    msg,
-                    session_key=resolved_session_key,
-                    on_progress=on_progress,
-                    on_tool_start=on_tool_start,
-                    on_tool_result=on_tool_result,
-                    on_status=on_status,
-                    on_thinking=on_thinking,
-                    on_step_start=on_step_start,
-                    on_step_complete=on_step_complete,
-                    on_plan_created=on_plan_created,
-                    on_plan_generating=on_plan_generating,
-                    on_plan_skipped=on_plan_skipped,
-                    on_plan_progress=on_plan_progress,
-                    speaking_to=speaking_to,
-                    conversation_type=conversation_type,
-                )
+                with self.tools.audit_context(
+                    **self._tool_audit_context(
+                        resolved_session_key,
+                        origin="process_message",
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                    )
+                ):
+                    return await self._message_processor.process_message(
+                        msg,
+                        session_key=resolved_session_key,
+                        on_progress=on_progress,
+                        on_tool_start=on_tool_start,
+                        on_tool_result=on_tool_result,
+                        on_status=on_status,
+                        on_thinking=on_thinking,
+                        on_step_start=on_step_start,
+                        on_step_complete=on_step_complete,
+                        on_plan_created=on_plan_created,
+                        on_plan_generating=on_plan_generating,
+                        on_plan_skipped=on_plan_skipped,
+                        on_plan_progress=on_plan_progress,
+                        speaking_to=speaking_to,
+                        conversation_type=conversation_type,
+                    )
             finally:
                 self._prune_message_lock(resolved_session_key, lock)
 
@@ -2432,146 +2594,140 @@ class AgentLoop:
         
         logger.info("📋 规划所需 Skills: {}", list(all_required_skills) if all_required_skills else "无")
         logger.info("📋 规划所需 MCP 工具: {}", list(all_required_mcp_tools) if all_required_mcp_tools else "无")
+        with self.tools.audit_context(**self._tool_audit_context(session_key, origin="plan_execution")):
+            plan_context = self._build_plan_context(
+                execution_plan,
+                required_skills=list(all_required_skills),
+                required_mcp_tools=list(all_required_mcp_tools),
+            )
+            
+            total_steps = len(plan.steps)
+            completed_steps = 0
+            failed_steps = 0
+            total_input_tokens = 0
+            total_output_tokens = 0
+            
+            execution_steps_for_message: list[dict] = []
+            
+            logger.info("🚀 开始执行 {} 个步骤", total_steps)
+            
+            # Use PlanExecutor for parallel execution
+            from horbot.agent.plan_executor import PlanExecutor
+            
+            executor = PlanExecutor(
+                provider=self.provider,
+                tools=self.tools,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                max_iterations=self.max_iterations,
+                session_key=session_key,
+            )
         
-        plan_context = self._build_plan_context(
-            execution_plan,
-            required_skills=list(all_required_skills),
-            required_mcp_tools=list(all_required_mcp_tools),
-        )
-        
-        total_steps = len(plan.steps)
-        completed_steps = 0
-        failed_steps = 0
-        total_input_tokens = 0
-        total_output_tokens = 0
-        
-        execution_steps_for_message: list[dict] = []
-        
-        logger.info("🚀 开始执行 {} 个步骤", total_steps)
-        
-        # Use PlanExecutor for parallel execution
-        from horbot.agent.plan_executor import PlanExecutor
-        
-        executor = PlanExecutor(
-            provider=self.provider,
-            tools=self.tools,
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            max_iterations=self.max_iterations,
-            session_key=session_key,
-        )
-        
-        # Save executor to active plans for stop functionality
-        self._active_plans[session_key] = {
-            "plan_id": plan_id,
-            "executor": executor,
-        }
+            # Save executor to active plans for stop functionality
+            self._active_plans[session_key] = {
+                "plan_id": plan_id,
+                "executor": executor,
+            }
         
         # Define callbacks for step execution
-        async def on_step_start(step_id: str, step_type: str, title: str):
-            logger.info("📌 开始执行步骤: {}", title[:100])
-            
-            step_entry = {
-                "id": step_id,
-                "type": step_type,
-                "title": title[:100],
-                "status": "running",
-                "timestamp": datetime.now().isoformat(),
-            }
-            execution_steps_for_message.append(step_entry)
-            logger.debug("Added step to execution_steps_for_message: {} (total: {})", step_id, len(execution_steps_for_message))
-            
-            if on_subtask_start:
-                await on_subtask_start(
-                    plan_id=plan_id,
-                    subtask_id=step_id,
-                    title=title[:100],
-                )
+            async def on_step_start(step_id: str, step_type: str, title: str):
+                logger.info("📌 开始执行步骤: {}", title[:100])
+                
+                step_entry = {
+                    "id": step_id,
+                    "type": step_type,
+                    "title": title[:100],
+                    "status": "running",
+                    "timestamp": datetime.now().isoformat(),
+                }
+                execution_steps_for_message.append(step_entry)
+                logger.debug("Added step to execution_steps_for_message: {} (total: {})", step_id, len(execution_steps_for_message))
+                
+                if on_subtask_start:
+                    await on_subtask_start(
+                        plan_id=plan_id,
+                        subtask_id=step_id,
+                        title=title[:100],
+                    )
         
-        async def on_step_complete(step_id: str, status: str, result: str, execution_time: float, logs: list, input_tokens: int = 0, output_tokens: int = 0):
-            nonlocal completed_steps, failed_steps, total_input_tokens, total_output_tokens
-            
-            # Accumulate token usage
-            total_input_tokens += input_tokens
-            total_output_tokens += output_tokens
-            
-            # Find the step
-            step = next((s for s in plan.steps if s.id == step_id), None)
-            if not step:
-                return
-            
-            if status == "completed":
-                step.status = StepStatus.COMPLETED
-                completed_steps += 1
-                storage.update_subtask_status(plan_id, step_id, "completed")
-                logger.info("✅ 步骤完成: {} (耗时 {:.2f}s, tokens: {}/{})", 
-                           step.description[:50], execution_time, input_tokens, output_tokens)
-            else:
-                step.status = StepStatus.FAILED
-                failed_steps += 1
-                storage.update_subtask_status(plan_id, step_id, "failed")
-                logger.error("❌ 步骤失败: {}", step.description[:50])
-            
-            # Update execution step status
-            for step_entry in execution_steps_for_message:
-                if step_entry["id"] == step_id:
-                    step_entry["status"] = status
-                    step_entry["details"] = {
-                        "result": result[:500] if result else "",
-                        "executionTime": execution_time,
-                    }
-                    break
-            
-            # Save execution logs to storage
-            logs_dict = [log.to_dict() if hasattr(log, 'to_dict') else log for log in logs]
-            storage.save_execution_logs(plan_id, step_id, logs_dict)
-            logger.debug("Saved execution logs for step: {}", step_id)
-            
-            if on_subtask_complete:
-                await on_subtask_complete(
-                    plan_id=plan_id,
-                    subtask_id=step_id,
-                    status=status,
-                    result=result,
-                    execution_time=execution_time,
-                    logs=logs_dict,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                )
+            async def on_step_complete(step_id: str, status: str, result: str, execution_time: float, logs: list, input_tokens: int = 0, output_tokens: int = 0):
+                nonlocal completed_steps, failed_steps, total_input_tokens, total_output_tokens
+                
+                total_input_tokens += input_tokens
+                total_output_tokens += output_tokens
+                
+                step = next((s for s in plan.steps if s.id == step_id), None)
+                if not step:
+                    return
+                
+                if status == "completed":
+                    step.status = StepStatus.COMPLETED
+                    completed_steps += 1
+                    storage.update_subtask_status(plan_id, step_id, "completed")
+                    logger.info("✅ 步骤完成: {} (耗时 {:.2f}s, tokens: {}/{})", 
+                               step.description[:50], execution_time, input_tokens, output_tokens)
+                else:
+                    step.status = StepStatus.FAILED
+                    failed_steps += 1
+                    storage.update_subtask_status(plan_id, step_id, "failed")
+                    logger.error("❌ 步骤失败: {}", step.description[:50])
+                
+                for step_entry in execution_steps_for_message:
+                    if step_entry["id"] == step_id:
+                        step_entry["status"] = status
+                        step_entry["details"] = {
+                            "result": result[:500] if result else "",
+                            "executionTime": execution_time,
+                        }
+                        break
+                
+                logs_dict = [log.to_dict() if hasattr(log, 'to_dict') else log for log in logs]
+                storage.save_execution_logs(plan_id, step_id, logs_dict)
+                logger.debug("Saved execution logs for step: {}", step_id)
+                
+                if on_subtask_complete:
+                    await on_subtask_complete(
+                        plan_id=plan_id,
+                        subtask_id=step_id,
+                        status=status,
+                        result=result,
+                        execution_time=execution_time,
+                        logs=logs_dict,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                    )
         
-        # Execute all steps
-        results = await executor.execute_plan(
-            steps=plan.steps,
-            plan_context=plan_context,
-            on_step_start=on_step_start,
-            on_step_complete=on_step_complete,
-        )
-        
-        plan.status = PlanStatus.COMPLETED
-        storage.update_plan_status(plan_id, "completed")
-        self._active_plans.pop(session_key, None)
-        
-        # Update checklist.md file based on execution results
-        if execution_plan.checklist_content:
-            updated_checklist = self._update_checklist_from_execution(
-                execution_plan.checklist_content, 
-                completed_steps, 
-                total_steps
+            results = await executor.execute_plan(
+                steps=plan.steps,
+                plan_context=plan_context,
+                on_step_start=on_step_start,
+                on_step_complete=on_step_complete,
             )
-            plan_dir = storage.plans_path / plan_id
-            checklist_file = plan_dir / "checklist.md"
-            with open(checklist_file, "w", encoding="utf-8") as f:
-                f.write(updated_checklist)
-            logger.debug("Updated checklist.md file for plan: {}", plan_id)
+            
+            plan.status = PlanStatus.COMPLETED
+            storage.update_plan_status(plan_id, "completed")
+            self._active_plans.pop(session_key, None)
         
-        logger.info("=" * 60)
-        logger.info("🎉 规划执行完成: {}", execution_plan.title)
-        logger.info("   总步骤: {}", total_steps)
-        logger.info("   成功: {}", completed_steps)
-        logger.info("   失败: {}", failed_steps)
-        logger.info("   Token使用量: 输入={}, 输出={}", total_input_tokens, total_output_tokens)
-        logger.info("=" * 60)
+            if execution_plan.checklist_content:
+                updated_checklist = self._update_checklist_from_execution(
+                    execution_plan.checklist_content, 
+                    completed_steps, 
+                    total_steps
+                )
+                plan_dir = storage.plans_path / plan_id
+                checklist_file = plan_dir / "checklist.md"
+                with open(checklist_file, "w", encoding="utf-8") as f:
+                    f.write(updated_checklist)
+                logger.debug("Updated checklist.md file for plan: {}", plan_id)
+        
+            logger.info("=" * 60)
+            logger.info("🎉 规划执行完成: {}", execution_plan.title)
+            logger.info("   总步骤: {}", total_steps)
+            logger.info("   成功: {}", completed_steps)
+            logger.info("   失败: {}", failed_steps)
+            logger.info("   Token使用量: 输入={}, 输出={}", total_input_tokens, total_output_tokens)
+            logger.info("=" * 60)
         
         # Save execution result to session history
         session = self.sessions.get(session_key)

@@ -85,6 +85,202 @@ Content-Type: application/json
 
 ---
 
+### 多 Agent 管理与治理
+
+#### 外部 Agent 列表
+
+```http
+GET /api/external-agents
+```
+
+**响应示例**:
+
+```json
+{
+  "external_agents": [
+    {
+      "id": "partner-agent",
+      "name": "Partner Agent",
+      "transport": "http_sse",
+      "dm_enabled": true,
+      "team_enabled": true,
+      "capability_tags": ["research", "analysis"]
+    }
+  ],
+  "count": 1
+}
+```
+
+#### 创建或更新外部 Agent
+
+```http
+POST /api/external-agents
+PUT /api/external-agents/{external_agent_id}
+Content-Type: application/json
+
+{
+  "id": "partner-agent",
+  "name": "Partner Agent",
+  "endpoint": "https://example.com/agent/sse",
+  "transport": "http_sse",
+  "auth_type": "bearer",
+  "auth_secret": "token-value",
+  "capability_tags": ["research", "analysis"],
+  "dm_enabled": true,
+  "team_enabled": true,
+  "mention_required": false
+}
+```
+
+说明：
+
+- 当前支持独立的外部 Agent CRUD 与连接探测，不需要把外部 Agent 混入内部 `agents.instances`
+- 如果更新后将 `team_enabled` 关闭，后端会自动清理相关 team member 引用
+
+#### 测试外部 Agent 连接
+
+```http
+POST /api/external-agents/{external_agent_id}/test
+```
+
+该接口返回轻量探测结果，用于管理页中的 “Test Connection”。
+
+#### 获取团队成员明细
+
+```http
+GET /api/teams/{team_id}/members
+```
+
+当前返回体已显式区分 internal / external：
+
+```json
+{
+  "team_id": "team-a",
+  "members": [
+    {
+      "id": "agent-a",
+      "kind": "internal",
+      "profile": {},
+      "agent": { "id": "agent-a", "name": "Agent A" }
+    },
+    {
+      "id": "partner-agent",
+      "kind": "external",
+      "profile": {},
+      "external_agent": { "id": "partner-agent", "name": "Partner Agent" }
+    }
+  ],
+  "internal_members": [
+    {
+      "id": "agent-a",
+      "kind": "internal",
+      "profile": {},
+      "agent": { "id": "agent-a", "name": "Agent A" }
+    }
+  ],
+  "external_members": [
+    {
+      "id": "partner-agent",
+      "kind": "external",
+      "profile": {},
+      "external_agent": { "id": "partner-agent", "name": "Partner Agent" }
+    }
+  ],
+  "member_order": [
+    { "id": "agent-a", "kind": "internal" },
+    { "id": "partner-agent", "kind": "external" }
+  ],
+  "count": 2,
+  "counts": {
+    "total": 2,
+    "internal": 1,
+    "external": 1
+  }
+}
+```
+
+#### 获取 Agent bootstrap 文件
+
+```http
+GET /api/agents/{agent_id}/bootstrap-files
+```
+
+说明：
+
+- 当前 bootstrap 资产包含 `AGENTS.md`、`SOUL.md`、`USER.md`
+- 返回体同时包含各文件内容、是否存在、摘要信息和 `workspace_path`
+
+#### 更新 bootstrap 文件
+
+```http
+PUT /api/agents/{agent_id}/bootstrap-files/{file_kind}
+Content-Type: application/json
+
+{
+  "content": "# AGENTS.md\n\n- 优先说明风险\n- 不直接泄露密钥"
+}
+```
+
+`file_kind` 当前支持：
+
+- `agents`
+- `soul`
+- `user`
+
+#### 更新 bootstrap 摘要
+
+```http
+PUT /api/agents/{agent_id}/bootstrap-summary
+Content-Type: application/json
+
+{
+  "identity": ["你是代码评审 Agent"],
+  "role_focus": ["优先发现高风险回归"],
+  "communication_style": ["先给结论，再给依据"],
+  "boundaries": ["高风险操作先确认"],
+  "user_preferences": ["回答保持简洁"]
+}
+```
+
+#### 获取工具审计记录
+
+```http
+GET /api/memory/tool-audits?agent_id=main&session_key=web:dm_main&risk_kind=all&limit=20&summary_window_hours=24
+```
+
+**响应示例**:
+
+```json
+{
+  "agent_id": "main",
+  "session_key": "web:dm_main",
+  "risk_kind": "all",
+  "window_hours": 24,
+  "limit": 20,
+  "total_returned": 6,
+  "total_matches": 6,
+  "blocked_count": 1,
+  "error_count": 1,
+  "summary": {
+    "window_hours": 24,
+    "total_count": 6,
+    "blocked_count": 1,
+    "exec_count": 2,
+    "outbound_count": 3,
+    "error_count": 1
+  },
+  "items": []
+}
+```
+
+说明：
+
+- `risk_kind` 支持 `all`、`blocked`、`exec`、`outbound`、`error`
+- `summary` 用于前端顶部风险摘要条
+- `session_key` 可用于定位某一轮具体聊天会话中的工具调用
+
+---
+
 ### 聊天功能
 
 #### 发送消息
@@ -130,6 +326,14 @@ data: {"content": "的"}
 event: done
 data: {"status": "complete"}
 ```
+
+说明：
+
+- 当前 SSE 流和相关历史消息都会携带 `request_id`
+- 前端会用 `request_id` 做失败诊断、停止生成和超时后的历史回查
+- 如果某次前端先超时、但后端随后已成功落盘，聊天页会按 `request_id` 自动尝试收敛这类假超时提示
+- Web 单聊在进入模型前会按 token 预算自动压缩上下文；若模型返回 `finish_reason=length`，后端会自动继续请求并把后续内容拼接到同一条流式回复中
+- 当前聊天页的流式 inactivity timeout 为 `240s`；这不是 provider 超时阈值，而是前端等待流事件的超时窗口
 
 #### 停止流式响应
 

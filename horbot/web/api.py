@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, FileResponse
 from typing import List, Dict, Any, AsyncGenerator, Optional, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 import hashlib
 import json
@@ -19,6 +19,7 @@ from loguru import logger
 from horbot.config.loader import get_cached_config, save_config
 from horbot.config.normalizer import (
     remove_agent_references,
+    remove_external_agent_references,
     remove_team_references,
     set_agent_team_memberships,
     set_team_members,
@@ -70,9 +71,11 @@ from horbot.utils.bootstrap import (
     truncate_summary_items,
     upsert_markdown_section,
 )
+from horbot.security.runtime_guard import inspect_user_input
 from pydantic import BaseModel, Field
 from pydantic.alias_generators import to_camel
 from pathlib import Path
+from urllib.parse import urlparse
 
 router = APIRouter()
 
@@ -1323,6 +1326,31 @@ def _normalize_agent_mention_token(text: str) -> str:
     return re.sub(r"[^\w\u4e00-\u9fff-]+", "", (text or "")).lower()
 
 
+def _resolve_chat_target(agent_id: str | None) -> tuple[str, Any | None]:
+    if not agent_id:
+        return "missing", None
+
+    from horbot.agent.manager import get_agent_manager
+    from horbot.external_agents.manager import get_external_agent_manager
+
+    internal_agent = get_agent_manager().get_agent(agent_id)
+    if internal_agent is not None:
+        return "internal", internal_agent
+
+    external_agent = get_external_agent_manager().get_external_agent(agent_id)
+    if external_agent is not None:
+        return "external", external_agent
+
+    return "missing", None
+
+
+def _resolve_chat_target_name(agent_id: str | None) -> str:
+    target_kind, target = _resolve_chat_target(agent_id)
+    if target_kind in {"internal", "external"} and target is not None:
+        return getattr(target, "name", None) or (agent_id or "助手")
+    return agent_id or "助手"
+
+
 def parse_agent_mentions(content: str, available_agents: List[str]) -> List[str]:
     """Parse @mentions from content and return list of mentioned agent IDs.
     
@@ -1330,15 +1358,12 @@ def parse_agent_mentions(content: str, available_agents: List[str]) -> List[str]
     Priority: exact name match > exact ID match > partial name match
     """
     import re
-    from horbot.agent.manager import get_agent_manager
-    
-    agent_manager = get_agent_manager()
     mentioned: list[str] = []
 
     agents_info = []
     for agent_id in available_agents:
-        agent = agent_manager.get_agent(agent_id)
-        if agent:
+        _, agent = _resolve_chat_target(agent_id)
+        if agent is not None:
             agents_info.append(
                 {
                     "id": agent_id,
@@ -1396,17 +1421,84 @@ def parse_agent_mentions(content: str, available_agents: List[str]) -> List[str]
 
 
 def _get_team_member_agent_ids(team_id: str | None) -> List[str]:
-    """Return ordered member agent ids for a team, or an empty list."""
+    """Return ordered internal member agent ids for a team, or an empty list."""
     if not team_id:
         return []
 
     from horbot.team.manager import get_team_manager
+    from horbot.agent.manager import get_agent_manager
 
     team = get_team_manager().get_team(team_id)
     if not team:
         return []
 
-    return team.get_ordered_member_ids()
+    agent_manager = get_agent_manager()
+    return [
+        member_id
+        for member_id in team.get_ordered_member_ids()
+        if agent_manager.get_agent(member_id) is not None
+    ]
+
+
+def _get_team_external_agent_ids(team_id: str | None) -> List[str]:
+    from horbot.external_agents.manager import get_external_agent_manager
+    from horbot.team.manager import get_team_manager
+
+    if not team_id:
+        external_agents = get_external_agent_manager().get_all_external_agents()
+        return [agent.id for agent in external_agents if bool(agent.config.team_enabled)]
+
+    team = get_team_manager().get_team(team_id)
+    if not team:
+        return []
+
+    external_agent_manager = get_external_agent_manager()
+    return [
+        member_id
+        for member_id in team.get_ordered_member_ids()
+        if (
+            (external_agent := external_agent_manager.get_external_agent(member_id)) is not None
+            and bool(external_agent.config.team_enabled)
+        )
+    ]
+
+
+def _get_group_chat_available_agent_ids(team_id: str | None) -> List[str]:
+    from horbot.agent.manager import get_agent_manager
+
+    internal_ids = (
+        _get_team_member_agent_ids(team_id)
+        if team_id
+        else [agent.id for agent in get_agent_manager().get_all_agents()]
+    )
+    ordered: list[str] = []
+    for agent_id in [*internal_ids, *_get_team_external_agent_ids(team_id)]:
+        if agent_id not in ordered:
+            ordered.append(agent_id)
+    return ordered
+
+
+def _build_external_agent_history(
+    session,
+    *,
+    max_items: int = 12,
+) -> list[dict[str, Any]]:
+    history: list[dict[str, Any]] = []
+    for item in list(getattr(session, "messages", []) or [])[-max_items:]:
+        role = str(item.get("role") or "").strip()
+        content = clean_message_content(str(item.get("content") or "").strip())
+        if not role or not content:
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        history.append(
+            {
+                "role": role,
+                "content": content,
+                "agent_id": metadata.get("agent_id"),
+                "agent_name": metadata.get("agent_name"),
+            }
+        )
+    return history
 
 
 def extract_agent_mention_payload(
@@ -1916,8 +2008,12 @@ async def _resolve_chat_session_manager(
     normalized_session_key = session_key if session_key.startswith("web:") else f"web:{session_key}"
 
     if agent_id:
-        agent_loop = await get_agent_loop(agent_id)
-        return agent_loop.sessions, normalized_session_key
+        target_kind, _ = _resolve_chat_target(agent_id)
+        if target_kind == "internal":
+            agent_loop = await get_agent_loop(agent_id)
+            return agent_loop.sessions, normalized_session_key
+        if target_kind == "external":
+            return get_session_manager(), normalized_session_key
 
     raw_session_key = normalized_session_key[4:] if normalized_session_key.startswith("web:") else normalized_session_key
 
@@ -1937,8 +2033,12 @@ async def _resolve_chat_session_manager(
     if raw_session_key.startswith("dm_"):
         extracted_agent_id = raw_session_key[3:]
         try:
-            agent_loop = await get_agent_loop(extracted_agent_id)
-            return agent_loop.sessions, normalized_session_key
+            target_kind, _ = _resolve_chat_target(extracted_agent_id)
+            if target_kind == "internal":
+                agent_loop = await get_agent_loop(extracted_agent_id)
+                return agent_loop.sessions, normalized_session_key
+            if target_kind == "external":
+                return get_session_manager(), normalized_session_key
         except Exception as e:
             logger.warning(
                 "[DEBUG] Failed to get agent loop for {} while resolving DM session manager: {}",
@@ -2253,14 +2353,92 @@ def _get_memory_roots(memory_store) -> tuple[Path, Path]:
     return base, base.parent / "executions"
 
 
+_TOOL_AUDIT_BLOCK_EVENT_TYPES = {
+    "tool_denied",
+    "tool_confirmation_required",
+    "tool_path_denied",
+    "tool_cancelled",
+}
+_TOOL_AUDIT_OUTBOUND_TOOLS = {"message"}
+_TOOL_AUDIT_RISK_KINDS = {"all", "blocked", "exec", "outbound", "error"}
+
+
+def _parse_tool_audit_timestamp(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        return parsed.astimezone().replace(tzinfo=None)
+    return parsed
+
+
+def _is_blocked_tool_audit(item: dict[str, Any]) -> bool:
+    event_type = str((item.get("audit_event") or {}).get("event_type") or "").strip()
+    return bool(item.get("guard_blocked")) or event_type in _TOOL_AUDIT_BLOCK_EVENT_TYPES
+
+
+def _is_exec_tool_audit(item: dict[str, Any]) -> bool:
+    return str(item.get("tool_name") or "").strip() == "exec"
+
+
+def _is_outbound_tool_audit(item: dict[str, Any]) -> bool:
+    tool_name = str(item.get("tool_name") or "").strip()
+    return (
+        tool_name in _TOOL_AUDIT_OUTBOUND_TOOLS
+        or tool_name.startswith("web_")
+        or tool_name.startswith("browser_")
+    )
+
+
+def _build_tool_audit_summary(items: list[dict[str, Any]], window_hours: int) -> dict[str, Any]:
+    cutoff = datetime.now() - timedelta(hours=window_hours)
+    recent_items = _filter_tool_audits_by_window(items, window_hours)
+    return {
+        "window_hours": window_hours,
+        "total_count": len(recent_items),
+        "blocked_count": sum(1 for item in recent_items if _is_blocked_tool_audit(item)),
+        "error_count": sum(1 for item in recent_items if bool(item.get("error"))),
+        "exec_count": sum(1 for item in recent_items if _is_exec_tool_audit(item)),
+        "outbound_count": sum(1 for item in recent_items if _is_outbound_tool_audit(item)),
+    }
+
+
+def _filter_tool_audits_by_window(items: list[dict[str, Any]], window_hours: int) -> list[dict[str, Any]]:
+    cutoff = datetime.now() - timedelta(hours=window_hours)
+    return [
+        item
+        for item in items
+        if (timestamp := _parse_tool_audit_timestamp(item.get("timestamp"))) is not None and timestamp >= cutoff
+    ]
+
+
+def _matches_tool_audit_risk(item: dict[str, Any], risk_kind: str) -> bool:
+    if risk_kind == "all":
+        return True
+    if risk_kind == "blocked":
+        return _is_blocked_tool_audit(item)
+    if risk_kind == "exec":
+        return _is_exec_tool_audit(item)
+    if risk_kind == "outbound":
+        return _is_outbound_tool_audit(item)
+    if risk_kind == "error":
+        return bool(item.get("error"))
+    return False
+
+
 def _agent_bootstrap_file_path(agent_id: str, file_kind: str) -> tuple[Path, str]:
     _, workspace_path = _resolve_agent_workspace_for_request(agent_id)
     normalized = (file_kind or "").strip().lower()
+    if normalized == "agents":
+        return workspace_path / "AGENTS.md", "AGENTS.md"
     if normalized == "soul":
         return workspace_path / "SOUL.md", "SOUL.md"
     if normalized == "user":
         return workspace_path / "USER.md", "USER.md"
-    raise HTTPException(status_code=400, detail="Unsupported bootstrap file. Use 'soul' or 'user'.")
+    raise HTTPException(status_code=400, detail="Unsupported bootstrap file. Use 'agents', 'soul', or 'user'.")
 
 
 def _read_bootstrap_file(path: Path) -> dict[str, Any]:
@@ -2279,8 +2457,10 @@ def _build_bootstrap_summary(agent, soul_content: str, user_content: str) -> dic
 def _build_agent_bootstrap_payload(agent) -> dict[str, Any]:
     _ensure_agent_bootstrap_files(agent)
 
+    agents_path, _ = _agent_bootstrap_file_path(agent.id, "agents")
     soul_path, _ = _agent_bootstrap_file_path(agent.id, "soul")
     user_path, _ = _agent_bootstrap_file_path(agent.id, "user")
+    agents_file = _read_bootstrap_file(agents_path)
     soul_file = _read_bootstrap_file(soul_path)
     user_file = _read_bootstrap_file(user_path)
 
@@ -2290,6 +2470,7 @@ def _build_agent_bootstrap_payload(agent) -> dict[str, Any]:
         "workspace_path": str(agent.get_workspace()),
         "summary": _build_bootstrap_summary(agent, soul_file["content"], user_file["content"]),
         "files": {
+            "agents": agents_file,
             "soul": soul_file,
             "user": user_file,
         },
@@ -4080,8 +4261,10 @@ async def _stream_generator(
     
     logger.info(f"[ChatAPI][{request_id}] Starting single chat: session_key={session_key}, agent_id={agent_id}")
 
-    agent_instance = agent_manager.get_agent(agent_id)
-    agent_name = agent_instance.name if agent_instance else "助手"
+    target_kind, target_instance = _resolve_chat_target(agent_id)
+    agent_instance = target_instance if target_kind == "internal" else None
+    external_agent = target_instance if target_kind == "external" else None
+    agent_name = _resolve_chat_target_name(agent_id)
 
     # Emit an initial event before heavier initialization so the client
     # receives headers promptly and can transition out of "connecting".
@@ -4096,15 +4279,22 @@ async def _stream_generator(
         )
     )
     
-    try:
-        agent_loop = await get_agent_loop(request.agent_id)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[ChatAPI][{request_id}] Failed to get agent loop: {e}")
-        raise HTTPException(status_code=500, detail="初始化对话代理失败，请稍后重试。")
-    
-    manager = agent_loop.sessions
+    if target_kind == "missing":
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    if target_kind == "internal":
+        try:
+            agent_loop = await get_agent_loop(request.agent_id)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[ChatAPI][{request_id}] Failed to get agent loop: {e}")
+            raise HTTPException(status_code=500, detail="初始化对话代理失败，请稍后重试。")
+        manager = agent_loop.sessions
+    else:
+        agent_loop = None
+        manager = get_session_manager()
+
     session = manager.get_or_create(session_key)
     
     user_message_id = session.add_message(
@@ -4137,10 +4327,92 @@ async def _stream_generator(
         },
     )
 
+    if external_agent is not None:
+        from horbot.external_agents.runtime import get_external_agent_runtime
+
+        history = _build_external_agent_history(session)
+        result = await get_external_agent_runtime().complete(
+            external_agent,
+            message=msg.content,
+            session_key=session_key,
+            history=history,
+            conversation={
+                "type": "dm",
+                "target_id": agent_id,
+                "target_name": agent_name,
+            },
+            metadata={
+                "request_id": request_id,
+                "turn_id": turn_id,
+                "user_message_id": user_message_id,
+            },
+        )
+        content = clean_message_content(str(result.get("content") or "").strip())
+        if not result.get("ok") and not content:
+            yield _sse_event(
+                _build_chat_stream_event(
+                    "error",
+                    content=str(result.get("detail") or "External agent request failed"),
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    turn_id=turn_id,
+                    message_id=assistant_message_id,
+                )
+            )
+            yield _sse_event({"event": "done"})
+            return
+
+        if content:
+            yield _sse_event(
+                _build_chat_stream_event(
+                    "agent_done",
+                    content=content,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    turn_id=turn_id,
+                    message_id=assistant_message_id,
+                )
+            )
+            yield _sse_event(
+                _build_chat_stream_event(
+                    "content",
+                    content=content,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    turn_id=turn_id,
+                    message_id=assistant_message_id,
+                )
+            )
+            session.add_message(
+                "assistant",
+                content,
+                dedup=True,
+                message_id=assistant_message_id,
+                metadata={
+                    "turn_id": turn_id,
+                    "request_id": request_id,
+                    "agent_id": agent_id,
+                    "agent_name": agent_name,
+                    "agent_type": "external",
+                    "_external_agent_mode": result.get("mode"),
+                    "_external_agent_transport": result.get("transport"),
+                    "_external_agent_detail": result.get("detail"),
+                },
+            )
+        await manager.async_save(session)
+        yield _sse_event({"event": "done"})
+        return
+
     queue: asyncio.Queue = asyncio.Queue()
     final_response = {"content": None}
     execution_steps: list[dict] = []
     content_state = {"content": ""}
+    idle_status_index = 0
+    idle_status_messages = [
+        f"{agent_name} 正在分析较长上下文...",
+        f"{agent_name} 仍在等待模型返回首个结果...",
+        f"{agent_name} 正在整理本轮回复结构...",
+    ]
 
     def store_message_tool_content(content: str) -> None:
         content_state["content"] = content
@@ -4159,6 +4431,7 @@ async def _stream_generator(
         on_step_start_hook=lambda step: logger.info(
             f"[ChatAPI] Added step: id={step['id']}, type={step['type']}, title={step['title']}, total steps: {len(execution_steps)}"
         ),
+        enable_synthetic_progress=True,
     )
 
     async def process_task():
@@ -4223,6 +4496,18 @@ async def _stream_generator(
                 now = time.monotonic()
                 if now - last_heartbeat >= heartbeat_interval:
                     yield _sse_event({"event": "heartbeat"})
+                    if not content_state["content"] and final_response["content"] is None:
+                        yield _sse_event(
+                            _build_chat_stream_event(
+                                "status",
+                                message=idle_status_messages[idle_status_index % len(idle_status_messages)],
+                                agent_id=agent_id,
+                                agent_name=agent_name,
+                                turn_id=turn_id,
+                                message_id=assistant_message_id,
+                            )
+                        )
+                        idle_status_index += 1
                     last_heartbeat = now
                 continue
 
@@ -4460,7 +4745,7 @@ async def _group_chat_stream_generator(
     
     logger.info(f"[ChatAPI][{request_id}] Group chat request: mentioned_agents={request.mentioned_agents}, team_id={request.team_id}")
     
-    available_agents = _get_team_member_agent_ids(request.team_id) if request.team_id else [a.id for a in agent_manager.get_all_agents()]
+    available_agents = _get_group_chat_available_agent_ids(request.team_id)
 
     parsed_mentions = parse_agent_mentions(request.content, available_agents)
     logger.info(f"[ChatAPI][{request_id}] Parsed mentions from content: {parsed_mentions}")
@@ -4500,8 +4785,7 @@ async def _group_chat_stream_generator(
     
     conversation_contexts: Dict[str, ConversationContext] = {}
     for agent_id in originally_mentioned:
-        agent_instance = agent_manager.get_agent(agent_id)
-        agent_name = agent_instance.name if agent_instance else agent_id
+        agent_name = _resolve_chat_target_name(agent_id)
         kickoff_trigger_message = _build_team_baton_trigger_message(
             request.content,
             mode="kickoff",
@@ -4524,12 +4808,12 @@ async def _group_chat_stream_generator(
     ):
         """Process response from a single agent with conversation context."""
         try:
-            agent_loop = await get_agent_loop_with_session_manager(agent_id, team_session_manager)
-            agent_instance = agent_manager.get_agent(agent_id)
-            agent_name = agent_instance.name if agent_instance else agent_id
+            target_kind, target_instance = _resolve_chat_target(agent_id)
+            agent_loop = None
+            agent_name = _resolve_chat_target_name(agent_id)
             turn_id = str(uuid.uuid4())[:8]
             assistant_message_id = str(uuid.uuid4())[:8]
-            
+
             execution_steps: list[dict] = []
             content_state = {"content": ""}
             message_tool_dispatch_state: dict[str, Any] = {}
@@ -4560,21 +4844,6 @@ async def _group_chat_stream_generator(
                 agent_index=agent_index,
                 turn_id=turn_id,
                 message_id=assistant_message_id,
-            )
-
-            callbacks = _create_chat_stream_callbacks(
-                queue=queue,
-                stream_manager=stream_manager,
-                request_id=request_id,
-                agent_id=agent_id,
-                agent_name=agent_name,
-                turn_id=turn_id,
-                message_id=assistant_message_id,
-                execution_steps=execution_steps,
-                content_state=content_state,
-                on_message_tool_content=store_message_tool_content,
-                on_message_tool_dispatch=store_message_tool_dispatch,
-                enable_synthetic_progress=bool(request.group_chat),
             )
 
             speaking_to = conversation_ctx.get_speaking_to()
@@ -4610,20 +4879,60 @@ async def _group_chat_stream_generator(
                     "request_id": request_id,
                 },
             )
+            if target_kind == "external":
+                from horbot.external_agents.runtime import get_external_agent_runtime
 
-            response = await agent_loop.process_message(
-                msg,
-                session_key=session_key,
-                **callbacks,
-                speaking_to=speaking_to,
-                conversation_type=conv_type,
-            )
-            
-            response_content = response.content if response else None
-            final_content = _resolve_final_agent_display_content(
-                response_content,
-                content_state["content"],
-            )
+                result = await get_external_agent_runtime().complete(
+                    target_instance,
+                    message=msg.content,
+                    session_key=session_key,
+                    history=_build_external_agent_history(session),
+                    conversation={
+                        "type": conv_type,
+                        "target_id": agent_id,
+                        "target_name": agent_name,
+                        "source_id": conversation_ctx.source,
+                        "source_name": conversation_ctx.source_name,
+                    },
+                    metadata={
+                        "request_id": request_id,
+                        "turn_id": turn_id,
+                        "group_chat": True,
+                    },
+                )
+                response = None
+                response_content = str(result.get("content") or "").strip()
+                final_content = clean_message_content(response_content)
+            else:
+                agent_loop = await get_agent_loop_with_session_manager(agent_id, team_session_manager)
+                callbacks = _create_chat_stream_callbacks(
+                    queue=queue,
+                    stream_manager=stream_manager,
+                    request_id=request_id,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    turn_id=turn_id,
+                    message_id=assistant_message_id,
+                    execution_steps=execution_steps,
+                    content_state=content_state,
+                    on_message_tool_content=store_message_tool_content,
+                    on_message_tool_dispatch=store_message_tool_dispatch,
+                    enable_synthetic_progress=bool(request.group_chat),
+                )
+
+                response = await agent_loop.process_message(
+                    msg,
+                    session_key=session_key,
+                    **callbacks,
+                    speaking_to=speaking_to,
+                    conversation_type=conv_type,
+                )
+
+                response_content = response.content if response else None
+                final_content = _resolve_final_agent_display_content(
+                    response_content,
+                    content_state["content"],
+                )
             
             logger.info(f"[ChatAPI][{request_id}] Agent {agent_id} response: response={response is not None}, response_content={response_content[:50] if response_content else None}, streamed_content={content_state['content'][:50] if content_state['content'] else None}, final_content={final_content[:50] if final_content else None}")
 
@@ -4688,7 +4997,7 @@ async def _group_chat_stream_generator(
                 queue,
                 "agent_stopped",
                 agent_id=agent_id,
-                agent_name=agent_manager.get_agent(agent_id).name if agent_manager.get_agent(agent_id) else agent_id,
+                agent_name=_resolve_chat_target_name(agent_id),
                 turn_id=turn_id,
                 message_id=assistant_message_id,
             )
@@ -4700,7 +5009,7 @@ async def _group_chat_stream_generator(
                 queue,
                 "agent_error",
                 agent_id=agent_id,
-                agent_name=agent_manager.get_agent(agent_id).name if agent_manager.get_agent(agent_id) else agent_id,
+                agent_name=_resolve_chat_target_name(agent_id),
                 turn_id=turn_id,
                 message_id=assistant_message_id,
                 error=safe_error,
@@ -4735,14 +5044,12 @@ async def _group_chat_stream_generator(
             if agent_id in conversation_contexts:
                 conv_ctx = conversation_contexts[agent_id]
             else:
-                agent_instance = agent_manager.get_agent(agent_id)
-                agent_name = agent_instance.name if agent_instance else agent_id
+                agent_name = _resolve_chat_target_name(agent_id)
                 source_id = last_speaking_agent.get(agent_id, "user")
                 if source_id == "user":
                     source_name = "用户"
                 else:
-                    source_agent = agent_manager.get_agent(source_id)
-                    source_name = source_agent.name if source_agent else source_id
+                    source_name = _resolve_chat_target_name(source_id)
                 
                 conv_ctx = build_conversation_context(
                     conversation_type=ConversationType.AGENT_TO_AGENT,
@@ -4902,8 +5209,7 @@ async def _group_chat_stream_generator(
                                             f"requeued={pending_again}, new total: {len(agents_to_respond)}"
                                         )
                                     
-                                    target_agent = agent_manager.get_agent(a)
-                                    target_name = target_agent.name if target_agent else a
+                                    target_name = _resolve_chat_target_name(a)
                                     return_to_user_summary = _should_return_to_user_summary_turn(
                                         candidate_agent_id=a,
                                         response_agent_id=resp["agent_id"],
@@ -4979,17 +5285,15 @@ async def _group_chat_stream_generator(
                                 total_agents = len(agents_to_respond)
                                 
                                 for new_agent_id in new_agents_to_respond:
-                                    new_agent = agent_manager.get_agent(new_agent_id)
-                                    if new_agent:
-                                        yield _sse_event(
-                                            _build_chat_stream_event(
-                                                "agent_mentioned",
-                                                agent_id=new_agent_id,
-                                                agent_name=new_agent.name,
-                                                mentioned_by=resp["agent_id"],
-                                                **handoff_event_meta.get(new_agent_id, {}),
-                                            )
+                                    yield _sse_event(
+                                        _build_chat_stream_event(
+                                            "agent_mentioned",
+                                            agent_id=new_agent_id,
+                                            agent_name=_resolve_chat_target_name(new_agent_id),
+                                            mentioned_by=resp["agent_id"],
+                                            **handoff_event_meta.get(new_agent_id, {}),
                                         )
+                                    )
                         
                         done_task = active_tasks.get(agent_id)
                     elif event in ("agent_stopped", "agent_error"):
@@ -5053,31 +5357,56 @@ def _validate_chat_request(request: StreamRequest) -> None:
     """
     if not request.content or not request.content.strip():
         raise HTTPException(status_code=400, detail="Content is required")
-    
-    from horbot.agent.manager import get_agent_manager
-    
-    agent_manager = get_agent_manager()
+
+    input_guard = inspect_user_input(request.content)
+    if input_guard.blocked:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsafe user intent detected: {', '.join(input_guard.reasons[:2])}",
+        )
     
     if request.agent_id:
-        agent = agent_manager.get_agent(request.agent_id)
-        if not agent:
+        target_kind, target = _resolve_chat_target(request.agent_id)
+        if target is None:
             raise HTTPException(status_code=404, detail=f"Agent '{request.agent_id}' not found")
+        if target_kind == "external" and not bool(target.config.dm_enabled):
+            raise HTTPException(status_code=400, detail=f"External agent '{request.agent_id}' does not allow direct chat")
     
-    if request.group_chat and request.mentioned_agents:
+    available_group_agents = _get_group_chat_available_agent_ids(request.team_id) if request.group_chat else []
+    parsed_group_mentions = parse_agent_mentions(request.content, available_group_agents) if available_group_agents else []
+
+    if request.group_chat and (request.mentioned_agents or parsed_group_mentions):
         team_members = set(_get_team_member_agent_ids(request.team_id)) if request.team_id else set()
-        for agent_id in request.mentioned_agents:
-            if not agent_manager.get_agent(agent_id):
+        team_external_agents = set(_get_team_external_agent_ids(request.team_id)) if request.team_id else set()
+        for agent_id in list(dict.fromkeys([*request.mentioned_agents, *parsed_group_mentions])):
+            target_kind, target = _resolve_chat_target(agent_id)
+            if target is None:
                 raise HTTPException(status_code=404, detail=f"Mentioned agent '{agent_id}' not found")
-            if team_members and agent_id not in team_members:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Mentioned agent '{agent_id}' is not a member of team '{request.team_id}'",
-                )
+            if request.team_id:
+                if target_kind == "internal" and agent_id not in team_members:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Mentioned agent '{agent_id}' is not a member of team '{request.team_id}'",
+                    )
+                if target_kind == "external" and agent_id not in team_external_agents:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"External agent '{agent_id}' is not enabled for team '{request.team_id}'",
+                    )
     
-    config = get_cached_config()
-    provider_config = config.get_provider() if config else None
-    if not provider_config or not provider_config.api_key:
-        raise HTTPException(status_code=500, detail="Provider not configured. Please set up API key in settings.")
+    requires_internal_provider = True
+    if request.group_chat:
+        resolved_mentions = list(dict.fromkeys([*request.mentioned_agents, *parsed_group_mentions]))
+        if resolved_mentions:
+            requires_internal_provider = any(_resolve_chat_target(agent_id)[0] == "internal" for agent_id in resolved_mentions)
+    elif request.agent_id:
+        requires_internal_provider = _resolve_chat_target(request.agent_id)[0] == "internal"
+
+    if requires_internal_provider:
+        config = get_cached_config()
+        provider_config = config.get_provider() if config else None
+        if not provider_config or not provider_config.api_key:
+            raise HTTPException(status_code=500, detail="Provider not configured. Please set up API key in settings.")
 
 
 @router.post("/chat/stream")
@@ -5163,7 +5492,13 @@ async def confirm_tool_execution(request: ConfirmRequest):
         
         # Execute the tool (using execute_confirmed to bypass permission check)
         try:
-            result = await agent_loop.tools.execute_confirmed(conf["tool_name"], conf["arguments"])
+            with agent_loop.tools.audit_context(
+                session_key=request.session_key,
+                origin="web_confirm",
+                source_channel="web",
+                source_chat_id=request.session_key,
+            ):
+                result = await agent_loop.tools.execute_confirmed(conf["tool_name"], conf["arguments"])
             
             # Add tool result to messages
             messages = conf["messages"]
@@ -5175,7 +5510,9 @@ async def confirm_tool_execution(request: ConfirmRequest):
             
             # Continue the conversation
             final_content, _, all_msgs, new_confirmations = await agent_loop._run_agent_loop(
-                messages, pending_confirmations=pending_confirmations
+                messages,
+                pending_confirmations=pending_confirmations,
+                session_key=request.session_key,
             )
             
             # Update session with new confirmations
@@ -7114,6 +7451,58 @@ async def get_memory_stats(agent_id: Optional[str] = None):
         raise HTTPException(status_code=500, detail=f"Failed to get memory stats: {str(e)}")
 
 
+@router.get("/memory/tool-audits")
+async def get_tool_audit_events(
+    agent_id: Optional[str] = None,
+    session_key: Optional[str] = None,
+    limit: int = 20,
+    summary_window_hours: int = 24,
+    window_hours: Optional[int] = None,
+    risk_kind: str = "all",
+):
+    """Get recent tool audit events for an agent/session."""
+    try:
+        bounded_limit = max(1, min(limit, 100))
+        bounded_window_hours = max(1, min(summary_window_hours, 168))
+        bounded_list_window_hours = max(1, min(window_hours or bounded_window_hours, 168))
+        normalized_risk_kind = str(risk_kind or "all").strip().lower()
+        if normalized_risk_kind not in _TOOL_AUDIT_RISK_KINDS:
+            raise HTTPException(status_code=400, detail=f"Unsupported risk_kind '{risk_kind}'.")
+        agent, _, memory_store = _build_memory_store(agent_id)
+        summary_scan_limit = max(200, bounded_limit * 5)
+        recent_items = memory_store.get_execution_history(
+            session_key=session_key,
+            limit=summary_scan_limit,
+            execution_type="tool_audit",
+        )
+        window_items = _filter_tool_audits_by_window(recent_items, bounded_list_window_hours)
+        matched_items = [
+            item for item in window_items
+            if _matches_tool_audit_risk(item, normalized_risk_kind)
+        ]
+        items = matched_items[:bounded_limit]
+        blocked_count = sum(1 for item in items if _is_blocked_tool_audit(item))
+        error_count = sum(1 for item in items if bool(item.get("error")))
+        return {
+            "agent_id": agent.id if agent is not None else None,
+            "session_key": session_key,
+            "risk_kind": normalized_risk_kind,
+            "window_hours": bounded_list_window_hours,
+            "limit": bounded_limit,
+            "total_returned": len(items),
+            "total_matches": len(matched_items),
+            "blocked_count": blocked_count,
+            "error_count": error_count,
+            "summary": _build_tool_audit_summary(recent_items, bounded_window_hours),
+            "items": items,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get tool audit events: {}", e)
+        raise HTTPException(status_code=500, detail=f"Failed to get tool audit events: {str(e)}")
+
+
 @router.delete("/memory")
 async def clear_memory(days: int = 30, agent_id: Optional[str] = None):
     """Clear expired memory data.
@@ -7283,7 +7672,10 @@ async def update_agent_bootstrap_file(
     file_path, file_name = _agent_bootstrap_file_path(agent_id, file_kind)
     file_path.parent.mkdir(parents=True, exist_ok=True)
     normalized_kind = (file_kind or "").strip().lower()
-    normalized_content = normalize_bootstrap_file_content(request.content or "", normalized_kind)
+    try:
+        normalized_content = normalize_bootstrap_file_content(request.content or "", normalized_kind)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     file_path.write_text(normalized_content, encoding="utf-8")
     if normalized_kind in {"soul", "user"}:
         reconcile_bootstrap_files(
@@ -7326,6 +7718,11 @@ async def update_agent_bootstrap_summary(
     next_soul = upsert_markdown_section(next_soul, "沟通风格", request.communication_style)
     next_soul = upsert_markdown_section(next_soul, "边界约束", request.boundaries)
     next_user = upsert_markdown_section(next_user, "用户偏好", request.user_preferences)
+    try:
+        next_soul = normalize_bootstrap_file_content(next_soul, "soul")
+        next_user = normalize_bootstrap_file_content(next_user, "user")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     soul_path.parent.mkdir(parents=True, exist_ok=True)
     user_path.parent.mkdir(parents=True, exist_ok=True)
@@ -7383,10 +7780,15 @@ async def get_conversation_messages(conv_id: str):
         conv_type, target_id = conv_manager.parse_id(conv_id)
         if conv_type == ConversationType.DM:
             from horbot.agent.manager import get_agent_manager
+            from horbot.external_agents.manager import get_external_agent_manager
             agent_manager = get_agent_manager()
             agent = agent_manager.get_agent(target_id)
             if agent:
                 conv = conv_manager.get_or_create_dm(target_id, agent.name)
+            else:
+                external_agent = get_external_agent_manager().get_external_agent(target_id)
+                if external_agent:
+                    conv = conv_manager.get_or_create_dm(target_id, external_agent.name)
         elif conv_type == ConversationType.TEAM:
             from horbot.team.manager import get_team_manager
             team_manager = get_team_manager()
@@ -7640,6 +8042,28 @@ class CreateAgentRequest(BaseModel):
     memory_bank_profile: Dict[str, Any] = Field(default_factory=dict)
 
 
+class CreateExternalAgentRequest(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    avatar: str = ""
+    transport: str = "http_sse"
+    endpoint: str
+    auth_type: str = "none"
+    auth_secret: str = ""
+    auth_header: str = "Authorization"
+    capabilities: List[str] = Field(default_factory=list)
+    dm_enabled: bool = True
+    team_enabled: bool = False
+    mention_required: bool = True
+    timeout_s: int = 90
+    max_turn_chars: int = 12000
+    context_scope: str = "recent_turns"
+    memory_access: str = "none"
+    file_access: str = "none"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 def _normalize_string_list(values: List[str]) -> List[str]:
     seen: set[str] = set()
     result: List[str] = []
@@ -7658,6 +8082,111 @@ def _normalize_agent_id(value: str) -> str:
 
 def _normalize_team_id(value: str) -> str:
     return value.strip().lower()
+
+
+def _normalize_external_agent_id(value: str) -> str:
+    return value.strip().lower()
+
+
+def _validate_external_agent_transport(value: str) -> str:
+    transport = value.strip().lower()
+    allowed = {"http", "http_sse", "websocket"}
+    if transport not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported external agent transport: {value}")
+    return transport
+
+
+def _validate_external_agent_endpoint(value: str, transport: str) -> str:
+    endpoint = value.strip()
+    if not endpoint:
+        raise HTTPException(status_code=400, detail="External agent endpoint is required")
+
+    parsed = urlparse(endpoint)
+    if transport in {"http", "http_sse"}:
+        allowed_schemes = {"http", "https"}
+    else:
+        allowed_schemes = {"ws", "wss", "http", "https"}
+    if parsed.scheme not in allowed_schemes or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="External agent endpoint must be a valid absolute URL")
+    return endpoint
+
+
+def _validate_external_agent_auth_type(value: str) -> str:
+    auth_type = value.strip().lower()
+    allowed = {"none", "bearer", "header"}
+    if auth_type not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported external agent auth type: {value}")
+    return auth_type
+
+
+def _validate_external_agent_context_scope(value: str) -> str:
+    scope = value.strip().lower()
+    allowed = {"message_only", "recent_turns", "dm_summary"}
+    if scope not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported external agent context scope: {value}")
+    return scope
+
+
+def _validate_external_agent_memory_access(value: str) -> str:
+    access = value.strip().lower()
+    allowed = {"none", "summary_only"}
+    if access not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported external agent memory access: {value}")
+    return access
+
+
+def _validate_external_agent_file_access(value: str) -> str:
+    access = value.strip().lower()
+    allowed = {"none", "referenced_only"}
+    if access not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported external agent file access: {value}")
+    return access
+
+
+def _normalize_external_agent_metadata(value: Dict[str, Any] | None) -> Dict[str, Any]:
+    return dict(value or {})
+
+
+def _build_external_agent_config(
+    request: CreateExternalAgentRequest,
+    *,
+    persisted_secret: str = "",
+):
+    from horbot.config.schema import ExternalAgentConfig
+
+    request_name = request.name.strip()
+    if not request_name:
+        raise HTTPException(status_code=400, detail="External agent name is required")
+
+    transport = _validate_external_agent_transport(request.transport)
+    auth_type = _validate_external_agent_auth_type(request.auth_type)
+    endpoint = _validate_external_agent_endpoint(request.endpoint, transport)
+    timeout_s = max(5, min(int(request.timeout_s or 90), 600))
+    max_turn_chars = max(1000, min(int(request.max_turn_chars or 12000), 100000))
+    auth_header = (request.auth_header or "Authorization").strip() or "Authorization"
+    auth_secret = request.auth_secret.strip() or persisted_secret
+
+    return ExternalAgentConfig(
+        id=request.id.strip(),
+        name=request_name,
+        description=request.description.strip(),
+        avatar=request.avatar.strip(),
+        transport=transport,
+        endpoint=endpoint,
+        auth_type=auth_type,
+        auth_secret=auth_secret,
+        auth_header=auth_header,
+        capabilities=_normalize_string_list(request.capabilities),
+        dm_enabled=bool(request.dm_enabled),
+        team_enabled=bool(request.team_enabled),
+        mention_required=bool(request.mention_required),
+        timeout_s=timeout_s,
+        max_turn_chars=max_turn_chars,
+        context_scope=_validate_external_agent_context_scope(request.context_scope),
+        memory_access=_validate_external_agent_memory_access(request.memory_access),
+        file_access=_validate_external_agent_file_access(request.file_access),
+        metadata=_normalize_external_agent_metadata(request.metadata),
+    )
 
 
 def _normalize_memory_bank_profile(payload: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -7695,6 +8224,31 @@ def _validate_agent_ids_exist(config: Config, agent_ids: List[str]) -> List[str]
     return normalized
 
 
+def _validate_team_member_ids_exist(config: Config, member_ids: List[str]) -> List[str]:
+    normalized = _normalize_string_list(member_ids)
+    unknown_ids: list[str] = []
+    disabled_external_ids: list[str] = []
+
+    for member_id in normalized:
+        if member_id in config.agents.instances:
+            continue
+        external_agent = config.external_agents.instances.get(member_id)
+        if external_agent is None:
+            unknown_ids.append(member_id)
+            continue
+        if not bool(external_agent.team_enabled):
+            disabled_external_ids.append(member_id)
+
+    if unknown_ids:
+        raise HTTPException(status_code=400, detail=f"Unknown team members: {', '.join(unknown_ids)}")
+    if disabled_external_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"External agents are not team-enabled: {', '.join(disabled_external_ids)}",
+        )
+    return normalized
+
+
 def _normalize_team_member_profiles(config: Config, member_ids: List[str], profiles: Dict[str, Any] | None) -> Dict[str, Any]:
     normalized: Dict[str, Any] = {}
     raw_profiles = profiles or {}
@@ -7709,10 +8263,10 @@ def _normalize_team_member_profiles(config: Config, member_ids: List[str], profi
         }
 
     for agent_id in raw_profiles:
-        if agent_id not in config.agents.instances:
-            raise HTTPException(status_code=400, detail=f"Unknown agent in member profiles: {agent_id}")
+        if agent_id not in config.agents.instances and agent_id not in config.external_agents.instances:
+            raise HTTPException(status_code=400, detail=f"Unknown team member in member profiles: {agent_id}")
         if agent_id not in member_ids:
-            raise HTTPException(status_code=400, detail=f"Member profile provided for non-member agent: {agent_id}")
+            raise HTTPException(status_code=400, detail=f"Member profile provided for non-member team member: {agent_id}")
 
     lead_ids = [agent_id for agent_id, profile in normalized.items() if profile["is_lead"]]
     if len(lead_ids) > 1:
@@ -7922,6 +8476,140 @@ async def delete_agent(agent_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to delete agent: {str(e)}")
 
 
+@router.get("/external-agents")
+async def list_external_agents():
+    """List all configured external third-party agents."""
+    from horbot.external_agents.manager import get_external_agent_manager
+
+    manager = get_external_agent_manager()
+    agents = manager.get_all_external_agents()
+    return {
+        "external_agents": [agent.to_dict() for agent in agents],
+        "count": len(agents),
+    }
+
+
+@router.get("/external-agents/{external_agent_id}")
+async def get_external_agent(external_agent_id: str):
+    """Get one external third-party agent."""
+    from horbot.external_agents.manager import get_external_agent_manager
+
+    manager = get_external_agent_manager()
+    agent = manager.get_external_agent(external_agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"External agent '{external_agent_id}' not found")
+    return agent.to_dict()
+
+
+@router.post("/external-agents")
+async def create_external_agent(request: CreateExternalAgentRequest):
+    """Create a new external third-party agent."""
+    from horbot.config.loader import load_config, save_config
+
+    config = load_config()
+    request_id = request.id.strip()
+    normalized_request_id = _normalize_external_agent_id(request_id)
+    if not request_id:
+        raise HTTPException(status_code=400, detail="External agent ID is required")
+
+    existing_agent_id = next(
+        (
+            existing_id
+            for existing_id in config.external_agents.instances
+            if _normalize_external_agent_id(existing_id) == normalized_request_id
+        ),
+        None,
+    )
+    if existing_agent_id is not None:
+        raise HTTPException(status_code=400, detail=f"External agent ID '{request_id}' already exists")
+
+    external_agent_config = _build_external_agent_config(request)
+    config.external_agents.instances[request_id] = external_agent_config
+
+    try:
+        save_config(config)
+        return {
+            "status": "created",
+            "external_agent_id": request_id,
+            "message": f"External agent '{external_agent_config.name}' created successfully",
+        }
+    except Exception as e:
+        logger.error("Failed to create external agent: {}", e)
+        raise HTTPException(status_code=500, detail=f"Failed to create external agent: {str(e)}")
+
+
+@router.put("/external-agents/{external_agent_id}")
+async def update_external_agent(external_agent_id: str, request: CreateExternalAgentRequest):
+    """Update an external third-party agent."""
+    from horbot.config.loader import load_config, save_config
+
+    config = load_config()
+    existing = config.external_agents.instances.get(external_agent_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"External agent '{external_agent_id}' not found")
+
+    external_agent_config = _build_external_agent_config(
+        request,
+        persisted_secret=str(existing.auth_secret or ""),
+    )
+    external_agent_config.id = external_agent_id
+    config.external_agents.instances[external_agent_id] = external_agent_config
+    if not external_agent_config.team_enabled:
+        remove_external_agent_references(config, external_agent_id)
+
+    try:
+        save_config(config)
+        return {
+            "status": "updated",
+            "external_agent_id": external_agent_id,
+            "message": f"External agent '{external_agent_config.name}' updated successfully",
+        }
+    except Exception as e:
+        logger.error("Failed to update external agent: {}", e)
+        raise HTTPException(status_code=500, detail=f"Failed to update external agent: {str(e)}")
+
+
+@router.delete("/external-agents/{external_agent_id}")
+async def delete_external_agent(external_agent_id: str):
+    """Delete an external third-party agent."""
+    from horbot.config.loader import load_config, save_config
+
+    config = load_config()
+    if external_agent_id not in config.external_agents.instances:
+        raise HTTPException(status_code=404, detail=f"External agent '{external_agent_id}' not found")
+
+    remove_external_agent_references(config, external_agent_id)
+    del config.external_agents.instances[external_agent_id]
+    try:
+        save_config(config)
+        return {
+            "status": "deleted",
+            "external_agent_id": external_agent_id,
+            "message": f"External agent '{external_agent_id}' deleted successfully",
+        }
+    except Exception as e:
+        logger.error("Failed to delete external agent: {}", e)
+        raise HTTPException(status_code=500, detail=f"Failed to delete external agent: {str(e)}")
+
+
+@router.post("/external-agents/{external_agent_id}/test")
+async def test_external_agent(external_agent_id: str):
+    """Probe an external third-party agent endpoint."""
+    from horbot.external_agents.manager import get_external_agent_manager
+    from horbot.external_agents.runtime import get_external_agent_runtime
+
+    manager = get_external_agent_manager()
+    agent = manager.get_external_agent(external_agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"External agent '{external_agent_id}' not found")
+
+    result = await get_external_agent_runtime().probe(agent)
+    return {
+        "external_agent_id": external_agent_id,
+        **result,
+    }
+
+
 @router.get("/teams")
 async def list_teams():
     """List all available teams."""
@@ -7955,24 +8643,60 @@ async def get_team_members(team_id: str):
     """Get members of a specific team."""
     from horbot.team.manager import get_team_manager
     from horbot.agent.manager import get_agent_manager
-    
+    from horbot.external_agents.manager import get_external_agent_manager
+
     team_manager = get_team_manager()
     agent_manager = get_agent_manager()
+    external_agent_manager = get_external_agent_manager()
     
     team = team_manager.get_team(team_id)
     if not team:
         raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found")
-    
-    members = []
+
+    def _member_profile(member_id: str) -> dict[str, Any]:
+        return dict(team.member_profiles.get(member_id, {}) or {})
+
+    members: list[dict[str, Any]] = []
+    internal_members: list[dict[str, Any]] = []
+    external_members: list[dict[str, Any]] = []
+    member_order: list[dict[str, str]] = []
     for agent_id in team.members:
         agent = agent_manager.get_agent(agent_id)
         if agent:
-            members.append(agent.to_dict())
-    
+            payload = {
+                "id": agent_id,
+                "kind": "internal",
+                "profile": _member_profile(agent_id),
+                "agent": agent.to_dict(),
+            }
+            members.append(payload)
+            internal_members.append(payload)
+            member_order.append({"id": agent_id, "kind": "internal"})
+            continue
+        external_agent = external_agent_manager.get_external_agent(agent_id)
+        if external_agent:
+            payload = {
+                "id": agent_id,
+                "kind": "external",
+                "profile": _member_profile(agent_id),
+                "external_agent": external_agent.to_dict(),
+            }
+            members.append(payload)
+            external_members.append(payload)
+            member_order.append({"id": agent_id, "kind": "external"})
+
     return {
         "team_id": team_id,
         "members": members,
-        "count": len(members)
+        "internal_members": internal_members,
+        "external_members": external_members,
+        "member_order": member_order,
+        "count": len(members),
+        "counts": {
+            "total": len(members),
+            "internal": len(internal_members),
+            "external": len(external_members),
+        },
     }
 
 
@@ -8064,7 +8788,7 @@ async def create_team(request: CreateTeamRequest):
     if existing_team_id is not None:
         raise HTTPException(status_code=400, detail=f"Team ID '{request_id}' already exists")
 
-    member_ids = _validate_agent_ids_exist(config, request.members)
+    member_ids = _validate_team_member_ids_exist(config, request.members)
     member_profiles = _normalize_team_member_profiles(config, member_ids, request.member_profiles)
     
     team_config = TeamConfig(
@@ -8112,7 +8836,7 @@ async def update_team(team_id: str, request: CreateTeamRequest):
     if not request_name:
         raise HTTPException(status_code=400, detail="Team name is required")
 
-    member_ids = _validate_agent_ids_exist(config, request.members)
+    member_ids = _validate_team_member_ids_exist(config, request.members)
     member_profiles = _normalize_team_member_profiles(config, member_ids, request.member_profiles)
     
     team_config = TeamConfig(

@@ -95,6 +95,8 @@ def _restore_from_backup(backup_path: Path, original_path: Path) -> bool:
 
 def _normalize_after_bootstrap_write(file_path: Path, content: str) -> str:
     normalized_name = file_path.name.upper()
+    if normalized_name == "AGENTS.MD":
+        return normalize_bootstrap_file_content(content, "agents")
     if normalized_name == "SOUL.MD":
         return normalize_bootstrap_file_content(content, "soul")
     if normalized_name == "USER.MD":
@@ -171,6 +173,8 @@ class SafeWriteFileTool(Tool):
             return f"Successfully wrote {len(content)} bytes to {file_path}"
             
         except PermissionError as e:
+            return f"Error: {e}"
+        except ValueError as e:
             return f"Error: {e}"
         except Exception as e:
             logger.error(f"Error writing file: {e}")
@@ -254,6 +258,8 @@ class SafeEditFileTool(Tool):
             return f"Successfully edited {file_path}"
             
         except PermissionError as e:
+            return f"Error: {e}"
+        except ValueError as e:
             return f"Error: {e}"
         except Exception as e:
             logger.error(f"Error editing file: {e}")

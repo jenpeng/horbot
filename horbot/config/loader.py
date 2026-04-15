@@ -252,10 +252,12 @@ def _handle_managers_reload(old_config: Config | None, new_config: Config) -> No
     """
     agents_changed = False
     teams_changed = False
+    external_agents_changed = False
     
     if old_config is None:
         agents_changed = True
         teams_changed = True
+        external_agents_changed = True
     else:
         if hasattr(old_config, 'agents') and hasattr(new_config, 'agents'):
             old_agents = old_config.agents.model_dump() if old_config.agents else {}
@@ -268,6 +270,12 @@ def _handle_managers_reload(old_config: Config | None, new_config: Config) -> No
             new_teams = new_config.teams.model_dump() if new_config.teams else {}
             if old_teams != new_teams:
                 teams_changed = True
+
+        if hasattr(old_config, 'external_agents') and hasattr(new_config, 'external_agents'):
+            old_external_agents = old_config.external_agents.model_dump() if old_config.external_agents else {}
+            new_external_agents = new_config.external_agents.model_dump() if new_config.external_agents else {}
+            if old_external_agents != new_external_agents:
+                external_agents_changed = True
     
     if agents_changed:
         try:
@@ -286,6 +294,15 @@ def _handle_managers_reload(old_config: Config | None, new_config: Config) -> No
             logger.info("TeamManager reloaded due to config change")
         except Exception as e:
             logger.error(f"Failed to reload TeamManager: {e}")
+
+    if external_agents_changed:
+        try:
+            from horbot.external_agents.manager import get_external_agent_manager
+            manager = get_external_agent_manager()
+            manager.reload(new_config)
+            logger.info("ExternalAgentManager reloaded due to config change")
+        except Exception as e:
+            logger.error(f"Failed to reload ExternalAgentManager: {e}")
 
 
 def reload_config() -> Config:

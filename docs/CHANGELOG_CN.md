@@ -2,6 +2,30 @@
 
 本记录用于概览 Horbot 的关键功能和文档演进。更细粒度的代码改动请直接查看 Git 历史。
 
+## 2026-04-14
+
+### 多 Agent 管理与外部 Agent
+
+- 新增 `external_agents` 配置与运行时模块，支持外部 Agent 的列表、详情、创建、更新、删除与连接探测
+- “Connect External Agent” 界面补齐更友好的能力标签交互，支持快捷预设、智能推荐、常用标签点选与折叠式手动补充，而不再只依赖手填
+- 团队成员接口 `GET /api/teams/{team_id}/members` 的返回体显式区分 `internal_members` / `external_members`，并补充 `member_order` 与分类统计，便于前端稳定渲染 mixed team
+- Teams 页面同步支持外部 Agent 目录、团队成员展示、团队选择与相关表单/校验回归
+
+### Agent Bootstrap、安全与审计
+
+- Agent 实例级 bootstrap 文件扩展为 `AGENTS.md`、`SOUL.md`、`USER.md` 三类可编辑资产，Web 管理端支持直接读取、保存与摘要回写
+- 新增 `horbot/security/runtime_guard.py`，集中提供用户输入 intent guard、tool result 检查/脱敏、bootstrap 内容检查等运行时安全守卫
+- 工具执行审计接口 `GET /api/memory/tool-audits` 支持按 `agent_id`、`session_key`、风险类型和时间窗口查询，并返回最近窗口的聚合摘要
+- Agent Activity 面板新增工具审计视图，支持按风险和会话过滤，并在顶部展示最近 24h 的拦截 / exec / 外联 / 错误摘要
+
+### 聊天诊断与失败恢复
+
+- 聊天错误消息卡片新增 provider 诊断字段展示，包括 `request_id`、`error_code`、`error_kind`、provider、model 与 status code
+- 前端流式 inactivity timeout 已提高到 `240s`，并在超时后按 `request_id` 回查历史消息，避免后端已成功落盘但前端误报“模型服务响应超时”
+- 会话顶部黄条与 turn 级 badge 现在都会直接展示失败请求的 `request_id`，无需展开具体错误消息再查诊断线索
+- Web 单聊上下文压缩改为预算驱动：先压缩旧话题，再在必要时继续裁剪最近的大段 assistant/tool 内容，避免超长 recent context 把首轮响应拖到假超时
+- 当模型返回 `finish_reason=length` 时，AgentLoop 会自动续答并把后续片段拼接到同一条流式回复和最终落盘消息中，而不是把半截回答直接暴露给前端
+
 ## 2026-04-13
 
 ### 多语言与文档

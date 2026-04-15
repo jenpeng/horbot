@@ -476,6 +476,36 @@ class TeamsConfig(Base):
     instances: dict[str, TeamConfig] = Field(default_factory=dict)
 
 
+class ExternalAgentConfig(Base):
+    """External third-party agent configuration."""
+
+    id: str = ""
+    name: str = ""
+    description: str = ""
+    avatar: str = ""
+    transport: Literal["http", "http_sse", "websocket"] = "http_sse"
+    endpoint: str = ""
+    auth_type: Literal["none", "bearer", "header"] = "none"
+    auth_secret: str = ""
+    auth_header: str = "Authorization"
+    capabilities: list[str] = Field(default_factory=list)
+    dm_enabled: bool = True
+    team_enabled: bool = False
+    mention_required: bool = True
+    timeout_s: int = 90
+    max_turn_chars: int = 12000
+    context_scope: Literal["message_only", "recent_turns", "dm_summary"] = "recent_turns"
+    memory_access: Literal["none", "summary_only"] = "none"
+    file_access: Literal["none", "referenced_only"] = "none"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExternalAgentsConfig(Base):
+    """External agent configuration collection."""
+
+    instances: dict[str, ExternalAgentConfig] = Field(default_factory=dict)
+
+
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
@@ -616,6 +646,7 @@ class Config(BaseSettings):
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     teams: TeamsConfig = Field(default_factory=TeamsConfig)
+    external_agents: ExternalAgentsConfig = Field(default_factory=ExternalAgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)

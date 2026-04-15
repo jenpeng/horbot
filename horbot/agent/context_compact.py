@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from dataclasses import dataclass, field
@@ -313,6 +314,119 @@ def compress_tool_results(content: list[dict]) -> list[dict]:
     return compressed
 
 
+def _clone_messages(messages: list[dict]) -> list[dict]:
+    """Clone messages so compaction never mutates caller-owned history."""
+    return [copy.deepcopy(message) for message in messages]
+
+
+def _clip_text_block(
+    text: str,
+    *,
+    max_chars: int,
+    label: str,
+) -> str:
+    """Keep both head and tail of long text blocks."""
+    if len(text) <= max_chars:
+        return text
+    if max_chars <= 80:
+        return text[:max_chars]
+
+    head = max_chars // 2
+    tail = max_chars - head - 32
+    tail = max(24, tail)
+    return (
+        f"[{label}: {len(text)} chars]\n"
+        f"{text[:head]}\n"
+        "[...omitted...]\n"
+        f"{text[-tail:]}"
+    )
+
+
+def _compress_message_payload(
+    message: dict,
+    *,
+    text_limit: int,
+    tool_limit: int,
+) -> tuple[dict, bool]:
+    """Shrink large recent messages while preserving the newest user turn."""
+    updated = copy.deepcopy(message)
+    changed = False
+    content = updated.get("content")
+
+    if isinstance(content, str):
+        clipped = _clip_text_block(content, max_chars=text_limit, label=f"Compressed {updated.get('role', 'message')}")
+        if clipped != content:
+            updated["content"] = clipped
+            changed = True
+        return updated, changed
+
+    if not isinstance(content, list):
+        return updated, False
+
+    blocks: list[dict[str, Any] | Any] = []
+    for block in content:
+        if not isinstance(block, dict):
+            blocks.append(block)
+            continue
+
+        next_block = copy.deepcopy(block)
+        block_type = next_block.get("type")
+        if block_type in ("text", "input_text", "output_text"):
+            text_value = next_block.get("text")
+            if isinstance(text_value, str):
+                clipped = _clip_text_block(text_value, max_chars=text_limit, label="Compressed text block")
+                if clipped != text_value:
+                    next_block["text"] = clipped
+                    changed = True
+        elif block_type == "tool_result":
+            tool_content = next_block.get("content")
+            if isinstance(tool_content, str):
+                clipped = _clip_text_block(tool_content, max_chars=tool_limit, label="Compressed tool result")
+                if clipped != tool_content:
+                    next_block["content"] = clipped
+                    changed = True
+        blocks.append(next_block)
+
+    if changed:
+        updated["content"] = blocks
+    return updated, changed
+
+
+def _shrink_recent_messages_to_budget(
+    messages: list[dict],
+    *,
+    max_tokens: int,
+    protected_tail_messages: int = 1,
+) -> list[dict]:
+    """Aggressively shrink oversized recent messages until they fit the budget."""
+    candidate = _clone_messages(messages)
+    if estimate_tokens(candidate) <= max_tokens:
+        return candidate
+
+    non_system_indexes = [index for index, message in enumerate(candidate) if message.get("role") != "system"]
+    compressible_indexes = non_system_indexes[:-protected_tail_messages] if protected_tail_messages > 0 else non_system_indexes
+    if not compressible_indexes:
+        return candidate
+
+    for text_limit, tool_limit in ((1600, 700), (1000, 450), (700, 280)):
+        changed = False
+        for index in compressible_indexes:
+            updated, did_change = _compress_message_payload(
+                candidate[index],
+                text_limit=text_limit,
+                tool_limit=tool_limit,
+            )
+            if did_change:
+                candidate[index] = updated
+                changed = True
+            if estimate_tokens(candidate) <= max_tokens:
+                return candidate
+        if not changed:
+            break
+
+    return candidate
+
+
 def compress_to_summary(messages: list[dict]) -> str:
     """Compress a list of messages to a summary (legacy function)."""
     topics = set()
@@ -380,31 +494,28 @@ def segmented_compact_context(
     Returns:
         Compressed message list, or CompressionResult if return_details=True
     """
-    current_tokens = estimate_tokens(messages)
+    source_messages = _clone_messages(messages)
+    current_tokens = estimate_tokens(source_messages)
     
     if current_tokens <= max_tokens:
         logger.debug(f"Context under threshold: {current_tokens} <= {max_tokens}")
         if return_details:
             return CompressionResult(
-                messages=messages,
+                messages=source_messages,
                 original_tokens=current_tokens,
                 compressed_tokens=current_tokens,
                 reduction_percent=0.0,
                 was_compressed=False,
             )
-        return messages
+        return source_messages
     
     logger.info(f"Segmented context compression triggered: {current_tokens} > {max_tokens}")
-    
-    result = []
-    
-    system_messages = [m for m in messages if m.get("role") == "system"]
-    non_system = [m for m in messages if m.get("role") != "system"]
-    
-    result.extend(system_messages)
-    
+
+    system_messages = [m for m in source_messages if m.get("role") == "system"]
+    non_system = [m for m in source_messages if m.get("role") != "system"]
+
     if len(non_system) <= preserve_recent:
-        result.extend(non_system)
+        result = system_messages + non_system
         if return_details:
             return CompressionResult(
                 messages=result,
@@ -414,46 +525,79 @@ def segmented_compact_context(
                 was_compressed=False,
             )
         return result
-    
-    middle_messages = non_system[:-preserve_recent]
-    recent_messages = non_system[-preserve_recent:]
-    
-    segments = detect_topic_change(middle_messages)
-    
-    if len(segments) <= 1:
-        summary = compress_to_summary(middle_messages)
-        result.append({
-            "role": "user",
-            "content": f"[Previous conversation summary]\n{summary}"
-        })
-    else:
-        segment_summaries = []
-        for i, segment in enumerate(segments):
-            summary = compress_segment_to_summary(segment)
-            segment_summaries.append(f"\n{summary}")
-        
-        combined_summary = "\n".join([
-            "[Previous conversation - Topic Segments]",
-            "=" * 40,
-            *segment_summaries,
-        ])
-        
-        result.append({
-            "role": "user",
-            "content": combined_summary
-        })
-    
-    if compress_tool_results_flag:
-        for msg in recent_messages:
-            content = msg.get("content")
-            if isinstance(content, list):
-                msg["content"] = compress_tool_results(content)
-    
-    result.extend(recent_messages)
-    
-    new_tokens = estimate_tokens(result)
+
+    min_preserve_recent = 1 if len(non_system) <= 1 else min(2, len(non_system))
+    effective_preserve_recent = min(max(preserve_recent, min_preserve_recent), len(non_system))
+    result: list[dict] = []
+    segments: list[TopicSegment] = []
+
+    while True:
+        result = list(system_messages)
+        middle_messages = non_system[:-effective_preserve_recent]
+        recent_messages = _clone_messages(non_system[-effective_preserve_recent:])
+        segments = detect_topic_change(middle_messages)
+
+        if len(segments) <= 1:
+            summary = compress_to_summary(middle_messages)
+            result.append({
+                "role": "user",
+                "content": f"[Previous conversation summary]\n{summary}"
+            })
+        else:
+            segment_summaries = []
+            for segment in segments:
+                summary = compress_segment_to_summary(segment)
+                segment_summaries.append(f"\n{summary}")
+
+            combined_summary = "\n".join([
+                "[Previous conversation - Topic Segments]",
+                "=" * 40,
+                *segment_summaries,
+            ])
+
+            result.append({
+                "role": "user",
+                "content": combined_summary
+            })
+
+        if compress_tool_results_flag:
+            for msg in recent_messages:
+                content = msg.get("content")
+                if isinstance(content, list):
+                    msg["content"] = compress_tool_results(content)
+
+        result.extend(recent_messages)
+        new_tokens = estimate_tokens(result)
+        if new_tokens <= max_tokens or effective_preserve_recent <= min_preserve_recent:
+            break
+
+        effective_preserve_recent -= 1
+
+    if new_tokens > max_tokens:
+        result = _shrink_recent_messages_to_budget(
+            result,
+            max_tokens=max_tokens,
+            protected_tail_messages=1,
+        )
+        new_tokens = estimate_tokens(result)
+
+    if new_tokens > max_tokens:
+        result = _shrink_recent_messages_to_budget(
+            result,
+            max_tokens=max_tokens,
+            protected_tail_messages=0,
+        )
+        new_tokens = estimate_tokens(result)
+
     reduction = (1 - new_tokens / current_tokens) * 100
-    logger.info(f"Context compressed: {current_tokens} -> {new_tokens} tokens ({reduction:.1f}% reduction, {len(segments)} topics)")
+    logger.info(
+        "Context compressed: {} -> {} tokens ({:.1f}% reduction, {} topics, preserve_recent={})",
+        current_tokens,
+        new_tokens,
+        reduction,
+        len(segments),
+        effective_preserve_recent,
+    )
     
     if return_details:
         return CompressionResult(

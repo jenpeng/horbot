@@ -766,6 +766,7 @@ class HierarchicalContextManager:
         self,
         session_key: str | None = None,
         limit: int = 10,
+        execution_type: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         获取执行历史。
@@ -773,6 +774,7 @@ class HierarchicalContextManager:
         Args:
             session_key: 会话标识（可选，用于过滤）
             limit: 最大返回数量
+            execution_type: 执行记录类型过滤（可选）
             
         Returns:
             执行历史列表
@@ -786,10 +788,13 @@ class HierarchicalContextManager:
         )[:limit * 2]:
             try:
                 data = json.loads(file_path.read_text(encoding="utf-8"))
-                if session_key is None or data.get("session_key") == session_key:
-                    results.append(data)
-                    if len(results) >= limit:
-                        break
+                if session_key is not None and data.get("session_key") != session_key:
+                    continue
+                if execution_type is not None and data.get("type") != execution_type:
+                    continue
+                results.append(data)
+                if len(results) >= limit:
+                    break
             except (json.JSONDecodeError, Exception) as e:
                 logger.warning("Failed to read execution log {}: {}", file_path.name, e)
         

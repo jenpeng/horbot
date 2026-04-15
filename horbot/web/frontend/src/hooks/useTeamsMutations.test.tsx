@@ -70,4 +70,43 @@ describe('useTeamsMutations', () => {
       workspace: '',
     })).rejects.toThrow('team update failed');
   });
+
+  it('serializes external agent forms without UI-only fields', async () => {
+    vi.mocked(fetch).mockResolvedValue(createJsonResponse({ ok: true }));
+
+    const { result } = renderHook(() => useTeamsMutations());
+
+    await act(async () => {
+      await result.current.createExternalAgent({
+        id: 'partner-agent',
+        name: 'Partner Agent',
+        description: 'External',
+        avatar: '',
+        transport: 'http_sse',
+        endpoint: 'https://example.com/agent',
+        auth_type: 'bearer',
+        auth_header: 'Authorization',
+        auth_secret: 'secret',
+        auth_secret_configured: true,
+        capabilities: ['research'],
+        dm_enabled: true,
+        team_enabled: false,
+        mention_required: true,
+        timeout_s: 90,
+        max_turn_chars: 12000,
+        context_scope: 'recent_turns',
+        memory_access: 'none',
+        file_access: 'none',
+        metadata: {},
+      });
+    });
+
+    expect(fetch).toHaveBeenCalledWith('/api/external-agents', expect.objectContaining({
+      method: 'POST',
+    }));
+    const requestInit = vi.mocked(fetch).mock.calls[0]?.[1] as RequestInit;
+    const payload = JSON.parse(String(requestInit.body));
+    expect(payload.auth_secret_configured).toBeUndefined();
+    expect(payload.auth_secret).toBe('secret');
+  });
 });

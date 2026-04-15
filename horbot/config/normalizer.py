@@ -71,7 +71,9 @@ def set_team_members(config: Config, team_id: str, member_ids: Iterable[str]) ->
         agent.teams = [existing_team_id for existing_team_id in _unique_str_list(agent.teams) if existing_team_id != team_id]
 
     for member_id in normalized_member_ids:
-        agent = config.agents.instances[member_id]
+        agent = config.agents.instances.get(member_id)
+        if agent is None:
+            continue
         agent.teams = _unique_str_list([*agent.teams, team_id])
 
     return normalized_member_ids
@@ -83,6 +85,14 @@ def remove_agent_references(config: Config, agent_id: str) -> None:
         team.members = [member_id for member_id in _unique_str_list(team.members) if member_id != agent_id]
         if agent_id in team.member_profiles:
             del team.member_profiles[agent_id]
+
+
+def remove_external_agent_references(config: Config, external_agent_id: str) -> None:
+    """Remove an external agent from all team member lists."""
+    for team in config.teams.instances.values():
+        team.members = [member_id for member_id in _unique_str_list(team.members) if member_id != external_agent_id]
+        if external_agent_id in team.member_profiles:
+            del team.member_profiles[external_agent_id]
 
 
 def remove_team_references(config: Config, team_id: str) -> None:
@@ -106,6 +116,14 @@ def normalize_config(config: Config) -> Config:
         team.members = _unique_str_list(team.members)
         team.workspace = team.workspace.strip()
 
+    for agent in config.external_agents.instances.values():
+        agent.capabilities = _unique_str_list(agent.capabilities)
+        agent.endpoint = agent.endpoint.strip()
+        agent.auth_header = (agent.auth_header or "Authorization").strip() or "Authorization"
+        agent.transport = agent.transport.strip().lower()
+        agent.auth_type = agent.auth_type.strip().lower()
+        agent.metadata = dict(agent.metadata or {})
+
     normalized_endpoints = []
     seen_endpoint_ids: set[str] = set()
     for endpoint in config.channels.endpoints:
@@ -123,6 +141,8 @@ def normalize_config(config: Config) -> Config:
     config.channels.endpoints = normalized_endpoints
 
     valid_agent_ids = set(config.agents.instances.keys())
+    valid_external_agent_ids = set(config.external_agents.instances.keys())
+    valid_team_member_ids = valid_agent_ids | valid_external_agent_ids
     valid_team_ids = set(config.teams.instances.keys())
     valid_endpoint_ids = {endpoint.id for endpoint in config.channels.endpoints}
     valid_endpoint_ids.update(_legacy_endpoint_id(channel_type) for channel_type in _CHANNEL_TYPES)
@@ -136,11 +156,11 @@ def normalize_config(config: Config) -> Config:
         ]
 
     for team in config.teams.instances.values():
-        team.members = [member_id for member_id in team.members if member_id in valid_agent_ids]
+        team.members = [member_id for member_id in team.members if member_id in valid_team_member_ids]
         team.member_profiles = {
             member_id: profile
             for member_id, profile in team.member_profiles.items()
-            if member_id in valid_agent_ids
+            if member_id in valid_team_member_ids
         }
 
     for team_id, team in config.teams.instances.items():

@@ -142,6 +142,11 @@ const TeamFormModal = ({
                     className="rounded border-surface-300 text-primary-500 focus:ring-primary-500"
                   />
                   <span className="text-sm text-surface-700">{agent.name}</span>
+                  {agent.external && (
+                    <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700 ring-1 ring-sky-200">
+                      {t('chat.externalBadge')}
+                    </span>
+                  )}
                 </label>
               ))}
             </div>

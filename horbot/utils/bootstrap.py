@@ -6,6 +6,10 @@ from pathlib import Path
 import re
 from typing import Any
 
+from loguru import logger
+
+from horbot.security.runtime_guard import inspect_bootstrap_write
+
 SETUP_PENDING_MARKER = "HORBOT_SETUP_PENDING"
 
 DEFAULT_SOUL_TEMPLATE_SIGNATURES = ["# Soul", "# 灵魂"]
@@ -123,9 +127,15 @@ def remove_setup_pending_marker(content: str) -> str:
 def normalize_bootstrap_file_content(content: str, file_kind: str) -> str:
     """Normalize explicit bootstrap writes before persisting."""
     normalized_kind = (file_kind or "").strip().lower()
-    if normalized_kind not in {"soul", "user"}:
+    if normalized_kind not in {"agents", "soul", "user"}:
         return content or ""
-    return remove_setup_pending_marker(content or "")
+    normalized = remove_setup_pending_marker(content or "")
+    guard = inspect_bootstrap_write(normalized_kind, normalized)
+    if guard.blocked:
+        raise ValueError(
+            f"Unsafe bootstrap content for {normalized_kind}: {', '.join(guard.reasons[:2])}"
+        )
+    return guard.output
 
 
 def parse_markdown_sections(content: str) -> tuple[str, dict[str, list[str]]]:
@@ -526,6 +536,11 @@ def reconcile_bootstrap_files(
 
     summary = build_bootstrap_summary(agent_name, soul_content, user_content)
     generated_peer = render_bootstrap_file_from_summary(peer_kind, agent_name, summary)
+    try:
+        generated_peer = normalize_bootstrap_file_content(generated_peer, peer_kind)
+    except ValueError:
+        logger.warning("Blocked suspicious auto-generated peer bootstrap file for {}", peer_kind)
+        return {"soul": soul_content, "user": user_content}
     peer_path.parent.mkdir(parents=True, exist_ok=True)
     peer_path.write_text(generated_peer, encoding="utf-8")
 
@@ -559,6 +574,12 @@ def materialize_bootstrap_from_messages(
 
     soul_rendered = render_bootstrap_file_from_summary("soul", agent_name, merged_summary)
     user_rendered = render_bootstrap_file_from_summary("user", agent_name, merged_summary)
+    try:
+        soul_rendered = normalize_bootstrap_file_content(soul_rendered, "soul")
+        user_rendered = normalize_bootstrap_file_content(user_rendered, "user")
+    except ValueError:
+        logger.warning("Blocked suspicious bootstrap materialization for workspace {}", workspace)
+        return False
 
     soul_path.parent.mkdir(parents=True, exist_ok=True)
     user_path.parent.mkdir(parents=True, exist_ok=True)

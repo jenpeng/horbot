@@ -33,6 +33,8 @@ interface AgentInfo {
 export interface SessionStatus {
   tone: 'info' | 'warning' | 'error' | 'success';
   message: string;
+  detailLabel?: string;
+  detailValue?: string;
   actionLabel?: string;
   onAction?: () => void | Promise<void>;
   actionTone?: 'neutral' | 'danger';
@@ -929,7 +931,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
         {sessionStatus && (
           <div
             data-testid="chat-session-status"
-              className={`mt-2 flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-2.5 text-sm shadow-sm ${
+              className={`mt-2 flex flex-wrap items-start justify-between gap-3 rounded-2xl border px-4 py-2.5 text-sm shadow-sm ${
               sessionStatus.tone === 'error'
                 ? 'border-red-200 bg-red-50 text-red-900'
                 : sessionStatus.tone === 'warning'
@@ -939,9 +941,26 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     : 'border-sky-200 bg-sky-50 text-sky-900'
             }`}
           >
-            <div className="flex min-w-0 items-center gap-2">
-              <Info className="h-4 w-4 flex-shrink-0" strokeWidth={2} />
-              <span data-testid="chat-session-status-message" className="min-w-0 truncate">{sessionStatus.message}</span>
+            <div className="flex min-w-0 items-start gap-2">
+              <Info className="mt-0.5 h-4 w-4 flex-shrink-0" strokeWidth={2} />
+              <div className="min-w-0">
+                <div data-testid="chat-session-status-message" className="min-w-0 truncate">
+                  {sessionStatus.message}
+                </div>
+                {sessionStatus.detailValue && (
+                  <div
+                    data-testid="chat-session-status-detail"
+                    className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-current/80"
+                  >
+                    {sessionStatus.detailLabel && (
+                      <span className="font-medium">{sessionStatus.detailLabel}</span>
+                    )}
+                    <code className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap rounded bg-white/70 px-1.5 py-0.5 font-mono text-[11px]">
+                      {sessionStatus.detailValue}
+                    </code>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-2">
               {sessionStatus.actionLabel && sessionStatus.onAction && (

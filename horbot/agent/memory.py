@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from loguru import logger
 
+from horbot.security.runtime_guard import inspect_memory_write
 from horbot.utils.helpers import ensure_dir
 
 if TYPE_CHECKING:
@@ -506,6 +507,11 @@ class MemoryStore:
         return content
 
     def write_long_term(self, content: str) -> None:
+        guard = inspect_memory_write("long_term", content)
+        if guard.blocked:
+            logger.warning("Blocked suspicious long-term memory write for agent {}", self.agent_id or "default")
+            return
+        content = guard.output
         self.memory_file.write_text(content, encoding="utf-8")
         self._cache[self._cache_key] = (content, self.memory_file.stat().st_mtime)
         
@@ -517,6 +523,11 @@ class MemoryStore:
             )
 
     def append_history(self, entry: str) -> None:
+        guard = inspect_memory_write("history", entry)
+        if guard.blocked:
+            logger.warning("Blocked suspicious history write for agent {}", self.agent_id or "default")
+            return
+        entry = guard.output
         with open(self.history_file, "a", encoding="utf-8") as f:
             f.write(entry.rstrip() + "\n\n")
         
@@ -646,6 +657,11 @@ class MemoryStore:
         return self.reflection_file.read_text(encoding="utf-8")
 
     def write_reflection(self, content: str) -> None:
+        guard = inspect_memory_write("reflection", content)
+        if guard.blocked:
+            logger.warning("Blocked suspicious reflection write for agent {}", self.agent_id or "default")
+            return
+        content = guard.output
         self.reflection_file.write_text(content, encoding="utf-8")
         if self._hierarchical_enabled and self._context_manager and content.strip():
             self._context_manager.add_memory(
@@ -1592,6 +1608,8 @@ class MemoryStore:
         self,
         execution_log: dict[str, Any],
         session_key: str,
+        *,
+        index_as_memory: bool = True,
     ) -> None:
         """
         Add execution history as memory.
@@ -1602,7 +1620,9 @@ class MemoryStore:
         """
         if self._hierarchical_enabled and self._context_manager:
             self._context_manager.add_execution(execution_log, session_key)
-            
+            if not index_as_memory:
+                return
+
             key_info = self._context_manager.extract_key_info_as_memory(execution_log)
             if key_info:
                 execution_metadata = {
@@ -1626,6 +1646,7 @@ class MemoryStore:
         self,
         session_key: str | None = None,
         limit: int = 10,
+        execution_type: str | None = None,
     ) -> list[dict[str, Any]]:
         """
         Get execution history.
@@ -1633,12 +1654,17 @@ class MemoryStore:
         Args:
             session_key: Optional session filter
             limit: Maximum results
+            execution_type: Optional execution type filter
             
         Returns:
             List of execution logs
         """
         if self._hierarchical_enabled and self._context_manager:
-            return self._context_manager.get_execution_history(session_key, limit)
+            return self._context_manager.get_execution_history(
+                session_key,
+                limit,
+                execution_type=execution_type,
+            )
         return []
     
     def get_memory_stats(self) -> dict[str, Any]:

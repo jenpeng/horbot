@@ -2,7 +2,7 @@
 
 本文档介绍 horbot 的整体架构和核心模块。
 
-当前 Web Chat 的团队接力除了消息流式展示外，还支持在“单聊发起团队接力”场景下自动在单聊与团队会话之间切换，并通过顶部短暂提示明确说明当前跳转原因。
+当前 Web Chat 的团队接力除了消息流式展示外，还支持在“单聊发起团队接力”场景下自动在单聊与团队会话之间切换，并通过顶部短暂提示明确说明当前跳转原因。最新聊天诊断链路会把失败请求的 `request_id` 直接显示在顶部黄条和 turn 级 badge 上，并在超时后按 `request_id` 回查历史，减少前端假超时误报；同时，Web 单聊对超长上下文会在进入模型前自动压缩，并在模型被长度截断时自动续答。
 
 ## 🏗️ 整体架构
 
@@ -13,6 +13,17 @@ horbot 采用模块化设计，核心组件包括：
 3. **提供商层** - 多 LLM 提供商支持
 4. **工具系统** - 内置工具和 MCP 扩展
 5. **存储层** - 会话、记忆、配置持久化
+6. **安全治理层** - 用户输入守卫、工具结果审计与 bootstrap 资产治理
+7. **外部 Agent 接入层** - 第三方 Agent 配置、探测与团队成员编排
+
+### 当前治理与诊断增量
+
+- Agent 实例除了 `SOUL.md` / `USER.md`，还新增 `AGENTS.md` 作为运行治理与协作规则文件
+- 外部 Agent 通过独立 `external_agents` 模块接入，不与内部 Agent 配置混写
+- 团队成员接口返回已显式区分 internal / external member，前端可稳定渲染 mixed team
+- 工具审计支持按风险级别、时间窗口、`session_key` 聚合，并在管理页顶部展示摘要
+- 聊天错误卡片、顶部状态条和 turn badge 都会尽量保留 `request_id` 作为统一诊断线索
+- `AgentLoop` 对 `web:` 会话引入更激进的上下文压缩预算，并在 `finish_reason=length` 时自动发起续答，最终把多段内容合并成一条 assistant 消息落盘
 
 ### 架构概览图
 
@@ -159,6 +170,11 @@ horbot/
 ├── config/                  # 配置模块
 │   ├── schema.py            # 配置模式
 │   └── loader.py            # 配置加载器
+├── external_agents/         # 外部 Agent 接入
+│   ├── manager.py           # 外部 Agent 管理器
+│   ├── models.py            # 外部 Agent 数据模型
+│   ├── runtime.py           # 连接探测与调用运行时
+│   └── adapters/            # 鉴权/协议适配器
 ├── cron/                    # 定时任务
 │   ├── service.py           # 任务服务
 │   └── types.py             # 类型定义
@@ -171,6 +187,8 @@ horbot/
 │   ├── openai_codex_provider.py  # OpenAI Codex
 │   ├── custom_provider.py   # 自定义提供商
 │   └── transcription.py     # 语音转录
+├── security/                # 运行时安全守卫
+│   └── runtime_guard.py     # 输入/输出/bootstrap 安全检查
 ├── session/                 # 会话管理
 │   └── manager.py           # 会话管理器
 ├── skills/                  # 内置技能
@@ -946,6 +964,18 @@ flowchart TD
 | 工作区内             | 允许操作 |
 | 工作区外             | 根据配置 |
 
+### 运行时安全守卫
+
+当前安全收口除了权限系统，还增加了内容级守卫：
+
+| 守卫层 | 作用点 | 当前用途 |
+|--------|--------|----------|
+| `inspect_user_input` | 用户输入进入聊天链路前 | 拦截明显的 prompt extraction / guard bypass / secret exfiltration intent |
+| `inspect_tool_result` | 工具结果进入模型上下文和审计前 | 阻断危险指令回灌，并对密钥/令牌做脱敏 |
+| `inspect_bootstrap_write` | `AGENTS.md` / `SOUL.md` / `USER.md` 写入前 | 用于识别危险覆盖指令、命令载荷与嵌入式凭证 |
+
+工具执行记录会以 `tool_audit` 形式写入执行历史，并通过 `/api/memory/tool-audits` 暴露给管理端用于风险摘要与审计排查。
+
 ***
 
 ## 📂 存储架构
@@ -956,7 +986,7 @@ flowchart TD
 .horbot/
 ├── agents/
 │   └── <agent-id>/
-│       ├── workspace/   # Agent 私有工作区
+│       ├── workspace/   # Agent 私有工作区（含 AGENTS.md / SOUL.md / USER.md）
 │       ├── memory/      # Agent 私有记忆
 │       ├── sessions/    # Agent 会话历史
 │       └── skills/      # Agent 私有技能
@@ -976,6 +1006,12 @@ flowchart TD
 ```
 
 旧 `.horbot/context` 与 `.horbot/memory` 目录仅保留给历史环境迁移，当前运行态不再依赖。
+
+其中与本轮治理能力最相关的持久化内容包括：
+
+- Agent workspace 下的 `AGENTS.md` / `SOUL.md` / `USER.md`
+- `memory/executions` 下的 `tool_audit` 执行历史
+- `sessions` 中带 `request_id`、`turn_id` 的聊天消息，用于超时后历史回查和失败诊断
 
 ***
 

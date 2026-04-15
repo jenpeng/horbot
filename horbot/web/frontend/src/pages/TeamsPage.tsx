@@ -6,6 +6,8 @@ import AgentOverviewCard from '../components/teams/AgentOverviewCard';
 import TeamDetailView from '../components/teams/TeamDetailView';
 import TeamFormModal from '../components/teams/TeamFormModal';
 import TeamsSidebar from '../components/teams/TeamsSidebar';
+import ExternalAgentDetailView from '../components/teams/external/ExternalAgentDetailView';
+import ExternalAgentFormModal from '../components/teams/external/ExternalAgentFormModal';
 import { useI18n } from '../contexts/I18nContext';
 import { PageLoadingState } from '../components/state';
 import {
@@ -22,38 +24,52 @@ import {
   getTeamTemplateOptions,
 } from './teams/formOptions';
 import type { TeamTemplateId } from './teams/formOptions';
-import { readSelectionFromUrl, writeSelectionToUrl } from './teams/selection';
+import {
+  createDefaultToolAuditState,
+  readFocusFromUrl,
+  readSelectionFromUrl,
+  readToolAuditStateFromUrl,
+  writeSelectionToUrl,
+} from './teams/selection';
 import type {
   AgentFormState,
   AgentInfo,
+  ExternalAgentFormState,
+  ExternalAgentInfo,
   MemoryBankProfileDraft,
   TeamInfo,
   TeamFormState,
   TeamMemberProfile,
-  TeamsPageSelection,
   SummarySectionKey,
+  TeamsPageFocusTarget,
+  TeamsPageSelection,
 } from './teams/types';
 
-type ModalType = 'create-agent' | 'create-team' | 'edit-agent' | 'edit-team' | 'group-chat' | null;
-
-type TeamsPageFocusTarget =
-  | 'agent-overview'
-  | 'agent-runtime'
-  | 'agent-summary'
-  | 'agent-files'
-  | 'agent-file-soul'
-  | 'agent-file-user'
-  | 'team-overview'
-  | 'team-members'
-  | 'team-workspace'
-  | 'team-collaboration';
+type ModalType =
+  | 'create-agent'
+  | 'create-team'
+  | 'edit-agent'
+  | 'edit-team'
+  | 'create-external-agent'
+  | 'edit-external-agent'
+  | 'group-chat'
+  | null;
 
 type BadgeTone = 'neutral' | 'warning' | 'pending' | 'success' | 'primary' | 'slate';
 type BadgeSize = 'sm' | 'md';
 type NoticeTone = 'warning' | 'pending' | 'success';
 type TranslateFn = (key: string, values?: Record<string, number | string>) => string;
+type DirectorySelection = {
+  selectedAgentId: string | null;
+  selectedTeam: TeamInfo | null;
+  selectedExternalAgentId: string | null;
+};
 
 const TEAMS_PAGE_SELECTION_STORAGE_KEY = 'horbot.teams.selection';
+const getErrorMessage = (error: unknown, fallback: string): string => (
+  error instanceof Error ? error.message : fallback
+);
+
 const getSummarySectionDefs = (t: (key: string, values?: Record<string, number | string>) => string): Array<{ key: SummarySectionKey; label: string; placeholder: string }> => [
   { key: 'identity', label: t('teams.summarySection.identityLabel'), placeholder: t('teams.summarySection.identityPlaceholder') },
   { key: 'role_focus', label: t('teams.summarySection.roleFocusLabel'), placeholder: t('teams.summarySection.roleFocusPlaceholder') },
@@ -379,32 +395,30 @@ const createEmptyTeamForm = (): TeamFormState => ({
 
 const normalizeTeamId = (value: string): string => value.trim().toLowerCase();
 
-const readFocusFromUrl = (): TeamsPageFocusTarget | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
+const createEmptyExternalAgentForm = (): ExternalAgentFormState => ({
+  id: '',
+  name: '',
+  description: '',
+  avatar: '',
+  transport: 'http_sse',
+  endpoint: '',
+  auth_type: 'none',
+  auth_header: 'Authorization',
+  auth_secret: '',
+  auth_secret_configured: false,
+  capabilities: [],
+  dm_enabled: true,
+  team_enabled: false,
+  mention_required: true,
+  timeout_s: 90,
+  max_turn_chars: 12000,
+  context_scope: 'recent_turns',
+  memory_access: 'none',
+  file_access: 'none',
+  metadata: {},
+});
 
-  const focus = new URLSearchParams(window.location.search).get('focus')?.trim();
-  if (!focus) {
-    return null;
-  }
-
-  const allowed: TeamsPageFocusTarget[] = [
-    'agent-overview',
-    'agent-runtime',
-    'agent-summary',
-    'agent-files',
-    'agent-file-soul',
-    'agent-file-user',
-    'team-overview',
-    'team-members',
-    'team-workspace',
-    'team-collaboration',
-  ];
-
-  return allowed.includes(focus as TeamsPageFocusTarget) ? (focus as TeamsPageFocusTarget) : null;
-};
-
+const normalizeExternalAgentId = (value: string): string => value.trim().toLowerCase();
 
 const TeamsPage: React.FC = () => {
   const { t } = useI18n();
@@ -412,7 +426,15 @@ const TeamsPage: React.FC = () => {
   const memoryReasoningStyleOptions = getMemoryReasoningStyleOptions(t);
   const teamTemplateOptions = getTeamTemplateOptions(t);
   const [selectedTeam, setSelectedTeam] = useState<TeamInfo | null>(null);
-  const [focusTarget] = useState<TeamsPageFocusTarget | null>(() => readFocusFromUrl());
+  const [selectedExternalAgentId, setSelectedExternalAgentId] = useState<string | null>(() => {
+    const urlSelection = readSelectionFromUrl();
+    if (urlSelection?.kind === 'external-agent') {
+      return urlSelection.id;
+    }
+    const persistedSelection = getStorageItem<TeamsPageSelection | null>(TEAMS_PAGE_SELECTION_STORAGE_KEY, null);
+    return persistedSelection?.kind === 'external-agent' ? persistedSelection.id : null;
+  });
+  const [focusTarget, setFocusTarget] = useState<TeamsPageFocusTarget | null>(() => readFocusFromUrl());
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(() => {
     const urlSelection = readSelectionFromUrl();
     if (urlSelection?.kind === 'agent') {
@@ -430,24 +452,31 @@ const TeamsPage: React.FC = () => {
   const [agentForm, setAgentForm] = useState<AgentFormState>(() => createEmptyAgentForm(t));
   
   const [teamForm, setTeamForm] = useState<TeamFormState>(createEmptyTeamForm);
+  const [externalAgentForm, setExternalAgentForm] = useState<ExternalAgentFormState>(createEmptyExternalAgentForm);
+  const [externalAgentTestFeedback, setExternalAgentTestFeedback] = useState<{
+    agentId: string;
+    tone: 'success' | 'warning';
+    summary: string;
+    detail: string;
+  } | null>(null);
 
-  const handleDirectorySelectionResolved = useCallback((selection: {
-    selectedAgentId: string | null;
-    selectedTeam: TeamInfo | null;
-  }) => {
+  const handleDirectorySelectionResolved = useCallback((selection: DirectorySelection) => {
     setSelectedAgentId(selection.selectedAgentId);
     setSelectedTeam(selection.selectedTeam);
-  }, []);
+    setSelectedExternalAgentId(selection.selectedExternalAgentId);
+  }, [setSelectedAgentId, setSelectedTeam, setSelectedExternalAgentId]);
 
   const {
     agents,
     teams,
+    externalAgents,
     providers,
     loading,
     refreshDirectory: fetchData,
   } = useTeamsDirectoryData({
     currentSelectedAgentId: selectedAgentId,
     currentSelectedTeamId: selectedTeam?.id || null,
+    currentSelectedExternalAgentId: selectedExternalAgentId,
     selectionStorageKey: TEAMS_PAGE_SELECTION_STORAGE_KEY,
     onSelectionResolved: handleDirectorySelectionResolved,
   });
@@ -458,6 +487,10 @@ const TeamsPage: React.FC = () => {
     createTeam,
     updateTeam,
     deleteTeam,
+    createExternalAgent,
+    updateExternalAgent,
+    deleteExternalAgent,
+    testExternalAgent,
   } = useTeamsMutations({
     onRefresh: fetchData,
   });
@@ -492,6 +525,20 @@ const TeamsPage: React.FC = () => {
   const closeTeamModal = () => {
     setTeamAdvancedOpen(false);
     resetTeamForm();
+    setModalType(null);
+  };
+
+  const resetExternalAgentForm = () => {
+    setExternalAgentForm(createEmptyExternalAgentForm());
+  };
+
+  const openCreateExternalAgentModal = () => {
+    resetExternalAgentForm();
+    setModalType('create-external-agent');
+  };
+
+  const closeExternalAgentModal = () => {
+    resetExternalAgentForm();
     setModalType(null);
   };
 
@@ -533,6 +580,27 @@ const TeamsPage: React.FC = () => {
   const createTeamNameError = createTeamNameRequired ? t('teams.validation.teamNameRequired') : '';
   const createTeamSubmitDisabled = modalType === 'create-team'
     && (!teamForm.id.trim() || !teamForm.name.trim() || createTeamIdExists);
+  const normalizedCreateExternalAgentId = normalizeExternalAgentId(externalAgentForm.id);
+  const createExternalAgentIdRequired = modalType === 'create-external-agent' && !externalAgentForm.id.trim();
+  const createExternalAgentNameRequired = modalType === 'create-external-agent' && !externalAgentForm.name.trim();
+  const createExternalAgentEndpointRequired = modalType === 'create-external-agent' && !externalAgentForm.endpoint.trim();
+  const createExternalAgentIdExists = modalType === 'create-external-agent'
+    && normalizedCreateExternalAgentId.length > 0
+    && externalAgents.some((agent) => normalizeExternalAgentId(agent.id) === normalizedCreateExternalAgentId);
+  const createExternalAgentIdError = createExternalAgentIdRequired
+    ? t('teams.validation.externalAgentIdRequired')
+    : createExternalAgentIdExists
+      ? t('teams.validation.externalAgentIdExists', { id: externalAgentForm.id.trim() })
+      : '';
+  const createExternalAgentNameError = createExternalAgentNameRequired ? t('teams.validation.externalAgentNameRequired') : '';
+  const createExternalAgentEndpointError = createExternalAgentEndpointRequired ? t('teams.validation.externalAgentEndpointRequired') : '';
+  const createExternalAgentSubmitDisabled = modalType === 'create-external-agent'
+    && (
+      !externalAgentForm.id.trim()
+      || !externalAgentForm.name.trim()
+      || !externalAgentForm.endpoint.trim()
+      || createExternalAgentIdExists
+    );
   const recommendedMemoryProfile = buildRecommendedMemoryBankProfile(t, agentForm.profile, agentForm.capabilities);
   const recommendedMemoryProfileMeta = getRecommendedMemoryProfileMeta(t, agentForm.profile, agentForm.capabilities);
   const isUsingRecommendedMemoryProfile = memoryProfilesEqual(agentForm.memory_bank_profile, recommendedMemoryProfile);
@@ -542,6 +610,42 @@ const TeamsPage: React.FC = () => {
     agentForm.workspace.trim() ? t('teams.summary.customWorkspace') : t('teams.summary.defaultWorkspace'),
     isUsingRecommendedMemoryProfile ? t('teams.summary.defaultMemoryProfile') : t('teams.summary.customizedMemoryProfile'),
   ];
+  const getAgentById = (agentId: string): AgentInfo | undefined => {
+    return agents.find(a => a.id === agentId);
+  };
+
+  const toExternalTeamMemberAgent = (agent: ExternalAgentInfo): AgentInfo => ({
+    id: agent.id,
+    name: agent.name,
+    description: agent.description,
+    external: true,
+    transport: agent.transport,
+    endpoint: agent.endpoint,
+    dm_enabled: agent.dm_enabled,
+    team_enabled: agent.team_enabled,
+    profile: '',
+    permission_profile: '',
+    model: agent.transport,
+    provider: 'external',
+    capabilities: agent.capabilities || [],
+    tools: [],
+    skills: [],
+    teams: [],
+    workspace: '',
+    effective_workspace: '',
+    avatar: agent.avatar || '',
+  });
+
+  const teamMemberOptions = [
+    ...agents,
+    ...externalAgents
+      .filter((agent) => agent.team_enabled)
+      .map((agent) => toExternalTeamMemberAgent(agent)),
+  ];
+
+  const getTeamMemberById = (agentId: string): AgentInfo | undefined => {
+    return teamMemberOptions.find((agent) => agent.id === agentId);
+  };
   const teamLeadAssigned = teamForm.members.some((agentId) => Boolean(teamForm.member_profiles[agentId]?.isLead));
   const teamConfiguredResponsibilitiesCount = teamForm.members.filter((agentId) => {
     const profile = teamForm.member_profiles[agentId];
@@ -557,33 +661,30 @@ const TeamsPage: React.FC = () => {
   const selectedTeamTemplate = teamTemplateOptions.find((item) => item.id === selectedTeamTemplateId) || teamTemplateOptions[0];
   const recommendedTeamTemplateId = recommendTeamTemplateId(
     teamForm.members
-      .map((agentId) => agents.find((agent) => agent.id === agentId))
+      .map((agentId) => getTeamMemberById(agentId))
       .filter(Boolean) as AgentInfo[],
   );
   const recommendedTeamTemplate = teamTemplateOptions.find((item) => item.id === recommendedTeamTemplateId) || teamTemplateOptions[0];
   const recommendedTeamLeadId = recommendTeamLeadId(
     teamForm.members
-      .map((agentId) => agents.find((agent) => agent.id === agentId))
+      .map((agentId) => getTeamMemberById(agentId))
       .filter(Boolean) as AgentInfo[],
     recommendedTeamTemplateId,
   );
   const recommendedTeamLead = recommendedTeamLeadId
-    ? agents.find((agent) => agent.id === recommendedTeamLeadId) || null
+    ? getTeamMemberById(recommendedTeamLeadId) || null
     : null;
   const summarySectionDefs = getSummarySectionDefs(t);
 
   const capabilityOptions = Array.from(new Set([
     ...baseCapabilityOptions.map((item) => item.id),
     ...agentForm.capabilities,
+    ...externalAgentForm.capabilities,
   ])).map((id) => baseCapabilityOptions.find((item) => item.id === id) || {
     id,
     label: id,
     description: t('teams.capabilityHistoryLabel'),
   });
-
-  const getAgentById = (agentId: string): AgentInfo | undefined => {
-    return agents.find(a => a.id === agentId);
-  };
 
   useEffect(() => {
     if (!focusTarget) {
@@ -595,7 +696,9 @@ const TeamsPage: React.FC = () => {
       return;
     }
 
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
     target.classList.add('ring-2', 'ring-primary-300', 'ring-offset-2');
     const timer = window.setTimeout(() => {
       target.classList.remove('ring-2', 'ring-primary-300', 'ring-offset-2');
@@ -607,7 +710,7 @@ const TeamsPage: React.FC = () => {
   const getAgentsByTeam = (teamId: string): AgentInfo[] => {
     const team = teams.find(t => t.id === teamId);
     if (!team) return [];
-    return team.members.map(id => getAgentById(id)).filter(Boolean) as AgentInfo[];
+    return team.members.map(id => getTeamMemberById(id)).filter(Boolean) as AgentInfo[];
   };
 
   const getTeamMemberProfile = (team: TeamInfo | null, agentId: string): TeamMemberProfile => {
@@ -691,7 +794,7 @@ const TeamsPage: React.FC = () => {
           );
 
       const nextAgents = nextMembers
-        .map((memberId) => agents.find((agent) => agent.id === memberId))
+        .map((memberId) => getTeamMemberById(memberId))
         .filter(Boolean) as AgentInfo[];
       const nextTemplateId = teamRecommendationAutoApply ? recommendTeamTemplateId(nextAgents) : selectedTeamTemplateId;
       const nextLeadId = teamRecommendationAutoApply ? recommendTeamLeadId(nextAgents, nextTemplateId) : null;
@@ -715,42 +818,49 @@ const TeamsPage: React.FC = () => {
 
   const handleSelectTeam = (team: TeamInfo) => {
     setSelectedAgentId(null);
+    setSelectedExternalAgentId(null);
     setSelectedTeam(team);
   };
 
   const handleSelectAgent = (agentId: string) => {
     setSelectedTeam(null);
+    setSelectedExternalAgentId(null);
     setSelectedAgentId(agentId);
   };
 
-  useEffect(() => {
-    if (selectedAgentId) {
-      const selection = {
-        kind: 'agent',
-        id: selectedAgentId,
-      } satisfies TeamsPageSelection;
-      setStorageItem<TeamsPageSelection>(TEAMS_PAGE_SELECTION_STORAGE_KEY, selection);
-      writeSelectionToUrl(selection);
+  const handleSelectExternalAgent = (agentId: string) => {
+    setSelectedAgentId(null);
+    setSelectedTeam(null);
+    setSelectedExternalAgentId(agentId);
+    setExternalAgentTestFeedback(null);
+  };
+
+  const handleSelectTeamMember = (agent: AgentInfo) => {
+    if (agent.external) {
+      handleSelectExternalAgent(agent.id);
       return;
     }
+    handleSelectAgent(agent.id);
+  };
 
-    if (selectedTeam?.id) {
-      const selection = {
-        kind: 'team',
-        id: selectedTeam.id,
-      } satisfies TeamsPageSelection;
-      setStorageItem<TeamsPageSelection>(TEAMS_PAGE_SELECTION_STORAGE_KEY, selection);
-      writeSelectionToUrl(selection);
+  const handleEditTeamMember = (agent: AgentInfo) => {
+    if (agent.external) {
+      const externalAgent = externalAgents.find((item) => item.id === agent.id);
+      if (externalAgent) {
+        handleEditExternalAgent(externalAgent);
+      }
       return;
     }
+    handleEditAgent(agent);
+  };
 
-    removeStorageItem(TEAMS_PAGE_SELECTION_STORAGE_KEY);
-    writeSelectionToUrl(null);
-  }, [selectedAgentId, selectedTeam]);
   const {
     agentAssets,
     agentMemoryStats,
     agentSkills,
+    agentToolAudits,
+    toolAuditState,
+    toolAuditLoading,
     assetDrafts,
     assetLoading,
     assetLoadedAgentId,
@@ -763,11 +873,105 @@ const TeamsPage: React.FC = () => {
     handleSummaryDraftChange,
     handleSaveAssetFile,
     handleSaveSummary,
+    setToolAuditState,
+    setToolAuditSessionKey,
+    setToolAuditRiskFilter,
+    setToolAuditWindowHours,
+    loadMoreToolAudits,
   } = useTeamAgentAssets({
     selectedAgentId,
     onSaved: fetchData,
   });
   const assetReady = Boolean(selectedAgentId) && assetLoadedAgentId === selectedAgentId && !assetLoading;
+  const applyToolAuditState = useCallback((auditState = createDefaultToolAuditState()) => {
+    setToolAuditState(auditState);
+  }, [setToolAuditState]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const urlSelection = readSelectionFromUrl();
+      if (urlSelection?.kind === 'agent') {
+        const matchedAgent = agents.find((agent) => agent.id === urlSelection.id) || null;
+        setSelectedAgentId(matchedAgent?.id || null);
+        setSelectedTeam(null);
+        setSelectedExternalAgentId(null);
+        applyToolAuditState(readToolAuditStateFromUrl());
+        setFocusTarget(readFocusFromUrl());
+        return;
+      }
+
+      if (urlSelection?.kind === 'external-agent') {
+        const matchedExternalAgent = externalAgents.find((agent) => agent.id === urlSelection.id) || null;
+        setSelectedAgentId(null);
+        setSelectedTeam(null);
+        setSelectedExternalAgentId(matchedExternalAgent?.id || null);
+        applyToolAuditState();
+        setFocusTarget(readFocusFromUrl());
+        return;
+      }
+
+      if (urlSelection?.kind === 'team') {
+        const matchedTeam = teams.find((team) => team.id === urlSelection.id) || null;
+        setSelectedAgentId(null);
+        setSelectedTeam(matchedTeam || teams[0] || null);
+        setSelectedExternalAgentId(null);
+        applyToolAuditState();
+        setFocusTarget(readFocusFromUrl());
+        return;
+      }
+
+      setSelectedAgentId(null);
+      setSelectedTeam(teams[0] || null);
+      setSelectedExternalAgentId(null);
+      applyToolAuditState();
+      setFocusTarget(readFocusFromUrl());
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [
+    agents,
+    teams,
+    externalAgents,
+    applyToolAuditState,
+  ]);
+
+  useEffect(() => {
+    if (selectedAgentId) {
+      const selection = {
+        kind: 'agent',
+        id: selectedAgentId,
+      } satisfies TeamsPageSelection;
+      setStorageItem<TeamsPageSelection>(TEAMS_PAGE_SELECTION_STORAGE_KEY, selection);
+      writeSelectionToUrl(selection, toolAuditState, focusTarget);
+      return;
+    }
+
+    if (selectedExternalAgentId) {
+      const selection = {
+        kind: 'external-agent',
+        id: selectedExternalAgentId,
+      } satisfies TeamsPageSelection;
+      setStorageItem<TeamsPageSelection>(TEAMS_PAGE_SELECTION_STORAGE_KEY, selection);
+      writeSelectionToUrl(selection, null, focusTarget);
+      return;
+    }
+
+    if (selectedTeam?.id) {
+      const selection = {
+        kind: 'team',
+        id: selectedTeam.id,
+      } satisfies TeamsPageSelection;
+      setStorageItem<TeamsPageSelection>(TEAMS_PAGE_SELECTION_STORAGE_KEY, selection);
+      writeSelectionToUrl(selection, null, focusTarget);
+      return;
+    }
+
+    removeStorageItem(TEAMS_PAGE_SELECTION_STORAGE_KEY);
+    writeSelectionToUrl(null, null, focusTarget);
+  }, [selectedAgentId, selectedExternalAgentId, selectedTeam, toolAuditState, focusTarget]);
 
   const handleCreateAgent = async () => {
     if (!agentForm.id.trim()) {
@@ -798,8 +1002,8 @@ const TeamsPage: React.FC = () => {
     try {
       await createAgent(agentForm);
       closeAgentModal();
-    } catch (error: any) {
-      alert(error.message);
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'Failed to create agent'));
     }
   };
 
@@ -857,8 +1061,37 @@ const TeamsPage: React.FC = () => {
     try {
       await createTeam(teamForm);
       closeTeamModal();
-    } catch (error: any) {
-      alert(error.message);
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'Failed to create team'));
+    }
+  };
+
+  const handleCreateExternalAgent = async () => {
+    if (!externalAgentForm.id.trim()) {
+      alert(t('teams.validation.externalAgentIdRequired'));
+      return;
+    }
+
+    if (!externalAgentForm.name.trim()) {
+      alert(t('teams.validation.externalAgentNameRequired'));
+      return;
+    }
+
+    if (!externalAgentForm.endpoint.trim()) {
+      alert(t('teams.validation.externalAgentEndpointRequired'));
+      return;
+    }
+
+    if (createExternalAgentIdExists) {
+      alert(createExternalAgentIdError);
+      return;
+    }
+
+    try {
+      await createExternalAgent(externalAgentForm);
+      closeExternalAgentModal();
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, t('teams.external.test.failedTitle')));
     }
   };
 
@@ -906,12 +1139,38 @@ const TeamsPage: React.FC = () => {
     setModalType('edit-team');
   };
 
+  const handleEditExternalAgent = (agent: ExternalAgentInfo) => {
+    setExternalAgentForm({
+      id: agent.id,
+      name: agent.name,
+      description: agent.description || '',
+      avatar: agent.avatar || '',
+      transport: agent.transport,
+      endpoint: agent.endpoint,
+      auth_type: agent.auth_type,
+      auth_header: agent.auth_header || 'Authorization',
+      auth_secret: '',
+      auth_secret_configured: Boolean(agent.auth_secret_configured),
+      capabilities: agent.capabilities || [],
+      dm_enabled: agent.dm_enabled,
+      team_enabled: agent.team_enabled,
+      mention_required: agent.mention_required,
+      timeout_s: agent.timeout_s,
+      max_turn_chars: agent.max_turn_chars,
+      context_scope: agent.context_scope,
+      memory_access: agent.memory_access,
+      file_access: agent.file_access,
+      metadata: agent.metadata || {},
+    });
+    setModalType('edit-external-agent');
+  };
+
   const handleUpdateAgent = async () => {
     try {
       await updateAgent(agentForm);
       closeAgentModal();
-    } catch (error: any) {
-      alert(error.message);
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'Failed to update agent'));
     }
   };
 
@@ -919,8 +1178,17 @@ const TeamsPage: React.FC = () => {
     try {
       await updateTeam(teamForm);
       closeTeamModal();
-    } catch (error: any) {
-      alert(error.message);
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'Failed to update team'));
+    }
+  };
+
+  const handleUpdateExternalAgent = async () => {
+    try {
+      await updateExternalAgent(externalAgentForm);
+      closeExternalAgentModal();
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'Failed to update external agent'));
     }
   };
 
@@ -932,8 +1200,8 @@ const TeamsPage: React.FC = () => {
       if (selectedAgentId === agentId) {
         setSelectedAgentId(null);
       }
-    } catch (error: any) {
-      alert(error.message);
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'Failed to delete agent'));
     }
   };
 
@@ -943,14 +1211,51 @@ const TeamsPage: React.FC = () => {
     try {
       await deleteTeam(teamId);
       setSelectedTeam(null);
-    } catch (error: any) {
-      alert(error.message);
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'Failed to delete team'));
+    }
+  };
+
+  const handleDeleteExternalAgent = async (externalAgentId: string) => {
+    if (!confirm(t('teams.confirmDeleteExternalAgent', { id: externalAgentId }))) return;
+
+    try {
+      await deleteExternalAgent(externalAgentId);
+      if (selectedExternalAgentId === externalAgentId) {
+        setSelectedExternalAgentId(null);
+        setExternalAgentTestFeedback(null);
+      }
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'Failed to delete external agent'));
+    }
+  };
+
+  const handleTestExternalAgent = async (externalAgentId: string) => {
+    try {
+      const result = await testExternalAgent(externalAgentId);
+      setExternalAgentTestFeedback({
+        agentId: externalAgentId,
+        tone: result.ok ? 'success' : 'warning',
+        summary: result.ok ? t('teams.external.test.successTitle') : t('teams.external.test.failedTitle'),
+        detail: result.detail || t('teams.external.test.noDetail'),
+      });
+    } catch (error: unknown) {
+      setExternalAgentTestFeedback({
+        agentId: externalAgentId,
+        tone: 'warning',
+        summary: t('teams.external.test.failedTitle'),
+        detail: getErrorMessage(error, t('teams.external.test.noDetail')),
+      });
     }
   };
 
   const startGroupChat = () => {
     window.location.href = '/chat?mode=group';
   };
+
+  const selectedExternalAgent = selectedExternalAgentId
+    ? externalAgents.find((agent) => agent.id === selectedExternalAgentId)
+    : undefined;
 
   if (loading) {
     return <PageLoadingState metricCount={3} showTabs={false} />;
@@ -972,6 +1277,15 @@ const TeamsPage: React.FC = () => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             {t('teams.createAgent')}
+          </button>
+          <button
+            onClick={openCreateExternalAgentModal}
+            className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors flex items-center gap-2"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4h10l6 6v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2zm4 5h8m-8 4h8m-8 4h5" />
+            </svg>
+            {t('teams.external.createAction')}
           </button>
               <button
                 onClick={openCreateTeamModal}
@@ -998,16 +1312,22 @@ const TeamsPage: React.FC = () => {
         <TeamsSidebar
           teams={teams}
           agents={agents}
+          externalAgents={externalAgents}
           selectedTeamId={selectedTeam?.id || null}
           selectedAgentId={selectedAgentId}
+          selectedExternalAgentId={selectedExternalAgentId}
           onCreateTeam={openCreateTeamModal}
           onCreateAgent={openCreateAgentModal}
+          onCreateExternalAgent={openCreateExternalAgentModal}
           onSelectTeam={handleSelectTeam}
           onEditTeam={handleEditTeam}
           onDeleteTeam={handleDeleteTeam}
           onSelectAgent={handleSelectAgent}
           onEditAgent={handleEditAgent}
           onDeleteAgent={handleDeleteAgent}
+          onSelectExternalAgent={handleSelectExternalAgent}
+          onEditExternalAgent={handleEditExternalAgent}
+          onDeleteExternalAgent={handleDeleteExternalAgent}
           getBadgeClassName={(tone, size = 'md') => getBadgeClassName(tone as BadgeTone, size)}
           getAgentProfileLabel={(profileId) => {
             if (!profileId) {
@@ -1049,9 +1369,17 @@ const TeamsPage: React.FC = () => {
                 selectedAgent={selectedAgent}
                 agentMemoryStats={agentMemoryStats}
                 agentSkills={agentSkills}
+                agentToolAudits={agentToolAudits}
+                toolAuditState={toolAuditState}
+                toolAuditLoading={toolAuditLoading}
                 assetReady={assetReady}
                 assetLoading={assetLoading}
                 reasoningStyleLabel={selectedAgentReasoningStyleLabel}
+                onToolAuditSessionKeyChange={setToolAuditSessionKey}
+                onToolAuditRiskFilterChange={setToolAuditRiskFilter}
+                onToolAuditWindowHoursChange={setToolAuditWindowHours}
+                onLoadMoreToolAudits={loadMoreToolAudits}
+                onToolAuditFocus={() => setFocusTarget('agent-tool-audits')}
               />
 
               <AgentConfigurationPanels
@@ -1076,6 +1404,23 @@ const TeamsPage: React.FC = () => {
                 onAssetDraftChange={handleAssetDraftChange}
               />
             </div>
+          ) : selectedExternalAgent ? (
+            <ExternalAgentDetailView
+              externalAgent={selectedExternalAgent}
+              getBadgeClassName={(tone, size = 'md') => getBadgeClassName(tone as BadgeTone, size)}
+              onEdit={() => handleEditExternalAgent(selectedExternalAgent)}
+              onDelete={() => handleDeleteExternalAgent(selectedExternalAgent.id)}
+              onTest={() => handleTestExternalAgent(selectedExternalAgent.id)}
+              testFeedback={
+                externalAgentTestFeedback?.agentId === selectedExternalAgent.id
+                  ? {
+                      tone: externalAgentTestFeedback.tone,
+                      summary: externalAgentTestFeedback.summary,
+                      detail: externalAgentTestFeedback.detail,
+                    }
+                  : null
+              }
+            />
           ) : selectedTeam ? (
             <TeamDetailView
               selectedTeam={selectedTeam}
@@ -1087,8 +1432,8 @@ const TeamsPage: React.FC = () => {
               getTeamRoleLabel={(role) => getTeamRoleMeta(t, role).label}
               getTeamPriorityLabel={(priority) => getTeamPriorityMeta(t, priority).label}
               onEditTeam={() => handleEditTeam(selectedTeam)}
-              onSelectAgent={handleSelectAgent}
-              onEditAgent={handleEditAgent}
+              onSelectMember={handleSelectTeamMember}
+              onEditMember={handleEditTeamMember}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-center">
@@ -1157,7 +1502,7 @@ const TeamsPage: React.FC = () => {
         <TeamFormModal
           mode="create"
           form={teamForm}
-          agents={agents}
+          agents={teamMemberOptions}
           createIdError={createTeamIdError}
           createNameError={createTeamNameError}
           submitDisabled={createTeamSubmitDisabled}
@@ -1193,7 +1538,7 @@ const TeamsPage: React.FC = () => {
             );
             setTeamForm((prev) => ({ ...prev, member_profiles: nextProfiles }));
           }}
-          getAgentById={getAgentById}
+          getAgentById={getTeamMemberById}
           getTeamRoleDescription={(role) => getTeamRoleMeta(t, role).description}
           getTeamPriorityDescription={(priority) => getTeamPriorityMeta(t, priority).description}
           onClose={closeTeamModal}
@@ -1205,7 +1550,7 @@ const TeamsPage: React.FC = () => {
         <TeamFormModal
           mode="edit"
           form={teamForm}
-          agents={agents}
+          agents={teamMemberOptions}
           advancedOpen={teamAdvancedOpen}
           setAdvancedOpen={setTeamAdvancedOpen}
           advancedSummaryItems={teamAdvancedSummaryItems}
@@ -1238,11 +1583,37 @@ const TeamsPage: React.FC = () => {
             );
             setTeamForm((prev) => ({ ...prev, member_profiles: nextProfiles }));
           }}
-          getAgentById={getAgentById}
+          getAgentById={getTeamMemberById}
           getTeamRoleDescription={(role) => getTeamRoleMeta(t, role).description}
           getTeamPriorityDescription={(priority) => getTeamPriorityMeta(t, priority).description}
           onClose={closeTeamModal}
           onSubmit={handleUpdateTeam}
+        />
+      )}
+
+      {modalType === 'create-external-agent' && (
+        <ExternalAgentFormModal
+          mode="create"
+          form={externalAgentForm}
+          setForm={setExternalAgentForm}
+          capabilityOptions={capabilityOptions}
+          createIdError={createExternalAgentIdError}
+          createNameError={createExternalAgentNameError}
+          createEndpointError={createExternalAgentEndpointError}
+          submitDisabled={createExternalAgentSubmitDisabled}
+          onClose={closeExternalAgentModal}
+          onSubmit={handleCreateExternalAgent}
+        />
+      )}
+
+      {modalType === 'edit-external-agent' && (
+        <ExternalAgentFormModal
+          mode="edit"
+          form={externalAgentForm}
+          setForm={setExternalAgentForm}
+          capabilityOptions={capabilityOptions}
+          onClose={closeExternalAgentModal}
+          onSubmit={handleUpdateExternalAgent}
         />
       )}
     </div>

@@ -1,6 +1,10 @@
 """Tool registry for dynamic tool management with permission control."""
 
+import contextvars
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime
+import time
 from typing import Any, Callable
 
 from horbot.agent.tools.base import (
@@ -21,6 +25,7 @@ from horbot.agent.tools.permission import (
     is_protected_path,
     PROTECTED_PATHS,
 )
+from horbot.security.runtime_guard import inspect_tool_result
 
 
 @dataclass
@@ -95,6 +100,11 @@ class ToolRegistry:
         self._tools: dict[str, Tool] = {}
         self._permission_manager = permission_manager or PermissionManager()
         self._audit_callback: Callable[[str, dict[str, Any], str | None, str | None], None] | None = None
+        self._audit_event_callback: Callable[[dict[str, Any]], None] | None = None
+        self._audit_context: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+            "tool_registry_audit_context",
+            default=None,
+        )
         self._pre_execute_hook: Callable[[str, dict[str, Any]], bool] | None = None
         self._post_execute_hook: Callable[[str, dict[str, Any], str], None] | None = None
         self._web_search_enabled: bool = False
@@ -109,6 +119,24 @@ class ToolRegistry:
     ) -> None:
         """Set callback for audit logging. Signature: (tool_name, params, result, error)"""
         self._audit_callback = callback
+
+    def set_audit_event_callback(
+        self,
+        callback: Callable[[dict[str, Any]], None] | None,
+    ) -> None:
+        """Set callback for structured audit events."""
+        self._audit_event_callback = callback
+
+    @contextmanager
+    def audit_context(self, **context: Any):
+        """Bind contextual metadata to subsequent tool audit events in this task."""
+        current = dict(self._audit_context.get() or {})
+        current.update({key: value for key, value in context.items() if value is not None})
+        token = self._audit_context.set(current)
+        try:
+            yield
+        finally:
+            self._audit_context.reset(token)
     
     def set_pre_execute_hook(
         self,
@@ -417,16 +445,32 @@ class ToolRegistry:
         skip_guard: bool = False,
     ) -> ExecutionResult:
         """Internal execution logic with unified error handling."""
+        started_at = time.perf_counter()
+        permission_level = self._permission_manager.check_permission(name).value
         
         tool = self._tools.get(name)
         if not tool:
             error_msg = f"Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
-            self._log_audit(name, params, None, error_msg)
+            self._log_audit(
+                name,
+                params,
+                None,
+                error_msg,
+                metadata={"event_type": "tool_not_found", "permission_level": permission_level},
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+            )
             return ExecutionResult.fail(error_msg, name, params, recoverable=False)
         
         if name in self.WEB_TOOLS and not self._web_search_enabled:
             error_msg = f"Web search is not enabled. Please enable '联网搜索' to use {name} tool."
-            self._log_audit(name, params, None, error_msg)
+            self._log_audit(
+                name,
+                params,
+                None,
+                error_msg,
+                metadata={"event_type": "tool_disabled", "permission_level": permission_level},
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+            )
             return ExecutionResult.fail(error_msg, name, params, recoverable=False)
         
         if check_permission:
@@ -434,36 +478,78 @@ class ToolRegistry:
             
             if permission.is_denied:
                 error_msg = permission.to_error_message() or f"Tool '{name}' is not allowed"
-                self._log_audit(name, params, None, error_msg)
+                self._log_audit(
+                    name,
+                    params,
+                    None,
+                    error_msg,
+                    metadata={"event_type": "tool_denied", "permission_level": permission.level.value},
+                    duration_ms=int((time.perf_counter() - started_at) * 1000),
+                )
                 return ExecutionResult.fail(error_msg, name, params, recoverable=False)
             
             if permission.needs_confirmation:
                 error_msg = permission.to_error_message() or f"Tool '{name}' requires confirmation"
-                self._log_audit(name, params, None, error_msg)
+                self._log_audit(
+                    name,
+                    params,
+                    None,
+                    error_msg,
+                    metadata={"event_type": "tool_confirmation_required", "permission_level": permission.level.value},
+                    duration_ms=int((time.perf_counter() - started_at) * 1000),
+                )
                 return ExecutionResult.fail(error_msg, name, params, recoverable=True)
         
         path_param = params.get("path", "")
         if path_param and not self.check_path_permission(path_param):
             error_msg = f"Access to path '{path_param}' is protected."
-            self._log_audit(name, params, None, error_msg)
+            self._log_audit(
+                name,
+                params,
+                None,
+                error_msg,
+                metadata={"event_type": "tool_path_denied", "permission_level": permission_level},
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+            )
             return ExecutionResult.fail(error_msg, name, params, recoverable=False)
         
         if self._pre_execute_hook:
             try:
                 if not self._pre_execute_hook(name, params):
                     error_msg = f"Tool '{name}' execution was cancelled by pre-execute hook."
-                    self._log_audit(name, params, None, error_msg)
+                    self._log_audit(
+                        name,
+                        params,
+                        None,
+                        error_msg,
+                        metadata={"event_type": "tool_cancelled", "permission_level": permission_level},
+                        duration_ms=int((time.perf_counter() - started_at) * 1000),
+                    )
                     return ExecutionResult.fail(error_msg, name, params, recoverable=True)
             except Exception as e:
                 error_msg = f"Pre-execute hook error: {str(e)}"
-                self._log_audit(name, params, None, error_msg)
+                self._log_audit(
+                    name,
+                    params,
+                    None,
+                    error_msg,
+                    metadata={"event_type": "tool_pre_execute_error", "permission_level": permission_level},
+                    duration_ms=int((time.perf_counter() - started_at) * 1000),
+                )
                 return ExecutionResult.fail(error_msg, name, params, recoverable=True)
         
         try:
             errors = tool.validate_params(params)
             if errors:
                 error_msg = f"Invalid parameters: {'; '.join(errors)}"
-                self._log_audit(name, params, None, error_msg)
+                self._log_audit(
+                    name,
+                    params,
+                    None,
+                    error_msg,
+                    metadata={"event_type": "tool_invalid_params", "permission_level": permission_level},
+                    duration_ms=int((time.perf_counter() - started_at) * 1000),
+                )
                 return ExecutionResult.fail(error_msg, name, params, recoverable=True)
             
             execute_params = params
@@ -473,39 +559,119 @@ class ToolRegistry:
             result = await tool.execute(**execute_params)
             
             if isinstance(result, str) and result.startswith("Error"):
-                self._log_audit(name, params, result, None)
+                self._log_audit(
+                    name,
+                    params,
+                    result,
+                    None,
+                    metadata={"event_type": "tool_error_result", "permission_level": permission_level},
+                    duration_ms=int((time.perf_counter() - started_at) * 1000),
+                )
                 return ExecutionResult.fail(result[6:].strip(), name, params)
+
+            safe_result = result
+            audit_metadata: dict[str, Any] = {
+                "event_type": "tool_result",
+                "permission_level": permission_level,
+            }
+            if isinstance(result, str):
+                guard = inspect_tool_result(name, result)
+                safe_result = guard.output
+                audit_metadata.update({
+                    "guard_blocked": guard.blocked,
+                    "guard_reasons": list(guard.reasons),
+                    "result_redacted": (not guard.blocked and "secret_redacted" in guard.reasons),
+                })
             
-            self._log_audit(name, params, result, None)
+            self._log_audit(
+                name,
+                params,
+                safe_result,
+                None,
+                metadata=audit_metadata,
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+            )
             
             if self._post_execute_hook:
                 try:
-                    self._post_execute_hook(name, params, result)
+                    self._post_execute_hook(name, params, safe_result)
                 except Exception:
                     pass
             
-            return ExecutionResult.ok(result, name, params)
+            return ExecutionResult.ok(safe_result, name, params)
             
         except ToolError as e:
             error_msg = e.to_result()
-            self._log_audit(name, params, None, error_msg)
+            self._log_audit(
+                name,
+                params,
+                None,
+                error_msg,
+                metadata={"event_type": "tool_exception", "permission_level": permission_level},
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+            )
             return ExecutionResult.fail(str(e), name, params, e.recoverable)
         except Exception as e:
             error_msg = f"Unexpected error executing {name}: {str(e)}"
-            self._log_audit(name, params, None, error_msg)
+            self._log_audit(
+                name,
+                params,
+                None,
+                error_msg,
+                metadata={"event_type": "tool_exception", "permission_level": permission_level},
+                duration_ms=int((time.perf_counter() - started_at) * 1000),
+            )
             return ExecutionResult.fail(error_msg, name, params, recoverable=True)
     
+    @staticmethod
+    def _sanitize_audit_value(value: Any, *, max_length: int = 1000) -> Any:
+        sensitive_keys = {
+            "password", "token", "api_key", "secret", "credential",
+            "private_key", "access_token", "refresh_token",
+        }
+        if isinstance(value, dict):
+            sanitized: dict[str, Any] = {}
+            for key, item in value.items():
+                if str(key).lower() in sensitive_keys:
+                    sanitized[key] = "***REDACTED***"
+                else:
+                    sanitized[key] = ToolRegistry._sanitize_audit_value(item, max_length=max_length)
+            return sanitized
+        if isinstance(value, list):
+            return [ToolRegistry._sanitize_audit_value(item, max_length=max_length) for item in value]
+        if isinstance(value, str) and len(value) > max_length:
+            return value[:max_length] + "...[truncated]"
+        return value
+
     def _log_audit(
         self,
         tool_name: str,
         params: dict[str, Any],
         result: str | None,
         error: str | None,
+        *,
+        metadata: dict[str, Any] | None = None,
+        duration_ms: int | None = None,
     ) -> None:
         """Log tool execution for audit purposes."""
         if self._audit_callback:
             try:
                 self._audit_callback(tool_name, params, result, error)
+            except Exception:
+                pass
+        if self._audit_event_callback:
+            try:
+                audit_event = {
+                    "timestamp": datetime.now().isoformat(),
+                    "tool_name": tool_name,
+                    "params": self._sanitize_audit_value(params),
+                    "result": self._sanitize_audit_value(result),
+                    "error": self._sanitize_audit_value(error),
+                    "duration_ms": duration_ms,
+                    **(self._audit_context.get() or {}),
+                    **(metadata or {}),
+                }
+                self._audit_event_callback(audit_event)
             except Exception:
                 pass
     

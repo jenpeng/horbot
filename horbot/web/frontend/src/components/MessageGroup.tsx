@@ -14,6 +14,7 @@ interface MessageGroupProps {
   isUser: boolean;
   formatTime: (timestamp?: string) => string;
   onRetryMessage?: (message: Message) => void;
+  showRetryPending?: boolean;
   children?: React.ReactNode;
 }
 
@@ -91,6 +92,26 @@ const coerceProviderRemediation = (value: unknown): string[] => {
     return [];
   }
   return remediation.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+};
+
+const coerceProviderDiagnostic = (value: unknown): {
+  errorCode?: string;
+  errorKind?: string;
+  provider?: string;
+  model?: string;
+  statusCode?: number;
+} | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const item = value as Record<string, unknown>;
+  return {
+    errorCode: typeof item.error_code === 'string' ? item.error_code : undefined,
+    errorKind: typeof item.error_kind === 'string' ? item.error_kind : undefined,
+    provider: typeof item.provider === 'string' ? item.provider : undefined,
+    model: typeof item.model === 'string' ? item.model : undefined,
+    statusCode: typeof item.status_code === 'number' ? item.status_code : undefined,
+  };
 };
 
 const getErrorKindMeta = (t: TranslateFn): Record<NonNullable<Message['errorKind']>, { label: string; tone: string }> => ({
@@ -390,6 +411,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
   isUser,
   formatTime,
   onRetryMessage,
+  showRetryPending = false,
   children,
 }) => {
   const { t } = useI18n();
@@ -673,6 +695,10 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
     const isErrorMessage = !isUser && !!message.isError;
     const errorMeta = message.errorKind ? errorKindMeta[message.errorKind] : null;
     const providerRemediation = !isUser ? coerceProviderRemediation(message.metadata?._provider_error) : [];
+    const providerDiagnostic = !isUser ? coerceProviderDiagnostic(message.metadata?._provider_error) : null;
+    const requestId = !isUser
+      ? (message.requestId || (typeof message.metadata?.request_id === 'string' ? message.metadata.request_id : ''))
+      : '';
     const cleanedContent = stripMessageTags(message.content);
     const memorySources = !isUser ? coerceMemorySources(message.metadata?._memory_sources) : [];
     const memoryRecall = !isUser ? coerceMemoryRecall(message.metadata?._memory_recall) : null;
@@ -791,6 +817,11 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                     {errorMeta.label}
                   </span>
                 )}
+                {showRetryPending && message.retryable && (
+                  <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                    {t('messageGroup.retryAvailable')}
+                  </span>
+                )}
               </div>
             )}
 
@@ -825,6 +856,52 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                     <li key={`${message.id}-remediation-${remediationIndex}`}>• {item}</li>
                   ))}
                 </ul>
+              </div>
+            )}
+
+            {isErrorMessage && (requestId || providerDiagnostic?.errorCode || providerDiagnostic?.errorKind || providerDiagnostic?.provider || providerDiagnostic?.model || typeof providerDiagnostic?.statusCode === 'number') && (
+              <div className="mt-3 rounded-2xl border border-red-100 bg-white/70 px-3 py-2" data-testid="message-provider-diagnostics">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-red-600">
+                  {t('messageGroup.diagnosticsTitle')}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs leading-5 text-red-900">
+                  {requestId && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5">
+                      <span className="font-medium text-red-700">{t('messageGroup.diagnosticsRequestId')}</span>
+                      <code className="font-mono text-[11px]">{requestId}</code>
+                    </span>
+                  )}
+                  {providerDiagnostic?.errorCode && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5">
+                      <span className="font-medium text-red-700">{t('messageGroup.diagnosticsErrorCode')}</span>
+                      <code className="font-mono text-[11px]">{providerDiagnostic.errorCode}</code>
+                    </span>
+                  )}
+                  {providerDiagnostic?.errorKind && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5">
+                      <span className="font-medium text-red-700">{t('messageGroup.diagnosticsErrorKind')}</span>
+                      <code className="font-mono text-[11px]">{providerDiagnostic.errorKind}</code>
+                    </span>
+                  )}
+                  {providerDiagnostic?.provider && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5">
+                      <span className="font-medium text-red-700">{t('messageGroup.diagnosticsProvider')}</span>
+                      <code className="font-mono text-[11px]">{providerDiagnostic.provider}</code>
+                    </span>
+                  )}
+                  {providerDiagnostic?.model && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5">
+                      <span className="font-medium text-red-700">{t('messageGroup.diagnosticsModel')}</span>
+                      <code className="font-mono text-[11px]">{providerDiagnostic.model}</code>
+                    </span>
+                  )}
+                  {typeof providerDiagnostic?.statusCode === 'number' && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5">
+                      <span className="font-medium text-red-700">{t('messageGroup.diagnosticsStatusCode')}</span>
+                      <code className="font-mono text-[11px]">{providerDiagnostic.statusCode}</code>
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>

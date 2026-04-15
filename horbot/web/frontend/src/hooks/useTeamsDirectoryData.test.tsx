@@ -51,6 +51,30 @@ describe('useTeamsDirectoryData', () => {
           ],
         }));
       }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({
+          external_agents: [
+            {
+              id: 'partner-agent',
+              name: 'Partner Agent',
+              description: 'External',
+              transport: 'http_sse',
+              endpoint: 'https://example.com/agent',
+              auth_type: 'none',
+              auth_header: 'Authorization',
+              capabilities: [],
+              dm_enabled: true,
+              team_enabled: false,
+              mention_required: true,
+              timeout_s: 90,
+              max_turn_chars: 12000,
+              context_scope: 'recent_turns',
+              memory_access: 'none',
+              file_access: 'none',
+            },
+          ],
+        }));
+      }
       if (url === '/api/providers') {
         return Promise.resolve(createJsonResponse({
           providers: [
@@ -64,6 +88,7 @@ describe('useTeamsDirectoryData', () => {
     const { result } = renderHook(() => useTeamsDirectoryData({
       currentSelectedAgentId: null,
       currentSelectedTeamId: null,
+      currentSelectedExternalAgentId: null,
       selectionStorageKey: 'horbot.teams.selection',
       onSelectionResolved,
     }));
@@ -74,10 +99,12 @@ describe('useTeamsDirectoryData', () => {
 
     expect(result.current.agents).toHaveLength(1);
     expect(result.current.teams).toHaveLength(2);
+    expect(result.current.externalAgents).toHaveLength(1);
     expect(result.current.providers).toHaveLength(1);
     expect(onSelectionResolved).toHaveBeenCalledWith({
       selectedAgentId: null,
       selectedTeam: expect.objectContaining({ id: 'team-b' }),
+      selectedExternalAgentId: null,
     });
   });
 });

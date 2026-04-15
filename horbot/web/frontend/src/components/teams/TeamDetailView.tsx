@@ -12,8 +12,8 @@ interface TeamDetailViewProps {
   getTeamRoleLabel: (role?: string) => string;
   getTeamPriorityLabel: (priority?: number) => string;
   onEditTeam: () => void;
-  onSelectAgent: (agentId: string) => void;
-  onEditAgent: (agent: AgentInfo) => void;
+  onSelectMember: (agent: AgentInfo) => void;
+  onEditMember: (agent: AgentInfo) => void;
 }
 
 const TeamDetailView = ({
@@ -26,8 +26,8 @@ const TeamDetailView = ({
   getTeamRoleLabel,
   getTeamPriorityLabel,
   onEditTeam,
-  onSelectAgent,
-  onEditAgent,
+  onSelectMember,
+  onEditMember,
 }: TeamDetailViewProps) => {
   const { t } = useI18n();
   return (
@@ -92,6 +92,9 @@ const TeamDetailView = ({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="font-medium text-surface-900">{agent.name}</p>
+                    {agent.external && (
+                      <span className={getBadgeClassName('slate', 'sm')}>{t('chat.externalBadge')}</span>
+                    )}
                     {profile.isLead && (
                       <span className={getBadgeClassName('primary', 'sm')}>{t('teams.teamDetail.leadBadge')}</span>
                     )}
@@ -107,25 +110,29 @@ const TeamDetailView = ({
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="text-right">
-                    <p className="text-xs text-surface-400">{agent.provider}</p>
-                    <p className="text-xs text-surface-500">{agent.model}</p>
-                    <p className="text-[11px] text-surface-400 truncate max-w-[180px]" title={agent.effective_workspace}>
-                      {agent.effective_workspace || agent.workspace || t('teams.summary.defaultWorkspace')}
+                    <p className="text-xs text-surface-400">
+                      {agent.external ? t('teams.sidebar.externalAgents') : agent.provider}
+                    </p>
+                    <p className="text-xs text-surface-500">
+                      {agent.external ? (agent.transport || '') : agent.model}
+                    </p>
+                    <p className="text-[11px] text-surface-400 truncate max-w-[180px]" title={agent.external ? agent.endpoint : agent.effective_workspace}>
+                      {agent.external ? (agent.endpoint || t('common.notAvailable')) : (agent.effective_workspace || agent.workspace || t('teams.summary.defaultWorkspace'))}
                     </p>
                   </div>
                   <button
-                    onClick={() => onSelectAgent(agent.id)}
+                    onClick={() => onSelectMember(agent)}
                     data-testid="team-member-open-agent"
                     data-agent-id={agent.id}
                     className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-white rounded transition-all"
-                    title={t('teams.teamDetail.viewAgentAssets')}
+                    title={agent.external ? t('teams.external.form.editTitle') : t('teams.teamDetail.viewAgentAssets')}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12H9m12 0c0 1.657-4.03 6-9 6s-9-4.343-9-6 4.03-6 9-6 9 4.343 9 6z" />
                     </svg>
                   </button>
                   <button
-                    onClick={() => onEditAgent(agent)}
+                    onClick={() => onEditMember(agent)}
                     className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-white rounded transition-all"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">

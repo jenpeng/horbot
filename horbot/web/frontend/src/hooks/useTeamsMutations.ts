@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type { AgentFormState, TeamFormState } from '../pages/teams/types';
+import type { AgentFormState, ExternalAgentFormState, TeamFormState } from '../pages/teams/types';
 
 interface UseTeamsMutationsOptions {
   onRefresh?: () => void | Promise<void>;
@@ -81,6 +81,67 @@ export const useTeamsMutations = ({ onRefresh }: UseTeamsMutationsOptions = {}) 
     );
   }, [runMutation]);
 
+  const serializeExternalAgentForm = useCallback((form: ExternalAgentFormState) => ({
+    id: form.id,
+    name: form.name,
+    description: form.description,
+    avatar: form.avatar,
+    transport: form.transport,
+    endpoint: form.endpoint,
+    auth_type: form.auth_type,
+    auth_header: form.auth_header,
+    auth_secret: form.auth_secret,
+    capabilities: form.capabilities,
+    dm_enabled: form.dm_enabled,
+    team_enabled: form.team_enabled,
+    mention_required: form.mention_required,
+    timeout_s: form.timeout_s,
+    max_turn_chars: form.max_turn_chars,
+    context_scope: form.context_scope,
+    memory_access: form.memory_access,
+    file_access: form.file_access,
+    metadata: form.metadata,
+  }), []);
+
+  const createExternalAgent = useCallback(async (form: ExternalAgentFormState) => {
+    await runMutation(
+      () => fetch('/api/external-agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(serializeExternalAgentForm(form)),
+      }),
+      'Failed to create external agent',
+    );
+  }, [runMutation, serializeExternalAgentForm]);
+
+  const updateExternalAgent = useCallback(async (form: ExternalAgentFormState) => {
+    await runMutation(
+      () => fetch(`/api/external-agents/${form.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(serializeExternalAgentForm(form)),
+      }),
+      'Failed to update external agent',
+    );
+  }, [runMutation, serializeExternalAgentForm]);
+
+  const deleteExternalAgent = useCallback(async (externalAgentId: string) => {
+    await runMutation(
+      () => fetch(`/api/external-agents/${externalAgentId}`, { method: 'DELETE' }),
+      'Failed to delete external agent',
+    );
+  }, [runMutation]);
+
+  const testExternalAgent = useCallback(async (externalAgentId: string) => {
+    const response = await fetch(`/api/external-agents/${externalAgentId}/test`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      throw await parseMutationError(response, 'Failed to test external agent');
+    }
+    return response.json();
+  }, []);
+
   return {
     createAgent,
     updateAgent,
@@ -88,5 +149,9 @@ export const useTeamsMutations = ({ onRefresh }: UseTeamsMutationsOptions = {}) 
     createTeam,
     updateTeam,
     deleteTeam,
+    createExternalAgent,
+    updateExternalAgent,
+    deleteExternalAgent,
+    testExternalAgent,
   };
 };

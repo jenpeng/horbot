@@ -1,4 +1,4 @@
-import type { AgentInfo, TeamInfo } from '../../pages/teams/types';
+import type { AgentInfo, ExternalAgentInfo, TeamInfo } from '../../pages/teams/types';
 import { useI18n } from '../../contexts/I18nContext';
 
 interface AgentStatusMeta {
@@ -9,16 +9,22 @@ interface AgentStatusMeta {
 interface TeamsSidebarProps {
   teams: TeamInfo[];
   agents: AgentInfo[];
+  externalAgents: ExternalAgentInfo[];
   selectedTeamId: string | null;
   selectedAgentId: string | null;
+  selectedExternalAgentId: string | null;
   onCreateTeam: () => void;
   onCreateAgent: () => void;
+  onCreateExternalAgent: () => void;
   onSelectTeam: (team: TeamInfo) => void;
   onEditTeam: (team: TeamInfo) => void;
   onDeleteTeam: (teamId: string) => void;
   onSelectAgent: (agentId: string) => void;
   onEditAgent: (agent: AgentInfo) => void;
   onDeleteAgent: (agentId: string) => void;
+  onSelectExternalAgent: (agentId: string) => void;
+  onEditExternalAgent: (agent: ExternalAgentInfo) => void;
+  onDeleteExternalAgent: (agentId: string) => void;
   getBadgeClassName: (tone: string, size?: 'sm' | 'md') => string;
   getAgentProfileLabel: (profileId?: string) => string | null;
   getAgentPermissionLabel: (permissionId?: string) => string | null;
@@ -28,16 +34,22 @@ interface TeamsSidebarProps {
 const TeamsSidebar = ({
   teams,
   agents,
+  externalAgents,
   selectedTeamId,
   selectedAgentId,
+  selectedExternalAgentId,
   onCreateTeam,
   onCreateAgent,
+  onCreateExternalAgent,
   onSelectTeam,
   onEditTeam,
   onDeleteTeam,
   onSelectAgent,
   onEditAgent,
   onDeleteAgent,
+  onSelectExternalAgent,
+  onEditExternalAgent,
+  onDeleteExternalAgent,
   getBadgeClassName,
   getAgentProfileLabel,
   getAgentPermissionLabel,
@@ -198,6 +210,75 @@ const TeamsSidebar = ({
           );
         })}
       </div>
+    </div>
+
+    <div className="p-4 border-t border-surface-100">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-medium text-surface-500 uppercase tracking-wider">
+          {t('teams.sidebar.externalAgents')}
+        </h2>
+        <button
+          onClick={onCreateExternalAgent}
+          className="p-1 hover:bg-surface-100 rounded"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+        </button>
+      </div>
+      {externalAgents.length === 0 ? (
+        <div className="text-sm text-surface-500 text-center py-6">
+          {t('teams.sidebar.noExternalAgents')}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {externalAgents.map((agent) => (
+            <div
+              key={agent.id}
+              className={`group relative flex items-center gap-3 rounded-lg p-2 transition-colors ${
+                selectedExternalAgentId === agent.id ? 'bg-primary-50 ring-1 ring-primary-200' : 'hover:bg-surface-50'
+              }`}
+            >
+              <button
+                onClick={() => onSelectExternalAgent(agent.id)}
+                className="min-w-0 flex flex-1 items-center gap-3 text-left"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-100 text-violet-700">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9h8M8 13h5m7 8H4a2 2 0 01-2-2V5a2 2 0 012-2h10l6 6v10a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-surface-900">{agent.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-xs text-surface-500">{agent.endpoint}</p>
+                    <span className={getBadgeClassName('primary', 'sm')}>{agent.transport}</span>
+                    {agent.dm_enabled && <span className={getBadgeClassName('neutral', 'sm')}>{t('teams.external.badge.dm')}</span>}
+                  </div>
+                </div>
+              </button>
+              <div className="flex gap-1 opacity-0 transition-all group-hover:opacity-100">
+                <button
+                  onClick={() => onEditExternalAgent(agent)}
+                  className="p-1 hover:bg-surface-200 rounded transition-all"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-surface-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => onDeleteExternalAgent(agent.id)}
+                  className="p-1 hover:bg-red-100 rounded transition-all"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   </div>
   );
