@@ -42,6 +42,7 @@ export const BUILTIN_PROVIDER_NAMES = [
 
 export const DEFAULT_WEB_SEARCH = {
   provider: 'duckduckgo',
+  tavilyEnabled: true,
   apiKey: '',
   maxResults: 5,
 };

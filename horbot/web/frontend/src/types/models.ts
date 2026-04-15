@@ -455,6 +455,7 @@ export interface ToolsConfig {
   web?: {
     search?: {
       provider?: string;
+      tavilyEnabled?: boolean;
       apiKey?: string;
       hasApiKey?: boolean;
       apiKeyMasked?: string;

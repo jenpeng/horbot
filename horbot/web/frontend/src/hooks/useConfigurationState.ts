@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, Dispatch, RefObject, SetStateAction } from 'react';
 import type { Config, ModelConfig, ModelsConfig, WebSearchProvider } from '../types';
 import configService from '../services/config';
-import type { AgentRecord } from '../services/config';
+import type { AgentRecord, RemoteImageCacheStatus } from '../services/config';
 import diagnosticsService from '../services/diagnostics';
 import type { ConfigCheckResultData } from '../components/ConfigCheckResult';
 import { useI18n } from '../contexts/I18nContext';
@@ -64,6 +64,7 @@ export interface UseConfigurationStateResult {
   isSavingWorkspace: boolean;
   isSavingModels: boolean;
   isSavingWebSearch: boolean;
+  isClearingRemoteImageCache: boolean;
   isRefreshing: boolean;
   isValidating: boolean;
   validationData: ConfigCheckResultData | null;
@@ -72,6 +73,7 @@ export interface UseConfigurationStateResult {
   isLoadingProviders: boolean;
   currentWebSearchConfig: {
     provider: string;
+    tavilyEnabled: boolean;
     apiKey: string;
     apiKeyMode: WebSearchApiKeyMode;
     hasApiKey: boolean;
@@ -88,6 +90,7 @@ export interface UseConfigurationStateResult {
   providerOptions: string[];
   hasPendingChanges: boolean;
   canSaveWebSearch: boolean;
+  remoteImageCacheStatus: RemoteImageCacheStatus;
   setError: Dispatch<SetStateAction<string | null>>;
   setSuccess: Dispatch<SetStateAction<string | null>>;
   clearFieldError: (fieldName: string) => void;
@@ -100,13 +103,14 @@ export interface UseConfigurationStateResult {
   setWorkspacePath: Dispatch<SetStateAction<string>>;
   updateModelConfig: (scenario: ModelScenarioKey, field: keyof ModelConfig, value: string) => void;
   updateWebSearchConfig: (
-    patch: Partial<{ provider: string; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>
+    patch: Partial<{ provider: string; tavilyEnabled: boolean; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>
   ) => void;
   handleSaveAgentSettings: () => Promise<void>;
   handleSaveWorkspace: () => Promise<void>;
   handleSaveModelsConfig: () => Promise<void>;
   handleSaveModel: (scenario: ModelScenarioKey) => Promise<void>;
   handleSaveWebSearch: () => Promise<void>;
+  handleClearRemoteImageCache: () => Promise<void>;
   handleExport: () => void;
   handleImport: (event: ChangeEvent<HTMLInputElement>) => void;
   handleProviderAdded: () => Promise<void>;
@@ -143,6 +147,7 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
   const [isSavingWebSearch, setIsSavingWebSearch] = useState(false);
   const [webSearchSettings, setWebSearchSettings] = useState({
     provider: DEFAULT_WEB_SEARCH.provider,
+    tavilyEnabled: DEFAULT_WEB_SEARCH.tavilyEnabled,
     maxResults: DEFAULT_WEB_SEARCH.maxResults,
   });
   const [webSearchApiKeyInput, setWebSearchApiKeyInput] = useState('');
@@ -153,6 +158,12 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
   const [webSearchProviders, setWebSearchProviders] = useState<WebSearchProvider[]>([]);
   const [isLoadingProviders, setIsLoadingProviders] = useState(false);
   const [mainAgent, setMainAgent] = useState<MainAgentSummary | null>(null);
+  const [remoteImageCacheStatus, setRemoteImageCacheStatus] = useState<RemoteImageCacheStatus>({
+    count: 0,
+    total_size_bytes: 0,
+    newest_updated_at: null,
+  });
+  const [isClearingRemoteImageCache, setIsClearingRemoteImageCache] = useState(false);
 
   const showSuccessMessage = useCallback((message: string) => {
     if (successTimerRef.current !== null) {
@@ -201,8 +212,14 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     setWorkspacePath(defaults?.workspace || '');
     setModelsConfig(normalizeModelsConfig(defaults?.models));
     const search = data.tools?.web?.search;
+    const resolvedTavilyEnabled = typeof search?.tavilyEnabled === 'boolean'
+      ? search.tavilyEnabled
+      : typeof (search as { tavily_enabled?: boolean } | undefined)?.tavily_enabled === 'boolean'
+        ? Boolean((search as { tavily_enabled?: boolean }).tavily_enabled)
+        : DEFAULT_WEB_SEARCH.tavilyEnabled;
     setWebSearchSettings({
       provider: search?.provider || DEFAULT_WEB_SEARCH.provider,
+      tavilyEnabled: resolvedTavilyEnabled,
       maxResults: search?.maxResults || DEFAULT_WEB_SEARCH.maxResults,
     });
     setHasAgentChanges(false);
@@ -305,13 +322,23 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     }
   }, []);
 
+  const refreshRemoteImageCacheStatus = useCallback(async () => {
+    try {
+      const status = await configService.getRemoteImageCacheStatus();
+      setRemoteImageCacheStatus(status);
+    } catch (err) {
+      console.error('Failed to fetch remote image cache status:', err);
+    }
+  }, []);
+
   useEffect(() => {
     void Promise.all([
       loadConfigState({ showLoading: true }),
       fetchProviders(),
+      refreshRemoteImageCacheStatus(),
       runValidation({ silent: true }),
     ]);
-  }, [fetchProviders, loadConfigState, runValidation]);
+  }, [fetchProviders, loadConfigState, refreshRemoteImageCacheStatus, runValidation]);
 
   const validateAgentSettings = useCallback(() => {
     const errors: Record<string, string> = {};
@@ -356,6 +383,7 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     const search = config?.tools?.web?.search;
     return {
       provider: webSearchSettings.provider,
+      tavilyEnabled: webSearchSettings.tavilyEnabled,
       apiKey: webSearchApiKeyInput,
       apiKeyMode: webSearchApiKeyMode,
       hasApiKey: Boolean(search?.hasApiKey),
@@ -370,9 +398,10 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
   );
 
   const updateWebSearchConfig = useCallback(
-    (patch: Partial<{ provider: string; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>) => {
+    (patch: Partial<{ provider: string; tavilyEnabled: boolean; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>) => {
       setWebSearchSettings((prev) => ({
         provider: patch.provider ?? prev.provider,
+        tavilyEnabled: patch.tavilyEnabled ?? prev.tavilyEnabled,
         maxResults: patch.maxResults ?? prev.maxResults,
       }));
       if (patch.apiKeyMode !== undefined) {
@@ -396,8 +425,14 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
       return;
     }
     const search = config.tools?.web?.search;
+    const persistedTavilyEnabled = typeof search?.tavilyEnabled === 'boolean'
+      ? search.tavilyEnabled
+      : typeof (search as { tavily_enabled?: boolean } | undefined)?.tavily_enabled === 'boolean'
+        ? Boolean((search as { tavily_enabled?: boolean }).tavily_enabled)
+        : DEFAULT_WEB_SEARCH.tavilyEnabled;
     const hasChanges =
       webSearchSettings.provider !== (search?.provider || DEFAULT_WEB_SEARCH.provider) ||
+      webSearchSettings.tavilyEnabled !== persistedTavilyEnabled ||
       webSearchSettings.maxResults !== (search?.maxResults || DEFAULT_WEB_SEARCH.maxResults) ||
       webSearchApiKeyMode === 'clear' ||
       (webSearchApiKeyMode === 'replace' && webSearchApiKeyInput.trim().length > 0);
@@ -466,6 +501,7 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     try {
       await configService.updateWebSearchConfig({
         provider: currentWebSearchConfig.provider,
+        tavilyEnabled: currentWebSearchConfig.tavilyEnabled,
         ...(webSearchApiKeyMode === 'replace' ? { apiKey: webSearchApiKeyInput.trim() } : {}),
         ...(webSearchApiKeyMode === 'clear' ? { apiKey: '' } : {}),
         maxResults: currentWebSearchConfig.maxResults,
@@ -478,6 +514,25 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
       setIsSavingWebSearch(false);
     }
   }, [currentWebSearchConfig, refreshConfigFromServer, webSearchApiKeyInput, webSearchApiKeyMode]);
+
+  const handleClearRemoteImageCache = useCallback(async () => {
+    setIsClearingRemoteImageCache(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const result = await configService.clearRemoteImageCache();
+      await refreshRemoteImageCacheStatus();
+      showSuccessMessage(
+        t('config.remoteImageCache.clearSuccess', { count: result.deleted_count }),
+      );
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.detail || err.message || t('config.remoteImageCache.clearFailed');
+      setError(errorMsg);
+    } finally {
+      setIsClearingRemoteImageCache(false);
+    }
+  }, [refreshRemoteImageCacheStatus, setError, showSuccessMessage, t]);
 
   const handleSaveModelsConfig = useCallback(async () => {
     setIsSavingModels(true);
@@ -660,6 +715,7 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     isSavingWorkspace,
     isSavingModels,
     isSavingWebSearch,
+    isClearingRemoteImageCache,
     isRefreshing,
     isValidating,
     validationData,
@@ -677,6 +733,7 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     providerOptions,
     hasPendingChanges,
     canSaveWebSearch,
+    remoteImageCacheStatus,
     setError,
     setSuccess,
     clearFieldError,
@@ -689,6 +746,7 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     handleSaveModelsConfig,
     handleSaveModel,
     handleSaveWebSearch,
+    handleClearRemoteImageCache,
     handleExport,
     handleImport,
     handleProviderAdded,

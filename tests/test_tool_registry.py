@@ -100,6 +100,35 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("web_access", names)
         self.assertIn("web_search", names)
 
+    def test_get_definitions_smart_forces_web_access_for_fresh_knowledge_requests(self):
+        registry = ToolRegistry()
+        registry.register(DummyTool("message"))
+        registry.register(DummyTool("web_access"))
+        registry.register(DummyTool("web_search"))
+
+        definitions = registry.get_definitions_smart("帮我整理一下当前美伊局势的最新动态")
+        names = {definition["function"]["name"] for definition in definitions}
+
+        self.assertIn("web_access", names)
+        self.assertNotIn("web_search", names)
+
+    def test_get_definitions_smart_forces_web_access_for_external_source_lookup(self):
+        registry = ToolRegistry()
+        registry.register(DummyTool("message"))
+        registry.register(DummyTool("web_access"))
+        registry.register(DummyTool("read_file"))
+
+        definitions = registry.get_definitions_smart("帮我看一下 OpenAI Responses API 官方文档怎么用")
+        names = {definition["function"]["name"] for definition in definitions}
+
+        self.assertIn("web_access", names)
+
+    def test_classify_web_requirement_keeps_stable_knowledge_local(self):
+        requirement = ToolRegistry.classify_web_requirement("解释一下 CAP 定理")
+
+        self.assertFalse(requirement.requires_web_access)
+        self.assertEqual(requirement.category, "none")
+
 
 class GuardedToolRegistryTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_with_result_blocks_suspicious_tool_output(self):

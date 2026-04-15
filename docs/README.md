@@ -15,6 +15,7 @@ Horbot is a lightweight multi-agent assistant stack with:
 - chat, attachments, and relay-style team conversations
 - compact chat layout plus baton-aware relay status in team conversations
 - automatic DM -> team -> DM baton navigation in Web Chat, with a temporary top banner so relay-driven view changes are explicit
+- promoted remote image links that render as normal image-card attachments, plus a manual remote-image cache clear entry in Configuration
 - MCP and external channel integration
 - native `web_access` with a built-in `web-access` proxy that starts alongside Horbot
 - background skill distillation from reusable work
@@ -65,3 +66,4 @@ Current web runtime notes:
 - startup no longer opens a visible browser; Chrome is only auto-launched on the first browser-backed request
 - the default auto-launched Chrome runs headless with remote debugging
 - the agent now prefers `web_access` first for web/search work, with `browser`, `web_search`, and `web_fetch` as fallbacks
+- Configuration now exposes a remote-image cache status panel and manual clear action for chat image-card materialization

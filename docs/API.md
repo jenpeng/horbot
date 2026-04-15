@@ -16,6 +16,7 @@
 - `GET /api/config`
 - `PUT /api/config`
 - `GET /api/config/validate`
+- `PATCH /api/config/web-search`
 
 ### Chat
 
@@ -32,6 +33,14 @@
 - `GET /api/conversations`
 - `GET /api/conversations/{conv_id}`
 - `GET /api/conversations/{conv_id}/messages`
+
+### Files And Cache
+
+- `POST /api/upload`
+- `GET /api/files/{file_id}`
+- `GET /api/files/{file_id}/preview`
+- `GET /api/files/cache/remote-images`
+- `DELETE /api/files/cache/remote-images`
 
 ### Agents And Teams
 
@@ -69,7 +78,10 @@
 - Agent creation requires explicit `provider` and `model`.
 - Team history and direct-message history automatically merge legacy and current session storage when possible.
 - Skills APIs resolve to the current agent skill directory, not a generic legacy workspace path.
+- `PATCH /api/config/web-search` can update the active web-search provider, `tavilyEnabled`, and other runtime search defaults used by the Configuration page.
 - `POST /api/chat/sessions` returns UUID-based session keys such as `session_4f0c...`, avoiding timestamp collisions.
+- `GET /api/chat/history` and `GET /api/conversations/{conv_id}/messages` now normalize standalone remote image URLs in assistant messages into `files` attachments when possible, so the chat UI can render the standard image card experience.
+- `GET /api/files/cache/remote-images` and `DELETE /api/files/cache/remote-images` expose the runtime-managed remote image cache used for those promoted image cards.
 - Channel endpoint metadata now includes WeCom, including required fields for `bot_id` and `secret`.
 - `POST /api/skills/import` validates `.skill` and `.zip` packages before writing them into the active agent skill directory.
 - Team relay SSE flows include relay-oriented events such as `agent_start`, `agent_mentioned`, and `agent_done`.

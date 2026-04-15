@@ -25,7 +25,12 @@ from horbot.agent.tools.cron import CronTool, TaskToolWrapper
 from horbot.agent.tools.filesystem import ListDirTool, ReadFileTool
 from horbot.agent.tools.safe_editor import SafeWriteFileTool, SafeEditFileTool
 from horbot.agent.tools.message import MessageTool
-from horbot.agent.tools.registry import ToolRegistry, ConfirmationRequiredError, ConfigureMCPTool
+from horbot.agent.tools.registry import (
+    ToolRegistry,
+    ConfirmationRequiredError,
+    ConfigureMCPTool,
+    WebRequirement,
+)
 from horbot.agent.tools.permission import PermissionLevel
 from horbot.agent.tools.shell import ExecTool
 from horbot.agent.tools.spawn import SpawnTool
@@ -49,10 +54,34 @@ if TYPE_CHECKING:
 class AgentLoop:
     WEB_INTERACTIVE_COMPACT_MAX_TOKENS = 30000
     MAX_AUTO_CONTINUE_ROUNDS = 2
+    MAX_WEB_ACCESS_ENFORCEMENT_ROUNDS = 2
+    MAX_UNSUCCESSFUL_WEB_ACCESS_ATTEMPTS = 3
     AUTO_CONTINUE_PROMPT = (
         "请从上一条 assistant 回复中断的位置继续输出，不要重复已经给出的内容。"
         "如果上一条回复其实已经完整结束，只回复 __COMPLETE__。"
     )
+    WEB_ACCESS_ENFORCEMENT_PROMPT = (
+        "你尚未完成本轮必须的联网核实。请先调用 `web_access` 获取外部信息，再基于结果回答。"
+        "在成功拿到 `web_access` 结果之前，不要直接给最终结论，也不要调用 `message` 发送最终答案。"
+    )
+    WEB_ACCESS_ENFORCEMENT_FAILURE = (
+        "这类请求需要先通过 `web_access` 联网核实，但本轮未能成功完成该步骤，"
+        "所以我不能直接给出结论。请稍后重试；如果静默搜索仍失败，建议改用打开浏览器（CDP）方式继续搜索。"
+    )
+    WEB_REQUIREMENT_PROMPT_MAP = {
+        "direct_web": (
+            "当前请求明确涉及网页/链接/外部页面操作。请先使用 `web_access` 获取页面或搜索结果，"
+            "不要直接凭内部记忆回答外部事实。"
+        ),
+        "fresh_knowledge": (
+            "当前请求包含明显的时效性知识（如最新、当前、最近、今日动态等）。请先使用 `web_access`"
+            " 进行联网检索或抓取，再基于结果回答，不要直接假设事实仍然最新。"
+        ),
+        "lookup_knowledge": (
+            "当前请求明显是在查官网、文档、API、GitHub、论文或发布说明等外部资料。请先使用 "
+            "`web_access` 查证相关来源，再给结论。"
+        ),
+    }
 
     """
     The agent loop is the core processing engine.
@@ -203,6 +232,72 @@ class AgentLoop:
             return model
         return self.model
 
+    @classmethod
+    def _inject_web_requirement_guidance(
+        cls,
+        messages: list[dict[str, Any]],
+        requirement: WebRequirement,
+    ) -> list[dict[str, Any]]:
+        """Inject a short system instruction when the request must use web access."""
+        if not requirement.requires_web_access:
+            return messages
+
+        guidance = cls.WEB_REQUIREMENT_PROMPT_MAP.get(requirement.category)
+        if not guidance:
+            return messages
+
+        marker = "[WEB_ACCESS_REQUIRED]"
+        if any(
+            message.get("role") == "system"
+            and isinstance(message.get("content"), str)
+            and marker in message.get("content", "")
+            for message in messages
+        ):
+            return messages
+
+        system_message = {
+            "role": "system",
+            "content": f"{marker} {guidance}",
+        }
+        if messages and messages[0].get("role") == "system":
+            return [messages[0], system_message, *messages[1:]]
+        return [system_message, *messages]
+
+    @staticmethod
+    def _is_usable_tool_output(tool_name: str, content: str) -> bool:
+        normalized = str(content or "").strip()
+        if not normalized:
+            return False
+        if normalized.startswith("Error") or normalized.startswith("[Security notice]"):
+            return False
+        if tool_name == "web_access":
+            if normalized.lower().startswith("no results for:"):
+                return False
+            try:
+                parsed = json.loads(normalized)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, dict) and parsed.get("error"):
+                return False
+        return True
+
+    @staticmethod
+    def _has_successful_tool_result(messages: list[dict[str, Any]], tool_name: str) -> bool:
+        for message in messages:
+            if message.get("role") != "tool" or message.get("name") != tool_name:
+                continue
+            content = str(message.get("content") or "")
+            if AgentLoop._is_usable_tool_output(tool_name, content):
+                return True
+        return False
+
+    @staticmethod
+    def _has_any_tool_result(messages: list[dict[str, Any]], tool_name: str) -> bool:
+        return any(
+            message.get("role") == "tool" and message.get("name") == tool_name
+            for message in messages
+        )
+
     def _init_permission_manager(self):
         """Initialize permission manager from config."""
         from horbot.agent.tools.permission import PermissionManager
@@ -253,10 +348,11 @@ class AgentLoop:
             search_config = config.tools.web.search
             return {
                 "provider": getattr(search_config, 'provider', 'duckduckgo'),
+                "tavilyEnabled": getattr(search_config, 'tavily_enabled', True),
                 "apiKey": getattr(search_config, 'api_key', ''),
                 "maxResults": getattr(search_config, 'max_results', 5),
             }
-        return {"provider": "duckduckgo", "apiKey": "", "maxResults": 5}
+        return {"provider": "duckduckgo", "tavilyEnabled": True, "apiKey": "", "maxResults": 5}
 
     def _init_subagents(self, provider, workspace, bus, brave_api_key, restrict_to_workspace):
         """Initialize subagents manager."""
@@ -361,6 +457,7 @@ class AgentLoop:
         web_search_config = self._get_web_search_config()
         web_search_tool = WebSearchTool(
             provider=web_search_config.get("provider", "duckduckgo"),
+            tavily_enabled=bool(web_search_config.get("tavilyEnabled", True)),
             api_key=web_search_config.get("apiKey", ""),
             max_results=web_search_config.get("maxResults", 5),
         )
@@ -1136,6 +1233,8 @@ class AgentLoop:
         reset_count = 0
         max_resets = 3
         auto_continue_round = 0
+        web_access_enforcement_round = 0
+        unsuccessful_web_access_attempts = 0
         continued_prefix = ""
         
         self.tools.set_web_search_enabled(web_search)
@@ -1145,6 +1244,8 @@ class AgentLoop:
             if msg.get("role") == "user":
                 user_message = msg.get("content", "")
                 break
+        web_requirement = self.tools.classify_web_requirement(user_message)
+        messages = self._inject_web_requirement_guidance(messages, web_requirement)
 
         # Detect file types for model selection
         has_image = False
@@ -1256,6 +1357,77 @@ class AgentLoop:
                 logger.debug("No usage info in response")
 
             if response.has_tool_calls:
+                web_access_satisfied = self._has_successful_tool_result(messages, "web_access")
+                if web_requirement.requires_web_access and not web_access_satisfied:
+                    blocked_message_calls = [
+                        tc for tc in response.tool_calls if tc.name == "message"
+                    ]
+                    executable_tool_calls = [
+                        tc for tc in response.tool_calls if tc.name != "message"
+                    ]
+                    if blocked_message_calls:
+                        if on_step_complete:
+                            thinking = response.reasoning_content or self._extract_think(response.content)
+                            await on_step_complete(thinking_step_id, "completed", {
+                                "thinking": thinking or ""
+                            })
+
+                        tool_call_dicts = [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": json.dumps(tc.arguments, ensure_ascii=False)
+                                }
+                            }
+                            for tc in response.tool_calls
+                        ]
+                        messages = self.context.add_assistant_message(
+                            messages, response.content, tool_call_dicts,
+                            reasoning_content=response.reasoning_content,
+                        )
+                        for blocked_call in blocked_message_calls:
+                            messages = self.context.add_tool_result(
+                                messages,
+                                blocked_call.id,
+                                blocked_call.name,
+                                "Error: This request requires a successful web_access call before sending the final answer.",
+                            )
+
+                        if executable_tool_calls:
+                            result = await self._tool_executor.execute_tool_calls(
+                                tool_calls=executable_tool_calls,
+                                messages=messages,
+                                tools_used=tools_used,
+                                iteration=iteration,
+                                on_step_start=on_step_start,
+                                on_tool_start=on_tool_start,
+                                on_status=on_status,
+                                on_tool_result=on_tool_result,
+                                on_step_complete=on_step_complete,
+                            )
+                            messages = result.messages
+                            tools_used = result.tools_used
+                            if result.confirmations:
+                                confirmations.update(result.confirmations)
+                                final_content = result.final_content
+                                return final_content, tools_used, messages, confirmations, error_info
+                            if result.should_break:
+                                final_content = result.final_content
+                                break
+
+                        web_access_enforcement_round += 1
+                        if web_access_enforcement_round > self.MAX_WEB_ACCESS_ENFORCEMENT_ROUNDS:
+                            final_content = self.WEB_ACCESS_ENFORCEMENT_FAILURE
+                            break
+                        messages.append({
+                            "role": "user",
+                            "content": self.WEB_ACCESS_ENFORCEMENT_PROMPT,
+                            "_ephemeral": True,
+                        })
+                        continue
+
                 # Check if any tool requires confirmation before sending progress
                 requires_confirmation = False
                 confirmation_tool = None
@@ -1308,6 +1480,16 @@ class AgentLoop:
                 )
                 messages = result.messages
                 tools_used = result.tools_used
+                attempted_web_access = any(tc.name == "web_access" for tc in response.tool_calls)
+                if web_requirement.requires_web_access and attempted_web_access:
+                    web_access_satisfied = self._has_successful_tool_result(messages, "web_access")
+                    if web_access_satisfied:
+                        unsuccessful_web_access_attempts = 0
+                    else:
+                        unsuccessful_web_access_attempts += 1
+                        if unsuccessful_web_access_attempts >= self.MAX_UNSUCCESSFUL_WEB_ACCESS_ATTEMPTS:
+                            final_content = self.WEB_ACCESS_ENFORCEMENT_FAILURE
+                            break
                 if result.confirmations:
                     confirmations.update(result.confirmations)
                     final_content = result.final_content
@@ -1332,6 +1514,30 @@ class AgentLoop:
                 clean = self._strip_think(response.content) or ""
                 if not clean:
                     clean = self._fallback_from_recent_tool_result(messages)
+
+                web_access_satisfied = self._has_successful_tool_result(messages, "web_access")
+                if web_requirement.requires_web_access and not web_access_satisfied:
+                    web_access_enforcement_round += 1
+                    if web_access_enforcement_round > self.MAX_WEB_ACCESS_ENFORCEMENT_ROUNDS:
+                        final_content = self.WEB_ACCESS_ENFORCEMENT_FAILURE
+                        messages = self._strip_ephemeral_messages(messages)
+                        messages = self.context.add_assistant_message(messages, final_content)
+                        if on_progress:
+                            await on_progress(final_content)
+                        break
+                    if on_status:
+                        await on_status("当前请求需要先联网核实，正在强制补做 web_access...")
+                    messages.append({
+                        "role": "assistant",
+                        "content": clean or self.WEB_ACCESS_ENFORCEMENT_FAILURE,
+                        "_ephemeral": True,
+                    })
+                    messages.append({
+                        "role": "user",
+                        "content": self.WEB_ACCESS_ENFORCEMENT_PROMPT,
+                        "_ephemeral": True,
+                    })
+                    continue
 
                 # Complete response step
                 if on_step_complete:

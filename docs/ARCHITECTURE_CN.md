@@ -26,6 +26,8 @@ horbot 采用模块化设计，核心组件包括：
 - `AgentLoop` 对 `web:` 会话引入更激进的上下文压缩预算，并在 `finish_reason=length` 时自动发起续答，最终把多段内容合并成一条 assistant 消息落盘
 - Agent 默认优先使用原生 `web_access` 处理联网搜索、网页抓取与基础网页交互，`browser` / `web_search` / `web_fetch` 作为回退
 - `web-access` 代理已内置到项目运行栈，由 `horbot.sh` 统一托管启动/停止/日志；启动阶段只做被动就绪检查，不再主动弹浏览器，真正收到浏览器型请求时才按需拉起 headless Chrome
+- 聊天历史层会尽量把 assistant 正文中的独立远程图片链接提升为 `files` 附件，并将可缓存的远程图片落盘到 `.horbot/data/uploads`，这样前端在刷新历史后仍能保持统一图片卡片与预览体验
+- Configuration 页面新增“远程图片缓存”状态区块，直接读取后端缓存统计，并支持手动清理自动落盘的远程图片缓存
 
 ### 架构概览图
 

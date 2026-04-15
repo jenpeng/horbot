@@ -201,3 +201,48 @@ class ChatSessionRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["conversation_id"], "team_alpha")
         self.assertEqual([message["content"] for message in payload["messages"]], ["先前的团队问题", "当前团队回复"])
+
+    async def test_get_dm_conversation_messages_promotes_remote_image_links_to_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agent_workspace = Path(tmpdir) / "writer-workspace"
+            session_manager = SessionManager(workspace=agent_workspace / "sessions")
+            session = session_manager.get_or_create("web:dm_writer")
+            remote_url = "https://image.pollinations.ai/prompt/pony?seed=1776250333"
+            session.add_message(
+                "assistant",
+                f"彭老师，继续用“小马主题”给你生成了一张新图，点开就能看：\n\n{remote_url}\n\n如果你要，我下一张可以改成：\n- 彩虹草地小马",
+                agent_id="writer",
+                agent_name="Writer",
+            )
+            session_manager.save(session)
+
+            fake_conversation = SimpleNamespace(
+                id="dm_writer",
+                type=ConversationType.DM,
+                target_id="writer",
+                to_dict=lambda: {"id": "dm_writer", "type": "dm", "target_id": "writer"},
+            )
+            fake_conv_manager = SimpleNamespace(
+                get=lambda conv_id: fake_conversation if conv_id == "dm_writer" else None,
+            )
+            fake_agent = SimpleNamespace(
+                get_sessions_dir=lambda: agent_workspace / "sessions",
+            )
+            fake_agent_manager = SimpleNamespace(
+                get_agent=lambda agent_id: fake_agent if agent_id == "writer" else None,
+            )
+
+            with (
+                patch("horbot.conversation.get_conversation_manager", return_value=fake_conv_manager),
+                patch("horbot.agent.manager.get_agent_manager", return_value=fake_agent_manager),
+            ):
+                payload = await get_conversation_messages("dm_writer")
+
+        self.assertEqual(payload["conversation_id"], "dm_writer")
+        self.assertEqual(len(payload["messages"]), 1)
+        self.assertEqual(
+            payload["messages"][0]["content"],
+            "彭老师，继续用“小马主题”给你生成了一张新图，点开就能看：\n\n如果你要，我下一张可以改成：\n- 彩虹草地小马",
+        )
+        self.assertEqual(len(payload["messages"][0]["files"]), 1)
+        self.assertEqual(payload["messages"][0]["files"][0]["preview_url"], remote_url)

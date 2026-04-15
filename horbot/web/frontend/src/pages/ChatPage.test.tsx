@@ -9,8 +9,10 @@ import { ChatStreamError, chatService } from '../services/chat';
 import { useConversationStore } from '../stores/conversationStore';
 import { ConversationType, type Conversation, type Message } from '../types/conversation';
 
+const messageGroupMock = vi.fn((_props: unknown) => <div data-testid="mock-message-group" />);
+
 vi.mock('../components/MessageGroup', () => ({
-  default: () => <div data-testid="mock-message-group" />,
+  default: (props: unknown) => messageGroupMock(props),
 }));
 
 vi.mock('../components/MessageExecutionCard', () => ({
@@ -124,6 +126,7 @@ const seedConversationMessages = (conversationId: string, messages: Message[]) =
 describe('ChatPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    messageGroupMock.mockClear();
     window.localStorage.clear();
     Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
       configurable: true,
@@ -213,6 +216,88 @@ describe('ChatPage', () => {
       'data-agent-ids',
       'agent-a,partner-agent',
     );
+  });
+
+  it('keeps assistant history messages that only contain image files', async () => {
+    const remoteUrl = 'https://image.pollinations.ai/prompt/pony?seed=7';
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [] }));
+      }
+      if (url === '/api/conversations/dm_agent-a/messages') {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: 'dm_agent-a',
+          conversation: {
+            id: 'dm_agent-a',
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: [
+            {
+              id: 'assistant-image-only',
+              role: 'assistant',
+              content: '',
+              timestamp: new Date().toISOString(),
+              files: [
+                {
+                  file_id: 'remote-image-1',
+                  filename: 'pony-7.png',
+                  original_name: 'pony-7.png',
+                  mime_type: 'image/png',
+                  size: 0,
+                  category: 'image',
+                  url: remoteUrl,
+                  preview_url: remoteUrl,
+                },
+              ],
+              metadata: {
+                agent_id: 'agent-a',
+                agent_name: 'Agent A',
+              },
+            },
+          ],
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
+    seedConversationStore({
+      id: 'dm_agent-a',
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(messageGroupMock).toHaveBeenCalled();
+    });
+
+    const messageGroupCalls = messageGroupMock.mock.calls as Array<[unknown]>;
+    const matchedCall = messageGroupCalls.find(([props]) => {
+      const messages = (props as { messages?: Message[] }).messages || [];
+      return messages.some((message) => message.id === 'assistant-image-only');
+    });
+
+    expect(matchedCall).toBeTruthy();
+    const renderedMessages = ((matchedCall?.[0] as { messages?: Message[] })?.messages || []);
+    const assistantMessage = renderedMessages.find((message) => message.id === 'assistant-image-only');
+    expect(assistantMessage?.files?.[0]?.previewUrl).toBe(remoteUrl);
+    expect(assistantMessage?.content).toBe('');
   });
 
   it('provides a localized retry banner message for Chinese chat sessions', () => {
@@ -368,6 +453,80 @@ describe('ChatPage', () => {
     });
 
     expect(screen.queryByText('The previous request failed. You can retry it.')).not.toBeInTheDocument();
+  });
+
+  it('keeps assistant content after </message> wrappers when loading history', async () => {
+    const conversationId = 'dm_agent-a';
+    const mixedAssistantContent = '<message from="Agent A">\n我先给你做一个清单。\n</message>## 结果\n- A\n- B';
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [externalAgent] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [team] }));
+      }
+      if (url === `/api/conversations/${conversationId}/messages`) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          conversation: {
+            id: conversationId,
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: [
+            {
+              id: 'history-user',
+              role: 'user',
+              content: 'hello',
+              timestamp: new Date().toISOString(),
+            },
+            {
+              id: 'history-assistant',
+              role: 'assistant',
+              content: mixedAssistantContent,
+              timestamp: new Date().toISOString(),
+              metadata: {
+                agent_id: 'agent-a',
+                agent_name: 'Agent A',
+                turn_id: 'turn-mixed',
+                request_id: 'req-mixed',
+              },
+            },
+          ],
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
+    seedConversationStore({
+      id: conversationId,
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      const conversationMessages = useConversationStore.getState().messages[conversationId] || [];
+      expect(conversationMessages.some((message) => message.role === 'assistant')).toBe(true);
+    });
+
+    const conversationMessages = useConversationStore.getState().messages[conversationId] || [];
+    const assistantMessage = conversationMessages.find((message) => message.role === 'assistant');
+    expect(assistantMessage?.content).toContain('我先给你做一个清单。');
+    expect(assistantMessage?.content).toContain('## 结果');
+    expect(assistantMessage?.content).toContain('- A');
   });
 
   it('surfaces the failed request id in the retry banner and turn badge', async () => {

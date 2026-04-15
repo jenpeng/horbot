@@ -62,6 +62,7 @@ Horbot keeps the runtime intentionally small:
 - `.horbot/agents/<agent-id>/sessions`
 - `.horbot/agents/<agent-id>/skills`
 - `.horbot/data/*` for uploads, plans, sessions, and cron data
+- remote image cards can also be materialized into `.horbot/data/uploads` so later history loads still render as normal file attachments
 
 ## Memory Model
 
@@ -95,6 +96,8 @@ The Web UI currently covers:
 - chat and relay conversations
 - baton-aware relay navigation between direct chat and team chat during DM-initiated team dispatch flows
 - richer attachment preview UX, including inline previews and a bottom thumbnail strip for multi-image preview modals
+- assistant history normalization that upgrades standalone remote image URLs into image-card attachments when possible
+- a Configuration-page remote-image cache panel with runtime stats and a manual clear action
 - skills import/edit/compatibility
 - channels and runtime status, including WeCom endpoint testing
 - dashboard and token usage

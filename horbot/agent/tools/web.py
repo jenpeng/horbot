@@ -483,17 +483,34 @@ class WebSearchTool(Tool):
     def __init__(
         self,
         provider: str = "duckduckgo",
+        tavily_enabled: bool = True,
         api_key: str | None = None,
         max_results: int = 5
     ):
         self._init_provider = provider
+        self._init_tavily_enabled = tavily_enabled
         self._init_api_key = api_key
         self.max_results = max_results
 
     @property
+    def tavily_enabled(self) -> bool:
+        if self._init_tavily_enabled is not None:
+            return bool(self._init_tavily_enabled)
+        return os.environ.get("WEB_SEARCH_TAVILY_ENABLED", "1").strip().lower() not in {"0", "false", "off", "no"}
+
+    @staticmethod
+    def _browser_cdp_suggestion() -> str:
+        return (
+            "如果静默搜索仍失败，建议改用打开浏览器（CDP）方式继续搜索。"
+        )
+
+    @property
     def provider(self) -> str:
         """Resolve provider at call time."""
-        return self._init_provider or os.environ.get("WEB_SEARCH_PROVIDER", "duckduckgo")
+        provider = self._init_provider or os.environ.get("WEB_SEARCH_PROVIDER", "duckduckgo")
+        if str(provider).lower() == "tavily" and not self.tavily_enabled:
+            return "duckduckgo"
+        return provider
 
     @property
     def api_key(self) -> str:
@@ -510,16 +527,28 @@ class WebSearchTool(Tool):
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         n = min(max(count or self.max_results, 1), 10)
         provider = self.provider.lower()
-        
-        if provider == "tavily" and self.api_key:
-            return await self._search_tavily(query, n)
-        elif provider == "brave" and self.api_key:
+
+        if provider == "tavily" and self.tavily_enabled and self.api_key:
+            result = await self._search_tavily(query, n)
+            return self._finalize_search_output(result, query)
+
+        if provider == "brave" and self.api_key:
             result = await self._search_brave(query, n)
             if result:
-                return result
-            return await self._search_duckduckgo(query, n)
-        else:
-            return await self._search_duckduckgo(query, n)
+                return self._finalize_search_output(result, query)
+            return self._finalize_search_output(await self._search_duckduckgo(query, n), query)
+
+        return self._finalize_search_output(await self._search_duckduckgo(query, n), query)
+
+    def _finalize_search_output(self, result: str, query: str) -> str:
+        normalized = str(result or "").strip()
+        if not normalized:
+            return f"No results for: {query}\n\n{self._browser_cdp_suggestion()}"
+        if normalized.startswith("No results for:"):
+            return f"{normalized}\n\n{self._browser_cdp_suggestion()}"
+        if normalized.startswith("Error"):
+            return f"{normalized}\n\n{self._browser_cdp_suggestion()}"
+        return normalized
 
     async def _search_tavily(self, query: str, max_results: int) -> str:
         """Search using Tavily API."""

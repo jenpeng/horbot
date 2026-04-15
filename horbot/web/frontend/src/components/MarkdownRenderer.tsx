@@ -24,6 +24,13 @@ interface CodeBlockProps {
   children: string;
 }
 
+const IMAGE_HOSTS = new Set([
+  'image.pollinations.ai',
+  'images.pollinations.ai',
+]);
+
+const IMAGE_PATH_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.avif'];
+
 const REGISTERED_LANGUAGES = [
   ['bash', bash],
   ['javascript', javascript],
@@ -65,6 +72,58 @@ const normalizeLanguage = (language: string): string => {
   }
   return LANGUAGE_ALIASES[normalized] || normalized;
 };
+
+const unwrapAngleBrackets = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+};
+
+const isLikelyDirectImageUrl = (value: string): boolean => {
+  const candidate = unwrapAngleBrackets(value);
+  if (!candidate || !/^https?:\/\//i.test(candidate)) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(candidate);
+    const host = parsed.hostname.toLowerCase();
+    if (IMAGE_HOSTS.has(host)) {
+      return true;
+    }
+
+    const pathname = parsed.pathname.toLowerCase();
+    return IMAGE_PATH_EXTENSIONS.some((ext) => pathname.endsWith(ext));
+  } catch {
+    return false;
+  }
+};
+
+const toMarkdownImage = (url: string): string => `![](${unwrapAngleBrackets(url)})`;
+
+const normalizeStandaloneImageLinks = (content: string): string => content
+  .split('\n')
+  .map((line) => {
+    const orderedMatch = line.match(/^(\s*\d+\.\s+)(https?:\/\/\S+)\s*$/i);
+    if (orderedMatch && isLikelyDirectImageUrl(orderedMatch[2])) {
+      return `${orderedMatch[1]}${toMarkdownImage(orderedMatch[2])}`;
+    }
+
+    const unorderedMatch = line.match(/^(\s*[-*+]\s+)(https?:\/\/\S+)\s*$/i);
+    if (unorderedMatch && isLikelyDirectImageUrl(unorderedMatch[2])) {
+      return `${unorderedMatch[1]}${toMarkdownImage(unorderedMatch[2])}`;
+    }
+
+    const trimmed = line.trim();
+    if (isLikelyDirectImageUrl(trimmed)) {
+      return `${line.slice(0, line.indexOf(trimmed))}${toMarkdownImage(trimmed)}`;
+    }
+
+    return line;
+  })
+  .join('\n');
 
 const CodeBlock: React.FC<CodeBlockProps> = memo(({ language, children }) => {
   const [copied, setCopied] = useState(false);
@@ -143,6 +202,10 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = memo(({ content, class
       .trim(),
     [content],
   );
+  const renderedContent = useMemo(
+    () => normalizeStandaloneImageLinks(normalizedContent),
+    [normalizedContent],
+  );
 
   const isDark = theme === 'dark';
 
@@ -167,6 +230,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = memo(({ content, class
     <div className={`markdown-content max-w-none break-words text-[13px] ${className}`}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
+        urlTransform={(url) => unwrapAngleBrackets(url)}
         components={{
           h1: ({ children }) => (
             <h1 className={styles.h1}>
@@ -237,11 +301,18 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = memo(({ content, class
             <hr className={styles.hr} />
           ),
           img: ({ src, alt }) => (
-            <img 
-              src={src} 
-              alt={alt} 
-              className="my-2 max-w-full rounded-lg"
-            />
+            <a
+              href={src}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="my-2 block"
+            >
+              <img
+                src={src}
+                alt={alt}
+                className="max-h-[28rem] max-w-full rounded-lg border border-surface-200 object-contain"
+              />
+            </a>
           ),
           code({ className: codeClassName, children, ...props }) {
             const match = /language-(\w+)/.exec(codeClassName || '');
@@ -316,7 +387,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = memo(({ content, class
           },
         }}
       >
-        {normalizedContent}
+        {renderedContent}
       </ReactMarkdown>
     </div>
   );

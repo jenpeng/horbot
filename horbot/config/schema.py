@@ -574,6 +574,7 @@ class WebSearchConfig(Base):
     """Web search tool configuration."""
 
     provider: str = "duckduckgo"  # "duckduckgo", "brave", "tavily"
+    tavily_enabled: bool = True
     api_key: str = ""  # API key for brave or tavily
     max_results: int = 5
 

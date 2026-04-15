@@ -261,6 +261,9 @@ const buildMemoryHandoffText = (source: MemorySource | null, t: TranslateFn): st
 };
 
 const formatFileSize = (size: number): string => {
+  if (!Number.isFinite(size) || size <= 0) {
+    return '';
+  }
   if (size >= 1024 * 1024) {
     return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   }
@@ -679,6 +682,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                 ? 'border-white/30 bg-white/15 text-white'
                 : 'border-slate-200 bg-slate-50 text-slate-700';
               const showOverflowBadge = hiddenImageCount > 0 && imageIndex === visibleImageFiles.length - 1;
+              const sizeLabel = formatFileSize(file.size);
               return (
                 <button
                   key={file.fileId}
@@ -702,7 +706,9 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                   )}
                   <div className="min-h-[3.4rem] px-3 py-2 text-[11px]">
                     <div className="line-clamp-2 min-h-[2rem] font-medium leading-4">{file.originalName}</div>
-                    <div className={isUserMessage ? 'text-white/75' : 'text-slate-500'}>{formatFileSize(file.size)}</div>
+                    {sizeLabel ? (
+                      <div className={isUserMessage ? 'text-white/75' : 'text-slate-500'}>{sizeLabel}</div>
+                    ) : null}
                   </div>
                 </button>
               );
@@ -716,6 +722,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
               const cardTone = isUserMessage
                 ? 'border-white/30 bg-white/15 text-white'
                 : 'border-slate-200 bg-slate-50 text-slate-700';
+              const sizeLabel = formatFileSize(file.size);
               if (file.category === 'audio' && file.url) {
                 return (
                   <button
@@ -732,9 +739,11 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                     <div className={`rounded-2xl border px-3 py-3 text-xs ${isUserMessage ? 'border-white/20 bg-white/10 text-white/85' : 'border-slate-200 bg-white text-slate-500'}`}>
                       {t('messageGroup.filePreview.playAudio')}
                     </div>
-                    <div className={`mt-2 text-[11px] ${isUserMessage ? 'text-white/75' : 'text-slate-500'}`}>
-                      {formatFileSize(file.size)}
-                    </div>
+                    {sizeLabel ? (
+                      <div className={`mt-2 text-[11px] ${isUserMessage ? 'text-white/75' : 'text-slate-500'}`}>
+                        {sizeLabel}
+                      </div>
+                    ) : null}
                   </button>
                 );
               }
@@ -756,9 +765,11 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                         {getFileKindLabel(file, t)}
                       </span>
                       <span className="block truncate text-sm font-medium">{file.originalName}</span>
-                      <span className={`block text-[11px] ${isUserMessage ? 'text-white/75' : 'text-slate-500'}`}>
-                        {formatFileSize(file.size)}
-                      </span>
+                      {sizeLabel ? (
+                        <span className={`block text-[11px] ${isUserMessage ? 'text-white/75' : 'text-slate-500'}`}>
+                          {sizeLabel}
+                        </span>
+                      ) : null}
                     </span>
                   </div>
                   <p className={`line-clamp-4 text-[12px] leading-5 ${isUserMessage ? 'text-white/80' : 'text-slate-500'}`}>
@@ -1366,9 +1377,11 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
               <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
                 {getFileKindLabel(previewedFile, t)}
               </span>
-              <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
-                {formatFileSize(previewedFile.size)}
-              </span>
+              {formatFileSize(previewedFile.size) ? (
+                <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
+                  {formatFileSize(previewedFile.size)}
+                </span>
+              ) : null}
               {previewedFile.mimeType && (
                 <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
                   {previewedFile.mimeType}

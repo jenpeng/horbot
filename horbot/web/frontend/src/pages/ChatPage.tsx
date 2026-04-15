@@ -390,13 +390,14 @@ const resolveStreamFailureMessage = (
 const cleanHistoryMessageContent = (content: string): string => {
   if (!content) return content;
 
-  const messageFromPattern = /<message\s+from="[^"]*">\s*([\s\S]*?)\s*<\/message>/;
-  const match = content.match(messageFromPattern);
-  if (match) {
-    return match[1].trim();
-  }
-
-  return content;
+  const messageFromPattern = /<message\s+from="[^"]*">\s*([\s\S]*?)\s*<\/message>/gi;
+  return content.replace(
+    messageFromPattern,
+    (fullMatch: string, innerContent: string, offset: number, source: string) => {
+      const remaining = source.slice(offset + fullMatch.length).trim();
+      return `${innerContent.trim()}${remaining ? '\n\n' : ''}`;
+    },
+  ).trim();
 };
 
 const buildHistoryMessageFallbackId = (msg: {
@@ -514,6 +515,11 @@ const normalizeMessageFiles = (value: unknown): MessageFile[] | undefined => {
     .map((item) => normalizeMessageFile(item))
     .filter((item): item is MessageFile => !!item);
   return files.length > 0 ? files : undefined;
+};
+
+const hasRenderableMessageFiles = (value: unknown): boolean => {
+  const files = normalizeMessageFiles(value);
+  return Boolean(files && files.length > 0);
 };
 
 const serializeMessageFiles = (files?: MessageFile[]): UploadedFile[] | undefined => {
@@ -1510,7 +1516,8 @@ const ChatPage: React.FC = () => {
         if (msg.role === 'tool') return false;
         const hasToolCalls = msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
         const hasContent = msg.content && msg.content.trim();
-        if (!hasContent && !hasToolCalls) return false;
+        const hasFiles = hasRenderableMessageFiles(msg.files);
+        if (!hasContent && !hasToolCalls && !hasFiles) return false;
         if (msg.content && msg.content.startsWith('Message sent to ')) return false;
         return true;
       })
@@ -1907,8 +1914,13 @@ const ChatPage: React.FC = () => {
           && (message as { role?: string }).role === 'assistant'
           && typeof (message as { metadata?: { request_id?: string } }).metadata?.request_id === 'string'
           && (message as { metadata?: { request_id?: string } }).metadata?.request_id === requestId
-          && typeof (message as { content?: string }).content === 'string'
-          && cleanHistoryMessageContent((message as { content?: string }).content || '').trim().length > 0
+          && (
+            (
+              typeof (message as { content?: string }).content === 'string'
+              && cleanHistoryMessageContent((message as { content?: string }).content || '').trim().length > 0
+            )
+            || hasRenderableMessageFiles((message as { files?: unknown }).files)
+          )
         ));
 
         if (matchedAssistantMessage) {

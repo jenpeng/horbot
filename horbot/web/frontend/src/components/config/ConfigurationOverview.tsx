@@ -22,6 +22,7 @@ interface ConfigurationOverviewProps {
   dirtySections: ConfigurationSectionKey[];
   webSearchProvider: string;
   webSearchProviderName: string;
+  webSearchTavilyEnabled: boolean;
   webSearchRequiresApiKey: boolean;
   webSearchHasApiKey: boolean;
   webSearchMaxResults: number;
@@ -45,6 +46,7 @@ const ConfigurationOverview: React.FC<ConfigurationOverviewProps> = ({
   dirtySections,
   webSearchProvider,
   webSearchProviderName,
+  webSearchTavilyEnabled,
   webSearchRequiresApiKey,
   webSearchHasApiKey,
   webSearchMaxResults,
@@ -55,11 +57,14 @@ const ConfigurationOverview: React.FC<ConfigurationOverviewProps> = ({
     workspace: { label: t('config.section.workspace'), href: '#config-workspace' },
     'web-search': { label: t('config.section.webSearch'), href: '#config-web-search' },
   };
-  const webSearchStatus = webSearchRequiresApiKey
-    ? webSearchHasApiKey
-      ? t('config.overview.webSearchKeyConfigured')
-      : t('config.overview.webSearchKeyMissing')
-    : t('config.overview.webSearchKeyNotRequired');
+  const tavilyDisabled = webSearchProvider === 'tavily' && !webSearchTavilyEnabled;
+  const webSearchStatus = tavilyDisabled
+    ? t('config.overview.webSearchTavilyDisabled')
+    : webSearchRequiresApiKey
+      ? webSearchHasApiKey
+        ? t('config.overview.webSearchKeyConfigured')
+        : t('config.overview.webSearchKeyMissing')
+      : t('config.overview.webSearchKeyNotRequired');
 
   return (
     <Card padding="md" variant="gradient" gradient="primary" className="shadow-md">
@@ -155,7 +160,9 @@ const ConfigurationOverview: React.FC<ConfigurationOverviewProps> = ({
           </p>
           <span
             className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-              webSearchRequiresApiKey && !webSearchHasApiKey
+              tavilyDisabled
+                ? 'bg-accent-orange/12 text-accent-orange'
+                : webSearchRequiresApiKey && !webSearchHasApiKey
                 ? 'bg-accent-red/12 text-accent-red'
                 : 'bg-accent-emerald/12 text-accent-emerald'
             }`}

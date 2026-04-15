@@ -14,6 +14,8 @@ import re
 import shutil
 import threading
 import time
+import urllib.error
+import urllib.request
 from loguru import logger
 
 from horbot.config.loader import get_cached_config, save_config
@@ -75,7 +77,7 @@ from horbot.security.runtime_guard import inspect_user_input
 from pydantic import BaseModel, Field
 from pydantic.alias_generators import to_camel
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 router = APIRouter()
 
@@ -660,10 +662,10 @@ async def _dispatch_internal_web_outbound(source_loop: AgentLoop, msg: OutboundM
     )
 
     session = session_manager.get_or_create(session_key)
-    outbound_files = _import_local_media_files(msg.media)
+    normalized_content, outbound_files = _normalize_outbound_content_and_files(msg.content, msg.media)
     message_id = session.add_message(
         "assistant",
-        clean_message_content(msg.content),
+        normalized_content,
         dedup=True,
         message_id=str(uuid.uuid4())[:8],
         files=outbound_files or None,
@@ -687,7 +689,7 @@ async def _dispatch_internal_web_outbound(source_loop: AgentLoop, msg: OutboundM
             "agent_done",
             agent_id=source_agent_id,
             agent_name=source_agent_name,
-            content=clean_message_content(msg.content),
+            content=normalized_content,
             message_id=message_id,
             files=outbound_files or None,
         ),
@@ -2035,13 +2037,20 @@ async def _resolve_chat_session_manager(
 
     if raw_session_key.startswith("dm_"):
         extracted_agent_id = raw_session_key[3:]
+        target_kind: str | None = None
         try:
             target_kind, _ = _resolve_chat_target(extracted_agent_id)
-            if target_kind == "internal":
-                agent_loop = await get_agent_loop(extracted_agent_id)
-                return agent_loop.sessions, normalized_session_key
-            if target_kind == "external":
-                return get_session_manager(), normalized_session_key
+        except Exception as e:
+            logger.warning(
+                "[DEBUG] Failed to resolve chat target for {} while resolving DM session manager: {}",
+                extracted_agent_id,
+                e,
+            )
+        if target_kind == "external":
+            return get_session_manager(), normalized_session_key
+        try:
+            agent_loop = await get_agent_loop(extracted_agent_id)
+            return agent_loop.sessions, normalized_session_key
         except Exception as e:
             logger.warning(
                 "[DEBUG] Failed to get agent loop for {} while resolving DM session manager: {}",
@@ -2216,6 +2225,9 @@ async def get_config():
     config = get_cached_config()
     raw_data = config.model_dump(by_alias=True)
     data = sanitize_config_for_client(raw_data)
+
+    search_config = getattr(getattr(getattr(config.tools, "web", None), "search", None), "tavily_enabled", True)
+    data.setdefault("tools", {}).setdefault("web", {}).setdefault("search", {})["tavilyEnabled"] = bool(search_config)
     
     # Predefined providers (always show in UI)
     PREDEFINED_PROVIDERS = {
@@ -3243,6 +3255,7 @@ class AgentDefaultsUpdateRequest(BaseModel):
 class WebSearchConfigUpdateRequest(BaseModel):
     """Partial update request for web search config."""
     provider: Optional[str] = None
+    tavilyEnabled: Optional[bool] = None
     apiKey: Optional[str] = None
     maxResults: Optional[int] = None
 
@@ -3325,6 +3338,8 @@ async def update_web_search_config(request: WebSearchConfigUpdateRequest):
 
         if request.provider is not None:
             search_config.provider = request.provider
+        if request.tavilyEnabled is not None:
+            search_config.tavily_enabled = request.tavilyEnabled
         if request.apiKey is not None:
             search_config.api_key = request.apiKey
         if request.maxResults is not None:
@@ -3530,6 +3545,276 @@ def _import_local_media_files(media: list[str] | None) -> list[dict[str, Any]]:
         logger.info("[ChatAPI] Imported outbound media {} -> {}", source_path, stored_path.name)
 
     return results
+
+
+REMOTE_IMAGE_HOSTS = {
+    "image.pollinations.ai",
+    "images.pollinations.ai",
+}
+REMOTE_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif")
+REMOTE_IMAGE_CACHE_TIMEOUT_SECONDS = 12
+REMOTE_IMAGE_MAX_BYTES = 20 * 1024 * 1024
+_STANDALONE_URL_LINE_PATTERN = re.compile(r"^\s*(?:[-*+]\s+|\d+\.\s+)?(https?://\S+)\s*$", re.IGNORECASE)
+
+
+def _unwrap_url_token(value: str) -> str:
+    candidate = (value or "").strip()
+    if candidate.startswith("<") and candidate.endswith(">"):
+        return candidate[1:-1].strip()
+    return candidate
+
+
+def _is_likely_remote_image_url(value: str) -> bool:
+    candidate = _unwrap_url_token(value)
+    if not candidate or not re.match(r"^https?://", candidate, re.IGNORECASE):
+        return False
+
+    try:
+        parsed = urlparse(candidate)
+    except Exception:
+        return False
+
+    host = (parsed.hostname or "").lower()
+    if host in REMOTE_IMAGE_HOSTS:
+        return True
+
+    path = (parsed.path or "").lower()
+    return any(path.endswith(ext) for ext in REMOTE_IMAGE_EXTENSIONS)
+
+
+def _guess_remote_image_file_name(url: str, index: int) -> tuple[str, str, str]:
+    parsed = urlparse(url)
+    raw_name = Path(parsed.path or "").name
+    original_extension = Path(raw_name).suffix.lower()
+    extension = original_extension
+    if extension not in REMOTE_IMAGE_EXTENSIONS:
+        extension = ".jpg"
+
+    stem = Path(raw_name).stem if raw_name else ""
+    host = (parsed.hostname or "").lower()
+    needs_generated_stem = not stem or stem.lower() in {"prompt", "image"} or original_extension not in REMOTE_IMAGE_EXTENSIONS
+    if needs_generated_stem:
+        if host in REMOTE_IMAGE_HOSTS:
+            seed_match = re.search(r"(?:^|&)seed=(\d+)", parsed.query or "", re.IGNORECASE)
+            decoded_prompt = unquote(parsed.path or "")
+            if "小马" in decoded_prompt or re.search(r"\bpony\b", decoded_prompt, re.IGNORECASE):
+                stem = f"pony-theme-{seed_match.group(1)}" if seed_match else f"pony-theme-{index}"
+            else:
+                stem = f"pollinations-{seed_match.group(1)}" if seed_match else f"pollinations-{index}"
+        else:
+            stem = f"remote-image-{index}"
+
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-") or f"remote-image-{index}"
+    original_name = f"{safe_stem}{extension}"
+    filename = original_name
+    mime_type = mimetypes.guess_type(original_name)[0] or "image/jpeg"
+    return filename, original_name, mime_type
+
+
+def _remote_image_file_id(url: str) -> str:
+    return f"remote-image-{uuid.uuid5(uuid.NAMESPACE_URL, url).hex[:12]}"
+
+
+def _remote_image_cache_enabled() -> bool:
+    # Keep unit tests deterministic and offline.
+    return not bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+def _list_remote_image_cache_paths() -> list[Path]:
+    upload_dir = _get_upload_dir()
+    return sorted(upload_dir.glob("remote-image-*.*"))
+
+
+def _get_remote_image_cache_stats() -> dict[str, Any]:
+    cache_files = _list_remote_image_cache_paths()
+    total_size_bytes = 0
+    newest_updated_at: str | None = None
+
+    for path in cache_files:
+        stat = path.stat()
+        total_size_bytes += stat.st_size
+        updated_at = datetime.fromtimestamp(stat.st_mtime).isoformat()
+        if newest_updated_at is None or updated_at > newest_updated_at:
+            newest_updated_at = updated_at
+
+    return {
+        "count": len(cache_files),
+        "total_size_bytes": total_size_bytes,
+        "newest_updated_at": newest_updated_at,
+    }
+
+
+def _clear_remote_image_cache() -> dict[str, Any]:
+    cache_files = _list_remote_image_cache_paths()
+    deleted_count = 0
+    deleted_size_bytes = 0
+
+    for path in cache_files:
+        try:
+            deleted_size_bytes += path.stat().st_size
+        except OSError:
+            pass
+        path.unlink(missing_ok=True)
+        deleted_count += 1
+
+    return {
+        "deleted_count": deleted_count,
+        "deleted_size_bytes": deleted_size_bytes,
+    }
+
+
+def _cache_remote_image_file(url: str, index: int) -> dict[str, Any] | None:
+    if not _remote_image_cache_enabled():
+        return None
+
+    file_id = _remote_image_file_id(url)
+    upload_dir = _get_upload_dir()
+    existing_files = list(upload_dir.glob(f"{file_id}.*"))
+    _, guessed_original_name, guessed_mime_type = _guess_remote_image_file_name(url, index)
+    if existing_files:
+        return _build_upload_response_for_path(
+            existing_files[0],
+            file_id=file_id,
+            original_name=guessed_original_name,
+        ).model_dump()
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Horbot/1.0",
+            "Accept": "image/*,*/*;q=0.8",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=REMOTE_IMAGE_CACHE_TIMEOUT_SECONDS) as response:
+            content_type = response.headers.get_content_type() or guessed_mime_type
+            if not str(content_type).startswith("image/"):
+                return None
+
+            extension = mimetypes.guess_extension(content_type) or Path(guessed_original_name).suffix or ".jpg"
+            if extension == ".jpe":
+                extension = ".jpg"
+            if extension.lower() not in REMOTE_IMAGE_EXTENSIONS:
+                extension = Path(guessed_original_name).suffix or ".jpg"
+
+            stored_path = upload_dir / f"{file_id}{extension}"
+            temp_path = stored_path.with_suffix(f"{stored_path.suffix}.tmp")
+            bytes_written = 0
+            with open(temp_path, "wb") as handle:
+                while True:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    bytes_written += len(chunk)
+                    if bytes_written > REMOTE_IMAGE_MAX_BYTES:
+                        handle.close()
+                        temp_path.unlink(missing_ok=True)
+                        logger.warning("[ChatAPI] Remote image too large to cache: {}", url)
+                        return None
+                    handle.write(chunk)
+            temp_path.replace(stored_path)
+            original_name = f"{Path(guessed_original_name).stem}{extension}"
+            logger.info("[ChatAPI] Cached remote image {} -> {}", url, stored_path.name)
+            return _build_upload_response_for_path(
+                stored_path,
+                file_id=file_id,
+                original_name=original_name,
+            ).model_dump()
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        logger.debug("[ChatAPI] Remote image cache skipped for {}: {}", url, exc)
+        return None
+
+
+def _extract_remote_image_urls(content: str) -> list[str]:
+    urls: list[str] = []
+    seen: set[str] = set()
+    for line in (content or "").splitlines():
+        match = _STANDALONE_URL_LINE_PATTERN.match(line)
+        if not match:
+            continue
+        candidate = _unwrap_url_token(match.group(1))
+        if not _is_likely_remote_image_url(candidate) or candidate in seen:
+            continue
+        seen.add(candidate)
+        urls.append(candidate)
+    return urls
+
+
+def _strip_standalone_remote_image_url_lines(content: str, urls: list[str]) -> str:
+    if not content or not urls:
+        return content
+
+    url_set = {_unwrap_url_token(url) for url in urls}
+    kept_lines: list[str] = []
+    for line in content.splitlines():
+        match = _STANDALONE_URL_LINE_PATTERN.match(line)
+        if match and _unwrap_url_token(match.group(1)) in url_set:
+            continue
+        kept_lines.append(line)
+
+    normalized = "\n".join(kept_lines)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
+def _build_remote_image_files(urls: list[str], existing_files: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    files: list[dict[str, Any]] = []
+    seen_urls = {
+        str((item or {}).get("preview_url") or (item or {}).get("url") or "").strip()
+        for item in (existing_files or [])
+    }
+    seen_file_ids = {
+        str((item or {}).get("file_id") or "").strip()
+        for item in (existing_files or [])
+    }
+    for index, url in enumerate(urls, start=1):
+        remote_file_id = _remote_image_file_id(url)
+        if url in seen_urls or remote_file_id in seen_file_ids:
+            continue
+        cached_file = _cache_remote_image_file(url, index)
+        if cached_file:
+            files.append(cached_file)
+            seen_file_ids.add(remote_file_id)
+            continue
+        filename, original_name, mime_type = _guess_remote_image_file_name(url, index)
+        files.append({
+            "file_id": remote_file_id,
+            "filename": filename,
+            "original_name": original_name,
+            "mime_type": mime_type,
+            "size": 0,
+            "category": "image",
+            "url": url,
+            "preview_url": url,
+        })
+    return files
+
+
+def _normalize_outbound_content_and_files(
+    content: str | None,
+    media: list[str] | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
+    cleaned_content = clean_message_content(content or "")
+    outbound_files = _import_local_media_files(media)
+    remote_image_urls = _extract_remote_image_urls(cleaned_content)
+    if remote_image_urls:
+        outbound_files.extend(_build_remote_image_files(remote_image_urls, outbound_files))
+        cleaned_content = _strip_standalone_remote_image_url_lines(cleaned_content, remote_image_urls)
+    return cleaned_content, outbound_files
+
+
+def _normalize_saved_assistant_content_and_files(
+    content: str | None,
+    files: list[dict[str, Any]] | None,
+) -> tuple[str, list[dict[str, Any]]]:
+    cleaned_content = clean_message_content(content or "")
+    normalized_files = list(files or [])
+    remote_image_urls = _extract_remote_image_urls(cleaned_content)
+    if remote_image_urls:
+        normalized_files.extend(_build_remote_image_files(remote_image_urls, normalized_files))
+        cleaned_content = _strip_standalone_remote_image_url_lines(cleaned_content, remote_image_urls)
+    return cleaned_content, normalized_files
 
 
 def _extract_text_from_pdf(file_path: Path) -> Optional[str]:
@@ -3890,6 +4175,34 @@ async def delete_file(file_id: str):
     return {"status": "success", "message": f"File {file_id} deleted"}
 
 
+@router.get("/files/cache/remote-images")
+async def get_remote_image_cache_status():
+    """Get remote image cache stats."""
+    try:
+        stats = _get_remote_image_cache_stats()
+        return {
+            "status": "success",
+            **stats,
+        }
+    except Exception as e:
+        logger.error("Failed to get remote image cache stats: {}", e)
+        raise HTTPException(status_code=500, detail=f"Failed to get remote image cache stats: {str(e)}")
+
+
+@router.delete("/files/cache/remote-images")
+async def clear_remote_image_cache():
+    """Clear cached remote images imported into uploads."""
+    try:
+        result = _clear_remote_image_cache()
+        return {
+            "status": "success",
+            **result,
+        }
+    except Exception as e:
+        logger.error("Failed to clear remote image cache: {}", e)
+        raise HTTPException(status_code=500, detail=f"Failed to clear remote image cache: {str(e)}")
+
+
 @router.get("/chat/history")
 async def get_chat_history(session_key: str = "default", agent_id: Optional[str] = None):
     """Get chat history for a session."""
@@ -3929,10 +4242,14 @@ async def get_chat_history(session_key: str = "default", agent_id: Optional[str]
         # Skip metadata entries
         if msg.get("_type") == "metadata":
             continue
+        content = msg.get("content")
+        files = msg.get("files")
+        if msg.get("role") == "assistant":
+            content, files = _normalize_saved_assistant_content_and_files(content, files)
         msg_data = {
             "id": ensure_history_message_id(msg),
             "role": msg.get("role"),
-            "content": msg.get("content"),
+            "content": content,
             "timestamp": msg.get("timestamp")
         }
         # Include execution_steps if present (saved with underscore naming)
@@ -3940,8 +4257,8 @@ async def get_chat_history(session_key: str = "default", agent_id: Optional[str]
             msg_data["execution_steps"] = sanitize_execution_steps(msg["execution_steps"])
         
         # Include files if present
-        if "files" in msg:
-            msg_data["files"] = msg["files"]
+        if files:
+            msg_data["files"] = files
         
         # Include metadata if present
         if "metadata" in msg:
@@ -4636,13 +4953,16 @@ async def _stream_generator(
                         _maybe_materialize_bootstrap_from_session(agent_instance, session)
                         yield _sse_event({"event": "done"})
                 elif final_response["content"] or exec_steps_to_save:
-                    cleaned_content = _resolve_final_agent_display_content(
+                    resolved_content = _resolve_final_agent_display_content(
                         final_response["content"],
                         content_state["content"],
                     )
-                    outbound_files = _import_local_media_files(message_tool_dispatch_state.get("media"))
+                    cleaned_content, outbound_files = _normalize_outbound_content_and_files(
+                        resolved_content,
+                        message_tool_dispatch_state.get("media"),
+                    )
                     provider_error = final_response.get("metadata", {}).get("_provider_error")
-                    if cleaned_content:
+                    if cleaned_content or outbound_files:
                         yield _sse_event(
                             _build_chat_stream_event(
                                 "agent_done",
@@ -5028,7 +5348,12 @@ async def _group_chat_stream_generator(
                     )
             
             # Only send agent_done event if there's actual content to display
-            if final_content:
+            normalized_content, outbound_files = _normalize_outbound_content_and_files(
+                final_content,
+                message_tool_dispatch_state.get("media"),
+            )
+
+            if normalized_content or outbound_files:
                 memory_sources = []
                 memory_recall = {}
                 if response and response.metadata:
@@ -5037,7 +5362,8 @@ async def _group_chat_stream_generator(
                 all_responses.append({
                     "agent_id": agent_id,
                     "agent_name": agent_name,
-                    "content": final_content,
+                    "content": normalized_content,
+                    "files": outbound_files or None,
                     "execution_steps": sanitize_execution_steps(execution_steps),
                     "memory_sources": memory_sources,
                     "memory_recall": memory_recall,
@@ -5049,9 +5375,10 @@ async def _group_chat_stream_generator(
                     agent_id=agent_id,
                     agent_name=agent_name,
                     agent_index=agent_index,
-                    content=final_content,
+                    content=normalized_content,
                     turn_id=turn_id,
                     message_id=assistant_message_id,
+                    files=outbound_files or None,
                     execution_steps=sanitize_execution_steps(execution_steps),
                     memory_sources=memory_sources,
                     memory_recall=memory_recall,
@@ -5149,56 +5476,59 @@ async def _group_chat_stream_generator(
                             "agent_id": item.get("agent_id"),
                             "agent_name": item.get("agent_name"),
                             "content": item.get("content"),
+                            "files": item.get("files"),
                             "turn_id": item.get("turn_id"),
                             "message_id": item.get("message_id"),
                             "execution_steps": sanitize_execution_steps(item.get("execution_steps", [])),
                             "memory_sources": item.get("memory_sources", []),
                             "memory_recall": item.get("memory_recall", {}),
                         }
-                        if resp["content"]:
+                        if resp["content"] or resp["files"]:
                             content_to_save = clean_message_content(resp["content"])
-                            if content_to_save:
-                                resp_ctx = conversation_contexts.get(resp["agent_id"])
-                                metadata = {
-                                    "agent_id": resp["agent_id"], 
-                                    "agent_name": resp["agent_name"]
-                                }
-                                if resp_ctx:
-                                    metadata["source"] = resp_ctx.source
-                                    metadata["source_name"] = resp_ctx.source_name
-                                    metadata["target"] = resp_ctx.target
-                                    metadata["target_name"] = resp_ctx.target_name
-                                    metadata["conversation_type"] = resp_ctx.conversation_type.value
-                                if resp["turn_id"]:
-                                    metadata["turn_id"] = resp["turn_id"]
-                                metadata["request_id"] = request_id
-                                if resp["memory_sources"]:
-                                    metadata["_memory_sources"] = resp["memory_sources"]
-                                if resp["memory_recall"]:
-                                    metadata["_memory_recall"] = resp["memory_recall"]
-                                
-                                logger.info(f"[ChatAPI][{request_id}] Adding assistant message with metadata: {metadata}")
-                                existing_msg_idx = _find_session_message_index(
-                                    session,
+                            resp_ctx = conversation_contexts.get(resp["agent_id"])
+                            metadata = {
+                                "agent_id": resp["agent_id"],
+                                "agent_name": resp["agent_name"]
+                            }
+                            if resp_ctx:
+                                metadata["source"] = resp_ctx.source
+                                metadata["source_name"] = resp_ctx.source_name
+                                metadata["target"] = resp_ctx.target
+                                metadata["target_name"] = resp_ctx.target_name
+                                metadata["conversation_type"] = resp_ctx.conversation_type.value
+                            if resp["turn_id"]:
+                                metadata["turn_id"] = resp["turn_id"]
+                            metadata["request_id"] = request_id
+                            if resp["memory_sources"]:
+                                metadata["_memory_sources"] = resp["memory_sources"]
+                            if resp["memory_recall"]:
+                                metadata["_memory_recall"] = resp["memory_recall"]
+
+                            logger.info(f"[ChatAPI][{request_id}] Adding assistant message with metadata: {metadata}")
+                            existing_msg_idx = _find_session_message_index(
+                                session,
+                                message_id=resp["message_id"],
+                                turn_id=resp["turn_id"],
+                                role="assistant",
+                            )
+                            if existing_msg_idx >= 0:
+                                session.messages[existing_msg_idx]["content"] = content_to_save
+                                if resp["execution_steps"]:
+                                    session.messages[existing_msg_idx]["execution_steps"] = resp["execution_steps"]
+                                if resp["files"]:
+                                    session.messages[existing_msg_idx]["files"] = resp["files"]
+                                session.messages[existing_msg_idx].setdefault("metadata", {}).update(metadata)
+                            else:
+                                session.add_message(
+                                    "assistant",
+                                    content_to_save,
+                                    dedup=True,
                                     message_id=resp["message_id"],
-                                    turn_id=resp["turn_id"],
-                                    role="assistant",
+                                    files=resp["files"],
+                                    execution_steps=resp["execution_steps"],
+                                    metadata=metadata,
                                 )
-                                if existing_msg_idx >= 0:
-                                    session.messages[existing_msg_idx]["content"] = content_to_save
-                                    if resp["execution_steps"]:
-                                        session.messages[existing_msg_idx]["execution_steps"] = resp["execution_steps"]
-                                    session.messages[existing_msg_idx].setdefault("metadata", {}).update(metadata)
-                                else:
-                                    session.add_message(
-                                        "assistant",
-                                        content_to_save,
-                                        dedup=True,
-                                        message_id=resp["message_id"],
-                                        execution_steps=resp["execution_steps"],
-                                        metadata=metadata,
-                                    )
-                                logger.info(f"[ChatAPI][{request_id}] Message saved. Session messages count: {len(session.messages)}")
+                            logger.info(f"[ChatAPI][{request_id}] Message saved. Session messages count: {len(session.messages)}")
                         all_responses.append(resp)
                         sanitized_item = dict(item)
                         sanitized_item["execution_steps"] = resp["execution_steps"]
@@ -6994,7 +7324,7 @@ async def get_web_search_providers():
         {
             "id": "tavily",
             "name": "Tavily",
-            "description": "AI 优化的搜索 API，需要 API key",
+            "description": "AI 优化的搜索 API，可通过 Tavily 开关显式启用或关闭",
             "requires_api_key": True,
             "api_key_url": "https://tavily.com/"
         }
@@ -7898,7 +8228,17 @@ async def get_conversation_messages(conv_id: str):
     for msg in raw_messages:
         cleaned_msg = dict(msg)  # Create a copy
         cleaned_msg["id"] = ensure_history_message_id(cleaned_msg)
-        if "content" in cleaned_msg and isinstance(cleaned_msg["content"], str):
+        if cleaned_msg.get("role") == "assistant":
+            normalized_content, normalized_files = _normalize_saved_assistant_content_and_files(
+                cleaned_msg.get("content"),
+                cleaned_msg.get("files"),
+            )
+            cleaned_msg["content"] = normalized_content
+            if normalized_files:
+                cleaned_msg["files"] = normalized_files
+            else:
+                cleaned_msg.pop("files", None)
+        elif "content" in cleaned_msg and isinstance(cleaned_msg["content"], str):
             cleaned_msg["content"] = clean_message_content(cleaned_msg["content"])
         cleaned_messages.append(cleaned_msg)
     

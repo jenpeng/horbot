@@ -8,6 +8,7 @@ import { Card } from '../ui/Card';
 interface WebSearchConfigSectionProps {
   currentWebSearchConfig: {
     provider: string;
+    tavilyEnabled: boolean;
     apiKey: string;
     apiKeyMode: WebSearchApiKeyMode;
     hasApiKey: boolean;
@@ -20,8 +21,15 @@ interface WebSearchConfigSectionProps {
   hasWebSearchChanges: boolean;
   canSaveWebSearch: boolean;
   isSavingWebSearch: boolean;
-  onWebSearchChange: (patch: Partial<{ provider: string; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>) => void;
+  remoteImageCacheStatus: {
+    count: number;
+    total_size_bytes: number;
+    newest_updated_at?: string | null;
+  };
+  isClearingRemoteImageCache: boolean;
+  onWebSearchChange: (patch: Partial<{ provider: string; tavilyEnabled: boolean; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>) => void;
   onSaveWebSearch: () => void | Promise<void>;
+  onClearRemoteImageCache: () => void | Promise<void>;
 }
 
 const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
@@ -32,11 +40,15 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
   hasWebSearchChanges,
   canSaveWebSearch,
   isSavingWebSearch,
+  remoteImageCacheStatus,
+  isClearingRemoteImageCache,
   onWebSearchChange,
   onSaveWebSearch,
+  onClearRemoteImageCache,
 }) => {
   const { t } = useI18n();
   const providerRequiresApiKey = Boolean(selectedWebSearchProvider?.requires_api_key);
+  const tavilySelected = currentWebSearchConfig.provider === 'tavily';
   const hasMaskedKey = currentWebSearchConfig.hasApiKey && currentWebSearchConfig.apiKeyMasked;
   const apiKeyActionLabel = currentWebSearchConfig.apiKeyMode === 'clear'
     ? t('config.webSearch.keyClear')
@@ -80,6 +92,41 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
             <p className="text-sm text-surface-500 mt-2">{selectedWebSearchProvider.description}</p>
           )}
         </div>
+
+        {tavilySelected && (
+          <div className="rounded-2xl border border-surface-200 bg-surface-50/80 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-surface-900">{t('config.webSearch.tavilyToggleLabel')}</p>
+                <p className="mt-1 text-sm text-surface-600">
+                  {currentWebSearchConfig.tavilyEnabled
+                    ? t('config.webSearch.tavilyEnabledHint')
+                    : t('config.webSearch.tavilyDisabledHint')}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={currentWebSearchConfig.tavilyEnabled}
+                onClick={() => onWebSearchChange({ tavilyEnabled: !currentWebSearchConfig.tavilyEnabled })}
+                className={`relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition-colors ${
+                  currentWebSearchConfig.tavilyEnabled ? 'bg-primary-600' : 'bg-surface-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                    currentWebSearchConfig.tavilyEnabled ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+            <div className="mt-3 rounded-xl border border-dashed border-surface-200 bg-white/70 px-3 py-2 text-xs text-surface-600">
+              {currentWebSearchConfig.tavilyEnabled
+                ? t('config.webSearch.tavilyEnabledMode')
+                : t('config.webSearch.tavilyDisabledMode')}
+            </div>
+          </div>
+        )}
 
         {providerRequiresApiKey && (
           <div className="space-y-4">
@@ -162,6 +209,45 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
           />
           <p className="text-sm text-surface-500 mt-2">{t('config.webSearch.maxResultsHint')}</p>
         </div>
+
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
+          <p className="font-medium">{t('config.webSearch.fallbackTitle')}</p>
+          <p className="mt-1 text-amber-800">{t('config.webSearch.fallbackHint')}</p>
+        </div>
+
+        <div className="rounded-2xl border border-surface-200 bg-surface-50/80 px-4 py-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <p className="text-sm font-semibold text-surface-900">{t('config.remoteImageCache.title')}</p>
+              <p className="mt-1 text-sm text-surface-600">{t('config.remoteImageCache.subtitle')}</p>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => void onClearRemoteImageCache()}
+              disabled={remoteImageCacheStatus.count === 0 || isClearingRemoteImageCache}
+              isLoading={isClearingRemoteImageCache}
+            >
+              {t('config.remoteImageCache.clear')}
+            </Button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2 text-sm">
+            <span className="inline-flex rounded-full bg-white px-3 py-1 font-medium text-surface-700">
+              {t('config.remoteImageCache.count', { count: remoteImageCacheStatus.count })}
+            </span>
+            <span className="inline-flex rounded-full bg-white px-3 py-1 font-medium text-surface-700">
+              {t('config.remoteImageCache.size', { size: formatBytes(remoteImageCacheStatus.total_size_bytes) })}
+            </span>
+            {remoteImageCacheStatus.newest_updated_at ? (
+              <span className="inline-flex rounded-full bg-white px-3 py-1 font-medium text-surface-700">
+                {t('config.remoteImageCache.updatedAt', { value: formatDateTime(remoteImageCacheStatus.newest_updated_at) })}
+              </span>
+            ) : (
+              <span className="inline-flex rounded-full bg-white px-3 py-1 font-medium text-surface-500">
+                {t('config.remoteImageCache.empty')}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="flex items-center justify-between gap-3 pt-5 border-t border-surface-200 px-6 pb-6 flex-wrap">
@@ -194,6 +280,32 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
       </div>
     </Card>
   );
+};
+
+const formatBytes = (value: number): string => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0 B';
+  }
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (value >= 1024) {
+    return `${Math.round(value / 1024)} KB`;
+  }
+  return `${value} B`;
+};
+
+const formatDateTime = (value: string): string => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 };
 
 export default WebSearchConfigSection;

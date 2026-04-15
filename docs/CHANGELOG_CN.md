@@ -13,6 +13,14 @@
 - 内置代理启动阶段只做被动健康检查，不再主动弹浏览器；首次收到真实浏览器请求时，才按需拉起支持 remote debugging 的 headless Chrome，并复用 `127.0.0.1:9222` 作为 CDP 浏览器入口
 - Web Chat 现在会把 Agent 通过 `message(..., media=...)` 发送的图片等媒体正确落盘并即时展示，而不再在 SSE / 前端层丢失
 
+### 聊天图片卡片与远程图片缓存
+
+- 聊天历史与会话消息接口现在会把 assistant 正文中的独立远程图片链接自动提升为 `files` 附件结构，前端恢复使用统一图片卡片，而不是退回裸链接或 Markdown 内联图
+- Pollinations 等远程图片链接会尽量落盘到 `.horbot/data/uploads`，并生成本地 `preview_url`、文件名与文件大小，便于历史消息继续走图片卡片与预览弹窗
+- Configuration 页面新增“远程图片缓存”状态区块，展示缓存文件数、累计大小与最近更新时间
+- 新增远程图片缓存手动清理能力，可直接在配置页触发，也可通过 `GET/DELETE /api/files/cache/remote-images` 查询与清空缓存
+- 聊天页在历史回刷和超时后补偿逻辑中，已支持“只有 files 没有正文”的 assistant 消息，不会再把成功图片消息误判为空响应
+
 ### 文档同步
 
 - README、文档索引、MCP 文档和架构文档已同步更新为当前的原生 `web_access` 与内置代理运行模式

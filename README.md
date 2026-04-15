@@ -73,6 +73,7 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 - Markdown rendering for assistant messages
 - Denser chat bubbles and tighter Markdown spacing to reduce blank space in long conversations
 - Inline preview for image, audio, PDF, Office, and text attachments
+- Standalone remote image URLs in assistant history are promoted into normal image-card attachments when possible, instead of degrading to bare links
 - Multi-image preview modals now include a bottom thumbnail strip for faster visual switching
 - Drag-and-drop, paste upload, and retry flows
 - Group chat history merge and recovery across legacy and current session paths
@@ -90,6 +91,7 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 ### Operational Tooling
 
 - Web admin UI for configuration, agents, teams, status, skills, channels, tasks, and token usage
+- Configuration now exposes remote-image cache stats and a manual clear action for runtime-generated image-card cache files
 - Built-in UI locale switcher for English, Simplified Chinese, and Thai, with the selection persisted in browser storage
 - Smoke scripts for browser, chat, configuration, and agent asset flows
 - Security defaults for local-only access and admin-token-gated remote access

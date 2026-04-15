@@ -290,6 +290,35 @@ class WebTeamDispatchTests(unittest.IsolatedAsyncioTestCase):
         broadcast_payload = broadcast.await_args.args[1]
         self.assertEqual(broadcast_payload["files"], imported_files)
 
+    async def test_dispatch_internal_web_outbound_converts_remote_image_links_to_files(self):
+        fake_manager = FakeSessionManager()
+        fake_loop = SimpleNamespace(_agent_id="main", _agent_name="小项 🐎")
+        remote_url = "https://image.pollinations.ai/prompt/pony?seed=1776249001"
+        msg = OutboundMessage(
+            channel="web",
+            chat_id="team_team-001",
+            content=f"彭老师，继续用“小马主题”给你生成了1张，见下图～\n\n1. {remote_url}",
+            metadata={"team_id": "team-001"},
+        )
+
+        with patch("horbot.web.api._get_team_session_manager", new=AsyncMock(return_value=fake_manager)), patch(
+            "horbot.web.api._dispatch_team_group_followups",
+            new=AsyncMock(),
+        ), patch(
+            "horbot.web.websocket.broadcast_to_session",
+            new=AsyncMock(),
+        ) as broadcast:
+            await _dispatch_internal_web_outbound(fake_loop, msg)
+
+        saved = fake_manager.session.messages[0]
+        self.assertEqual(saved["content"], "彭老师，继续用“小马主题”给你生成了1张，见下图～")
+        self.assertEqual(len(saved["files"]), 1)
+        self.assertEqual(saved["files"][0]["preview_url"], remote_url)
+        self.assertEqual(saved["files"][0]["category"], "image")
+        broadcast_payload = broadcast.await_args.args[1]
+        self.assertEqual(broadcast_payload["content"], "彭老师，继续用“小马主题”给你生成了1张，见下图～")
+        self.assertEqual(broadcast_payload["files"][0]["preview_url"], remote_url)
+
     async def test_dispatch_internal_web_outbound_prefers_existing_team_session_manager(self):
         fake_manager = FakeSessionManager("/tmp/team-001-sessions")
         fake_loop = SimpleNamespace(

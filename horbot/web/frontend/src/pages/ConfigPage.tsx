@@ -62,6 +62,7 @@ const ConfigPage: React.FC = () => {
           dirtySections={state.dirtySections}
           webSearchProvider={state.currentWebSearchConfig.provider}
           webSearchProviderName={state.selectedWebSearchProvider?.name || state.currentWebSearchConfig.provider}
+          webSearchTavilyEnabled={state.currentWebSearchConfig.tavilyEnabled}
           webSearchRequiresApiKey={Boolean(state.selectedWebSearchProvider?.requires_api_key)}
           webSearchHasApiKey={state.currentWebSearchConfig.hasApiKey}
           webSearchMaxResults={state.currentWebSearchConfig.maxResults}
@@ -145,8 +146,11 @@ const ConfigPage: React.FC = () => {
             hasWebSearchChanges={state.hasWebSearchChanges}
             canSaveWebSearch={state.canSaveWebSearch}
             isSavingWebSearch={state.isSavingWebSearch}
+            remoteImageCacheStatus={state.remoteImageCacheStatus}
+            isClearingRemoteImageCache={state.isClearingRemoteImageCache}
             onWebSearchChange={state.updateWebSearchConfig}
             onSaveWebSearch={state.handleSaveWebSearch}
+            onClearRemoteImageCache={state.handleClearRemoteImageCache}
           />
         </div>
 

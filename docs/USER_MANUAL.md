@@ -24,6 +24,7 @@ Useful commands:
 ./horbot.sh restart
 ./horbot.sh stop
 ./horbot.sh logs backend
+./horbot.sh logs web-access
 ```
 
 ## Main Pages
@@ -57,10 +58,30 @@ Chat supports:
 - drag and drop
 - paste upload
 - inline history preview
+- remote image links in assistant history are normalized into the same image-card attachment UI when possible
 - compact assistant bubbles with tighter Markdown spacing for long replies
 - baton-aware team relay status so the UI shows who handed off to whom and whether the next turn is continuing discussion or returning to a final summary
 
 Uploads are stored under `.horbot/data/uploads`.
+
+If a remote image link can be cached successfully, later history loads use a local attachment preview URL and preserve filename plus file size in the card. If caching fails, the chat still falls back to a remote image attachment instead of showing only a bare link.
+
+## Configuration: Web Search And Remote Image Cache
+
+The `Configuration` page now also exposes runtime web-search controls:
+
+- switch the preferred web-search provider
+- enable or disable Tavily without changing the stored provider selection
+- adjust the default max-results limit
+- inspect and manually clear the remote image cache used for promoted image cards
+
+The remote image cache panel shows:
+
+- cached file count
+- total cached size
+- newest update timestamp
+
+Manual clear only removes runtime-generated remote-image cache entries. It does not delete ordinary user-uploaded files.
 
 ## Agent Setup
 

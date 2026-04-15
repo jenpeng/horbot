@@ -61,6 +61,15 @@ class ExecutionResult:
         )
 
 
+@dataclass(frozen=True)
+class WebRequirement:
+    """Classification result for whether a request should rely on native web access."""
+
+    category: str = "none"
+    requires_web_access: bool = False
+    reason: str = ""
+
+
 class PermissionDeniedError(Exception):
     """Raised when a tool execution is denied by permission policy."""
     pass
@@ -214,6 +223,160 @@ class ToolRegistry:
                         text_parts.append(item["content"])
             return "\n".join(part for part in text_parts if part).strip()
         return str(user_message)
+
+    @staticmethod
+    def classify_web_requirement(user_message: Any) -> WebRequirement:
+        """Infer whether the request should use native web access before answering."""
+        normalized = ToolRegistry._normalize_user_message_for_matching(user_message)
+        if not normalized:
+            return WebRequirement()
+
+        msg_lower = normalized.lower()
+
+        direct_web_hints = (
+            "http://",
+            "https://",
+            "www.",
+            "网页",
+            "网站",
+            "网页访问",
+            "浏览器",
+            "browser",
+            "打开这个网页",
+            "打开网页",
+            "访问页面",
+            "打开网站",
+            "进入网站",
+            "url",
+            "link",
+            "链接",
+            "页面标题",
+            "截图",
+            "screenshot",
+            "click",
+            "点击",
+        )
+        freshness_hints = (
+            "最新",
+            "最近",
+            "近期",
+            "当前",
+            "目前",
+            "现状",
+            "今天",
+            "今日",
+            "昨日",
+            "昨天",
+            "本周",
+            "now",
+            "today",
+            "current",
+            "latest",
+            "recent",
+            "breaking",
+        )
+        dynamic_fact_hints = (
+            "新闻",
+            "消息",
+            "动态",
+            "局势",
+            "进展",
+            "版本",
+            "更新",
+            "发布",
+            "release",
+            "changelog",
+            "价格",
+            "股价",
+            "汇率",
+            "天气",
+            "比分",
+            "赛程",
+            "政策",
+            "公告",
+            "财报",
+            "status",
+            "incident",
+            "outage",
+            "论文",
+            "paper",
+            "docs",
+            "文档",
+            "仓库",
+            "repo",
+        )
+        lookup_verbs = (
+            "查",
+            "查下",
+            "查一下",
+            "查一查",
+            "帮我查",
+            "搜",
+            "搜一下",
+            "搜索",
+            "检索",
+            "查询",
+            "核实",
+            "确认",
+            "看看",
+            "看下",
+            "看一下",
+            "参考一下",
+            "调研",
+            "对比",
+            "比较",
+        )
+        source_hints = (
+            "官网",
+            "官方",
+            "文档",
+            "docs",
+            "documentation",
+            "api",
+            "github",
+            "gitlab",
+            "仓库",
+            "repo",
+            "release",
+            "changelog",
+            "发布说明",
+            "paper",
+            "论文",
+            "arxiv",
+            "规范",
+            "spec",
+            "rfc",
+            "wiki",
+        )
+
+        has_direct_web = any(token in msg_lower for token in direct_web_hints)
+        has_lookup_verb = any(token in msg_lower for token in lookup_verbs)
+        has_source_hint = any(token in msg_lower for token in source_hints)
+        has_freshness_hint = any(token in msg_lower for token in freshness_hints)
+        has_dynamic_fact_hint = any(token in msg_lower for token in dynamic_fact_hints)
+
+        if has_direct_web:
+            return WebRequirement(
+                category="direct_web",
+                requires_web_access=True,
+                reason="explicit webpage or URL interaction requested",
+            )
+
+        if has_freshness_hint and (has_dynamic_fact_hint or has_lookup_verb or has_source_hint):
+            return WebRequirement(
+                category="fresh_knowledge",
+                requires_web_access=True,
+                reason="time-sensitive knowledge request detected",
+            )
+
+        if has_source_hint and (has_lookup_verb or "是否" in msg_lower or "能否" in msg_lower or "怎么" in msg_lower):
+            return WebRequirement(
+                category="lookup_knowledge",
+                requires_web_access=True,
+                reason="external-source lookup intent detected",
+            )
+
+        return WebRequirement()
     
     def get_definitions_smart(self, user_message: Any = None, max_tools: int = 50, include_web_search: bool = False) -> list[dict[str, Any]]:
         """
@@ -323,6 +486,12 @@ class ToolRegistry:
                 selected.add(tool)
         
         normalized_user_message = self._normalize_user_message_for_matching(user_message)
+
+        web_requirement = self.classify_web_requirement(normalized_user_message)
+        if web_requirement.requires_web_access:
+            for tool in available:
+                if tool == "web_access":
+                    selected.add(tool)
 
         keyword_matched = False
         if normalized_user_message:

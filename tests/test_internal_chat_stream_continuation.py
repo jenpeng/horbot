@@ -216,3 +216,68 @@ class InternalChatStreamContinuationTests(unittest.IsolatedAsyncioTestCase):
             session = sessions.get_or_create("web:dm_main")
             assistant_messages = [message for message in session.messages if message.get("role") == "assistant"]
             self.assertEqual(assistant_messages[-1]["files"], imported_files)
+
+    async def test_single_chat_stream_remote_image_links_are_exposed_as_files(self):
+        config = Config()
+        fake_stream_manager = FakeStreamManager()
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "workspace"
+            workspace.mkdir(parents=True, exist_ok=True)
+            sessions = SessionManager(workspace=Path(tempdir) / "sessions")
+
+            fake_agent = SimpleNamespace(
+                id="main",
+                name="小项 🐎",
+                is_main=True,
+                get_workspace=lambda: workspace,
+            )
+            fake_agent_manager = SimpleNamespace(
+                get_default_agent=lambda: fake_agent,
+                get_agent=lambda agent_id: fake_agent if agent_id == "main" else None,
+                get_all_agents=lambda: [fake_agent],
+            )
+            fake_external_agent_manager = SimpleNamespace(
+                get_external_agent=lambda agent_id: None,
+            )
+            remote_url = "https://image.pollinations.ai/prompt/pony?seed=1776249001"
+
+            async def process_message(msg, **kwargs):
+                on_tool_start = kwargs["on_tool_start"]
+                await on_tool_start(
+                    "message",
+                    {
+                        "content": f"彭老师，继续用“小马主题”给你生成了1张，见下图～\n\n1. {remote_url}",
+                    },
+                )
+                return SimpleNamespace(content="Message sent to web:dm_main", metadata={})
+
+            fake_loop = SimpleNamespace(
+                sessions=sessions,
+                process_message=process_message,
+            )
+
+            request = StreamRequest(
+                content="继续用“小马主题”生成1张图片展示",
+                session_key="web:dm_main",
+                agent_id="main",
+            )
+
+            with (
+                patch("horbot.agent.manager.get_agent_manager", return_value=fake_agent_manager),
+                patch("horbot.external_agents.manager.get_external_agent_manager", return_value=fake_external_agent_manager),
+                patch("horbot.web.api.get_agent_loop", new=AsyncMock(return_value=fake_loop)),
+                patch("horbot.web.api.get_stream_manager", return_value=fake_stream_manager),
+            ):
+                chunks = [chunk async for chunk in _stream_generator(request, "req-remote-image-link")]
+
+            events = _decode_sse_events(chunks)
+            agent_done_event = next(event for event in events if event.get("event") == "agent_done")
+            self.assertEqual(agent_done_event["content"], "彭老师，继续用“小马主题”给你生成了1张，见下图～")
+            self.assertEqual(len(agent_done_event["files"]), 1)
+            self.assertEqual(agent_done_event["files"][0]["preview_url"], remote_url)
+
+            session = sessions.get_or_create("web:dm_main")
+            assistant_messages = [message for message in session.messages if message.get("role") == "assistant"]
+            self.assertEqual(assistant_messages[-1]["content"], "彭老师，继续用“小马主题”给你生成了1张，见下图～")
+            self.assertEqual(assistant_messages[-1]["files"][0]["preview_url"], remote_url)

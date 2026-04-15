@@ -83,6 +83,25 @@ Content-Type: application/json
 }
 ```
 
+#### 更新联网搜索配置
+
+```http
+PATCH /api/config/web-search
+Content-Type: application/json
+
+{
+  "provider": "tavily",
+  "tavilyEnabled": false,
+  "maxResults": 5
+}
+```
+
+说明：
+
+- 可用于更新 Web 管理页中的联网搜索 Provider、`tavilyEnabled` 开关与最大结果数
+- 当 `tavilyEnabled=false` 时，即使当前 Provider 仍选中 Tavily，运行时也会回退到默认静默 HTTP 搜索；若继续失败，Agent 会建议改用浏览器 / CDP 路径
+- 如需替换密钥，可同时传 `apiKey`
+
 ---
 
 ### 多 Agent 管理与治理
@@ -499,6 +518,49 @@ GET /api/files/{file_id}
 - 当前接口默认使用 `inline` 返回，浏览器会优先尝试图片、音频、PDF、文本等内联预览
 - 前端聊天历史会基于该接口打开统一预览弹窗
 
+#### 远程图片缓存统计
+
+```http
+GET /api/files/cache/remote-images
+```
+
+响应示例：
+
+```json
+{
+  "status": "success",
+  "count": 3,
+  "total_size_bytes": 216384,
+  "newest_updated_at": "2026-04-15T15:44:23.521000"
+}
+```
+
+说明：
+
+- 该接口返回当前已落盘到上传目录的远程图片缓存统计
+- Configuration 页面里的“远程图片缓存”区块会直接使用该接口
+
+#### 清理远程图片缓存
+
+```http
+DELETE /api/files/cache/remote-images
+```
+
+响应示例：
+
+```json
+{
+  "status": "success",
+  "deleted_count": 3,
+  "deleted_size_bytes": 216384
+}
+```
+
+说明：
+
+- 该接口只会删除自动缓存的远程图片文件，不会影响普通上传附件
+- 可用于配置页中的手动“清理缓存”操作
+
 #### 流式聊天携带附件
 
 ```http
@@ -537,6 +599,12 @@ Content-Type: application/json
 - XLSX
 - PPTX
 - TXT / Markdown
+
+历史消息补充说明：
+
+- `GET /api/chat/history` 与 `GET /api/conversations/{conv_id}/messages` 会尽量把 assistant 正文中的独立远程图片链接提升为 `files` 附件
+- 当远程图片缓存成功时，返回体中的 `preview_url` 会指向本地 `/api/files/{file_id}/preview`
+- 当缓存失败时，仍会回退为远程 URL 形式的附件对象，前端继续按图片卡片渲染
 
 #### 添加定时任务
 

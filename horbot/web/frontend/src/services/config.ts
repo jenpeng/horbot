@@ -42,8 +42,14 @@ export interface AgentRecord {
 
 export interface WebSearchUpdateData {
   provider?: string;
+  tavilyEnabled?: boolean;
   apiKey?: string;
   maxResults?: number;
+}
+export interface RemoteImageCacheStatus {
+  count: number;
+  total_size_bytes: number;
+  newest_updated_at?: string | null;
 }
 export type ModelScenario = 'main' | 'planning' | 'file' | 'image' | 'audio' | 'video';
 
@@ -113,6 +119,23 @@ const configService = {
       console.error('Failed to fetch web search providers:', error);
       return [];
     }
+  },
+
+  getRemoteImageCacheStatus: async (): Promise<RemoteImageCacheStatus> => {
+    const response = await api.get<{ count: number; total_size_bytes: number; newest_updated_at?: string | null }>('/api/files/cache/remote-images');
+    return {
+      count: response.data?.count || 0,
+      total_size_bytes: response.data?.total_size_bytes || 0,
+      newest_updated_at: response.data?.newest_updated_at || null,
+    };
+  },
+
+  clearRemoteImageCache: async (): Promise<{ deleted_count: number; deleted_size_bytes: number }> => {
+    const response = await api.delete<{ deleted_count: number; deleted_size_bytes: number }>('/api/files/cache/remote-images');
+    return {
+      deleted_count: response.data?.deleted_count || 0,
+      deleted_size_bytes: response.data?.deleted_size_bytes || 0,
+    };
   },
 };
 
