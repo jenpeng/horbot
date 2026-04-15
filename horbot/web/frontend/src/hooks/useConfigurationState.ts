@@ -6,6 +6,7 @@ import type { AgentRecord, RemoteImageCacheStatus } from '../services/config';
 import diagnosticsService from '../services/diagnostics';
 import type { ConfigCheckResultData } from '../components/ConfigCheckResult';
 import { useI18n } from '../contexts/I18nContext';
+import { createAsyncResourceCache } from '../utils/asyncResourceCache';
 import {
   BUILTIN_PROVIDER_NAMES,
   DEFAULT_MODELS_CONFIG,
@@ -22,6 +23,44 @@ const createEmptyModelChangeState = (): Record<ModelScenarioKey, boolean> => ({
   audio: false,
   video: false,
 });
+
+const configSnapshotCache = createAsyncResourceCache(
+  async () => {
+    const [config, agents] = await Promise.all([
+      configService.getConfig(),
+      configService.getAgents(),
+    ]);
+    return { config, agents };
+  },
+  {
+    ttlMs: 20_000,
+    keyFn: () => 'config-snapshot',
+  },
+);
+
+const webSearchProvidersCache = createAsyncResourceCache(
+  () => configService.getWebSearchProviders(),
+  {
+    ttlMs: 5 * 60_000,
+    keyFn: () => 'web-search-providers',
+  },
+);
+
+const remoteImageCacheStatusCache = createAsyncResourceCache(
+  () => configService.getRemoteImageCacheStatus(),
+  {
+    ttlMs: 20_000,
+    keyFn: () => 'remote-image-cache-status',
+  },
+);
+
+const configValidationCache = createAsyncResourceCache(
+  () => diagnosticsService.validateConfig(),
+  {
+    ttlMs: 20_000,
+    keyFn: () => 'config-validation',
+  },
+);
 
 export interface ConfigurationValidationSummary {
   label: string;
@@ -121,8 +160,12 @@ export interface UseConfigurationStateResult {
 
 export const useConfigurationState = (): UseConfigurationStateResult => {
   const { t } = useI18n();
+  const cachedConfigSnapshot = configSnapshotCache.peek();
+  const cachedProviders = webSearchProvidersCache.peek();
+  const cachedValidation = configValidationCache.peek();
+  const cachedRemoteImageCacheStatus = remoteImageCacheStatusCache.peek();
   const [config, setConfig] = useState<Config | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!cachedConfigSnapshot);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -154,14 +197,14 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
   const [webSearchApiKeyMode, setWebSearchApiKeyMode] = useState<WebSearchApiKeyMode>('keep');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
-  const [validationData, setValidationData] = useState<ConfigCheckResultData | null>(null);
-  const [webSearchProviders, setWebSearchProviders] = useState<WebSearchProvider[]>([]);
+  const [validationData, setValidationData] = useState<ConfigCheckResultData | null>(cachedValidation ?? null);
+  const [webSearchProviders, setWebSearchProviders] = useState<WebSearchProvider[]>(cachedProviders ?? []);
   const [isLoadingProviders, setIsLoadingProviders] = useState(false);
   const [mainAgent, setMainAgent] = useState<MainAgentSummary | null>(null);
   const [remoteImageCacheStatus, setRemoteImageCacheStatus] = useState<RemoteImageCacheStatus>({
-    count: 0,
-    total_size_bytes: 0,
-    newest_updated_at: null,
+    count: cachedRemoteImageCacheStatus?.count ?? 0,
+    total_size_bytes: cachedRemoteImageCacheStatus?.total_size_bytes ?? 0,
+    newest_updated_at: cachedRemoteImageCacheStatus?.newest_updated_at ?? null,
   });
   const [isClearingRemoteImageCache, setIsClearingRemoteImageCache] = useState(false);
 
@@ -251,22 +294,21 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
   }, []);
 
   const loadConfigState = useCallback(
-    async (options: { showLoading?: boolean; successMessage?: string } = {}) => {
+    async (options: { showLoading?: boolean; successMessage?: string; force?: boolean } = {}) => {
       if (options.showLoading) {
         setIsLoading(true);
       }
 
       try {
-        const [data, agents] = await Promise.all([
-          configService.getConfig(),
-          configService.getAgents(),
-        ]);
-        applyConfigToForm(data);
-        applyMainAgentToState(agents);
+        const snapshot = options.force
+          ? await configSnapshotCache.refresh()
+          : await configSnapshotCache.get();
+        applyConfigToForm(snapshot.config);
+        applyMainAgentToState(snapshot.agents);
         if (options.successMessage) {
           showSuccessMessage(options.successMessage);
         }
-        return data;
+        return snapshot.config;
       } catch (err) {
         setError(t('config.fetchFailed'));
         console.error('Error fetching config:', err);
@@ -280,10 +322,12 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     [applyConfigToForm, applyMainAgentToState, showSuccessMessage]
   );
 
-  const runValidation = useCallback(async (options: { silent?: boolean } = {}) => {
+  const runValidation = useCallback(async (options: { silent?: boolean; force?: boolean } = {}) => {
     setIsValidating(true);
     try {
-      const data = await diagnosticsService.validateConfig();
+      const data = options.force
+        ? await configValidationCache.refresh()
+        : await configValidationCache.get();
       setValidationData(data);
       return data;
     } catch (err) {
@@ -301,8 +345,8 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     async (successMessage?: string) => {
       setIsRefreshing(true);
       try {
-        await loadConfigState({ successMessage });
-        await runValidation({ silent: true });
+        await loadConfigState({ successMessage, force: true });
+        await runValidation({ silent: true, force: true });
       } finally {
         setIsRefreshing(false);
       }
@@ -310,10 +354,12 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     [loadConfigState, runValidation]
   );
 
-  const fetchProviders = useCallback(async () => {
+  const fetchProviders = useCallback(async (options: { force?: boolean } = {}) => {
     setIsLoadingProviders(true);
     try {
-      const providers = await configService.getWebSearchProviders();
+      const providers = options.force
+        ? await webSearchProvidersCache.refresh()
+        : await webSearchProvidersCache.get();
       setWebSearchProviders(providers);
     } catch (err) {
       console.error('Failed to fetch web search providers:', err);
@@ -322,9 +368,11 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     }
   }, []);
 
-  const refreshRemoteImageCacheStatus = useCallback(async () => {
+  const refreshRemoteImageCacheStatus = useCallback(async (options: { force?: boolean } = {}) => {
     try {
-      const status = await configService.getRemoteImageCacheStatus();
+      const status = options.force
+        ? await remoteImageCacheStatusCache.refresh()
+        : await remoteImageCacheStatusCache.get();
       setRemoteImageCacheStatus(status);
     } catch (err) {
       console.error('Failed to fetch remote image cache status:', err);
@@ -332,13 +380,18 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
   }, []);
 
   useEffect(() => {
+    if (cachedConfigSnapshot) {
+      applyConfigToForm(cachedConfigSnapshot.config);
+      applyMainAgentToState(cachedConfigSnapshot.agents);
+    }
+
     void Promise.all([
-      loadConfigState({ showLoading: true }),
-      fetchProviders(),
-      refreshRemoteImageCacheStatus(),
-      runValidation({ silent: true }),
+      loadConfigState({ showLoading: !cachedConfigSnapshot }),
+      fetchProviders({ force: false }),
+      refreshRemoteImageCacheStatus({ force: false }),
+      runValidation({ silent: true, force: false }),
     ]);
-  }, [fetchProviders, loadConfigState, refreshRemoteImageCacheStatus, runValidation]);
+  }, [applyConfigToForm, applyMainAgentToState, cachedConfigSnapshot, fetchProviders, loadConfigState, refreshRemoteImageCacheStatus, runValidation]);
 
   const validateAgentSettings = useCallback(() => {
     const errors: Record<string, string> = {};
@@ -522,7 +575,8 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
 
     try {
       const result = await configService.clearRemoteImageCache();
-      await refreshRemoteImageCacheStatus();
+      remoteImageCacheStatusCache.clear();
+      await refreshRemoteImageCacheStatus({ force: true });
       showSuccessMessage(
         t('config.remoteImageCache.clearSuccess', { count: result.deleted_count }),
       );

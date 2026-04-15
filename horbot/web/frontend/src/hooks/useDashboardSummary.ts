@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react';
 import { statusService } from '../services';
 import type { DashboardChannelSummary, DashboardSummary } from '../types';
+import { createAsyncResourceCache } from '../utils/asyncResourceCache';
+
+const dashboardSummaryCache = createAsyncResourceCache(
+  () => statusService.getDashboardSummary(),
+  {
+    ttlMs: 15_000,
+    keyFn: () => 'dashboard-summary',
+  },
+);
 
 const computeChannelCounts = (items: DashboardChannelSummary[]) => ({
   total: items.length,
@@ -11,8 +20,9 @@ const computeChannelCounts = (items: DashboardChannelSummary[]) => ({
 });
 
 export const useDashboardSummary = () => {
-  const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const cachedSummary = dashboardSummaryCache.peek();
+  const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(cachedSummary ?? null);
+  const [isLoading, setIsLoading] = useState(!cachedSummary);
   const [error, setError] = useState<string | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
 
@@ -20,14 +30,16 @@ export const useDashboardSummary = () => {
     let disposed = false;
     let hasLoadedInitial = false;
 
-    const fetchData = async (silent: boolean = false) => {
+    const fetchData = async (silent: boolean = false, force: boolean = false) => {
       if (!silent) {
         setIsLoading(true);
       }
       setError(null);
 
       try {
-        const summaryData = await statusService.getDashboardSummary();
+        const summaryData = force
+          ? await dashboardSummaryCache.refresh()
+          : await dashboardSummaryCache.get();
         if (disposed) {
           return;
         }
@@ -45,7 +57,7 @@ export const useDashboardSummary = () => {
       }
     };
 
-    void fetchData();
+    void fetchData(Boolean(cachedSummary));
     const intervalId = window.setInterval(() => {
       void fetchData(true);
     }, 30000);
@@ -60,7 +72,10 @@ export const useDashboardSummary = () => {
     dashboardSummary,
     isLoading,
     error,
-    refreshSummary: () => setRefreshVersion((current) => current + 1),
+    refreshSummary: () => {
+      dashboardSummaryCache.clear();
+      setRefreshVersion((current) => current + 1);
+    },
     systemStatus: dashboardSummary?.system_status ?? null,
     channelStatusList: dashboardSummary?.channels.items ?? [],
     channelCounts: dashboardSummary?.channels.counts ?? computeChannelCounts([]),

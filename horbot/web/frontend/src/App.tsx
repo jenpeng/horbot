@@ -1,26 +1,79 @@
 
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Suspense } from 'react';
+import { Suspense, useEffect } from 'react';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useI18n } from './contexts/I18nContext';
 import { ToastProvider } from './contexts/ToastContext';
 import Toast from './components/Toast';
 import { lazyWithReload } from './utils/lazyWithReload';
+import { preloadRoutesSequentially, registerRoutePreload } from './utils/routePreload';
 
-const DashboardPage = lazyWithReload('DashboardPage', () => import('./pages/DashboardPage'));
-const ChatPage = lazyWithReload('ChatPage', () => import('./pages/ChatPage'));
-const ConfigPage = lazyWithReload('ConfigPage', () => import('./pages/ConfigPage'));
-const ChannelsPage = lazyWithReload('ChannelsPage', () => import('./pages/ChannelsPage'));
-const TasksPage = lazyWithReload('TasksPage', () => import('./pages/TasksPage'));
-const StatusPage = lazyWithReload('StatusPage', () => import('./pages/StatusPage'));
-const SkillsPage = lazyWithReload('SkillsPage', () => import('./pages/SkillsPage'));
-const TokenPage = lazyWithReload('TokenPage', () => import('./pages/TokenPage'));
-const TeamsPage = lazyWithReload('TeamsPage', () => import('./pages/TeamsPage'));
-const WebMCPBootstrap = lazyWithReload('WebMCPBootstrap', () => import('./components/WebMCPBootstrap'));
+const dashboardPageLoader = () => import('./pages/DashboardPage');
+const chatPageLoader = () => import('./pages/ChatPage');
+const configPageLoader = () => import('./pages/ConfigPage');
+const channelsPageLoader = () => import('./pages/ChannelsPage');
+const tasksPageLoader = () => import('./pages/TasksPage');
+const statusPageLoader = () => import('./pages/StatusPage');
+const skillsPageLoader = () => import('./pages/SkillsPage');
+const tokenPageLoader = () => import('./pages/TokenPage');
+const teamsPageLoader = () => import('./pages/TeamsPage');
+const webMcpBootstrapLoader = () => import('./components/WebMCPBootstrap');
+
+const DashboardPage = lazyWithReload('DashboardPage', dashboardPageLoader);
+const ChatPage = lazyWithReload('ChatPage', chatPageLoader);
+const ConfigPage = lazyWithReload('ConfigPage', configPageLoader);
+const ChannelsPage = lazyWithReload('ChannelsPage', channelsPageLoader);
+const TasksPage = lazyWithReload('TasksPage', tasksPageLoader);
+const StatusPage = lazyWithReload('StatusPage', statusPageLoader);
+const SkillsPage = lazyWithReload('SkillsPage', skillsPageLoader);
+const TokenPage = lazyWithReload('TokenPage', tokenPageLoader);
+const TeamsPage = lazyWithReload('TeamsPage', teamsPageLoader);
+const WebMCPBootstrap = lazyWithReload('WebMCPBootstrap', webMcpBootstrapLoader);
+
+registerRoutePreload('/', dashboardPageLoader);
+registerRoutePreload('/chat', chatPageLoader);
+registerRoutePreload('/config', configPageLoader);
+registerRoutePreload('/channels', channelsPageLoader);
+registerRoutePreload('/tasks', tasksPageLoader);
+registerRoutePreload('/status', statusPageLoader);
+registerRoutePreload('/skills', skillsPageLoader);
+registerRoutePreload('/tokens', tokenPageLoader);
+registerRoutePreload('/teams', teamsPageLoader);
+
+const PRIMARY_ROUTE_PRELOAD_ORDER = [
+  '/',
+  '/chat',
+  '/teams',
+  '/config',
+  '/status',
+  '/channels',
+  '/tasks',
+  '/tokens',
+  '/skills',
+];
+
+const scheduleIdle = (callback: () => void): (() => void) => {
+  if (typeof window.requestIdleCallback === 'function') {
+    const idleId = window.requestIdleCallback(callback, { timeout: 1500 });
+    return () => window.cancelIdleCallback(idleId);
+  }
+
+  const timeoutId = window.setTimeout(callback, 300);
+  return () => window.clearTimeout(timeoutId);
+};
 
 function App() {
   const { t } = useI18n();
+
+  useEffect(() => {
+    const currentPath = window.location.pathname || '/';
+    const preloadQueue = PRIMARY_ROUTE_PRELOAD_ORDER.filter((path) => path !== currentPath);
+    const cancel = scheduleIdle(() => {
+      void preloadRoutesSequentially(preloadQueue);
+    });
+    return cancel;
+  }, []);
 
   return (
     <ErrorBoundary>

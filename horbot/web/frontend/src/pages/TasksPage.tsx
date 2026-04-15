@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { tasksService } from '../services';
+import { useI18n } from '../contexts/I18nContext';
 import { useToast } from '../contexts/ToastContext';
 import { Card, CardContent, Button, Badge, Modal, Input } from '../components/ui';
 import { formatRelativeTime, formatAbsoluteTime } from '../utils/date';
 import type { Task, TaskSchedule, DeliveryTarget } from '../types';
 
 const TasksPage: React.FC = () => {
+  const { t } = useI18n();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +32,7 @@ const TasksPage: React.FC = () => {
       setTasks(response || []);
       setError(null);
     } catch (err) {
-      setError('Failed to fetch tasks');
+      setError(t('tasks.fetchFailed'));
       console.error('Error fetching tasks:', err);
     } finally {
       setIsLoading(false);
@@ -44,14 +46,14 @@ const TasksPage: React.FC = () => {
   }, []);
 
   const handleDeleteTask = async (taskId: string, taskName: string) => {
-    if (!confirm(`Are you sure you want to delete task "${taskName}"?`)) return;
+    if (!confirm(t('tasks.deleteConfirm', { name: taskName }))) return;
     
     try {
       await tasksService.deleteTask(taskId);
       await fetchTasks();
-      showSuccess(`Task "${taskName}" deleted`);
+      showSuccess(t('tasks.deleted', { name: taskName }));
     } catch (err) {
-      showError('Failed to delete task');
+      showError(t('tasks.deleteFailed'));
       console.error('Error deleting task:', err);
     }
   };
@@ -60,9 +62,12 @@ const TasksPage: React.FC = () => {
     try {
       await tasksService.toggleTask(taskId, enabled);
       await fetchTasks();
-      showSuccess(`Task "${taskName}" ${!enabled ? 'enabled' : 'disabled'}`);
+      showSuccess(t('tasks.toggled', {
+        name: taskName,
+        status: !enabled ? t('tasks.status.enabled') : t('tasks.status.disabled'),
+      }));
     } catch (err) {
-      showError('Failed to toggle task status');
+      showError(t('tasks.toggleFailed'));
       console.error('Error toggling task:', err);
     }
   };
@@ -73,7 +78,7 @@ const TasksPage: React.FC = () => {
     
     try {
       await tasksService.runTask(taskId);
-      showSuccess(`Task "${taskName}" started executing...`);
+      showSuccess(t('tasks.runStarted', { name: taskName }));
       
       // Poll for task completion (check every 2 seconds for up to 60 seconds)
       let attempts = 0;
@@ -97,9 +102,12 @@ const TasksPage: React.FC = () => {
             await fetchTasks();
             
             if (task.state.last_status === 'ok') {
-              showSuccess(`Task "${taskName}" completed successfully`);
+              showSuccess(t('tasks.runCompleted', { name: taskName }));
             } else if (task.state.last_status === 'error') {
-              showError(`Task "${taskName}" failed: ${task.state.last_error || 'Unknown error'}`);
+              showError(t('tasks.runFailed', {
+                name: taskName,
+                error: task.state.last_error || t('common.unknown'),
+              }));
             }
           }
           
@@ -110,7 +118,7 @@ const TasksPage: React.FC = () => {
               next.delete(taskId);
               return next;
             });
-            showSuccess(`Task "${taskName}" is still running. Check back later for results.`);
+            showSuccess(t('tasks.runStillRunning', { name: taskName }));
           }
         } catch (err) {
           console.error('Error polling task status:', err);
@@ -123,14 +131,14 @@ const TasksPage: React.FC = () => {
         next.delete(taskId);
         return next;
       });
-      showError('Failed to run task');
+      showError(t('tasks.runTaskFailed'));
       console.error('Error running task:', err);
     }
   };
 
   const handleAddTask = async () => {
     if (!newTask.name || !newTask.message) {
-      showError('Name and message are required');
+      showError(t('tasks.requiredNameMessage'));
       return;
     }
 
@@ -162,9 +170,9 @@ const TasksPage: React.FC = () => {
         channels: [],
       });
       await fetchTasks();
-      showSuccess(`Task "${newTask.name}" created successfully`);
+      showSuccess(t('tasks.created', { name: newTask.name }));
     } catch (err) {
-      showError('Failed to add task');
+      showError(t('tasks.addFailed'));
       console.error('Error adding task:', err);
     }
   };
@@ -209,7 +217,7 @@ const TasksPage: React.FC = () => {
 
   const handleUpdateTask = async () => {
     if (!editingTask || !newTask.name || !newTask.message) {
-      showError('Name and message are required');
+      showError(t('tasks.requiredNameMessage'));
       return;
     }
 
@@ -246,9 +254,9 @@ const TasksPage: React.FC = () => {
         channels: [],
       });
       await fetchTasks();
-      showSuccess(`Task "${newTask.name}" updated successfully`);
+      showSuccess(t('tasks.updated', { name: newTask.name }));
     } catch (err) {
-      showError('Failed to update task');
+      showError(t('tasks.updateFailed'));
       console.error('Error updating task:', err);
     }
   };
@@ -297,18 +305,18 @@ const TasksPage: React.FC = () => {
       const hours = Math.floor(minutes / 60);
       const days = Math.floor(hours / 24);
       
-      if (days > 0) return `Every ${days} days`;
-      if (hours > 0) return `Every ${hours} hours`;
-      if (minutes > 0) return `Every ${minutes} minutes`;
-      return `Every ${seconds} seconds`;
+      if (days > 0) return t('tasks.schedule.everyDays', { count: days });
+      if (hours > 0) return t('tasks.schedule.everyHours', { count: hours });
+      if (minutes > 0) return t('tasks.schedule.everyMinutes', { count: minutes });
+      return t('tasks.schedule.everySeconds', { count: seconds });
     }
     if (schedule.kind === 'cron' && schedule.expr) {
-      return `Cron: ${schedule.expr}`;
+      return t('tasks.schedule.cron', { expr: schedule.expr });
     }
     if (schedule.kind === 'at' && schedule.at_ms) {
       return formatAbsoluteTime(schedule.at_ms);
     }
-    return 'Unknown schedule';
+    return t('tasks.schedule.unknown');
   };
 
   const filteredTasks = tasks.filter(task => {
@@ -336,18 +344,18 @@ const TasksPage: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-surface-900 flex items-center gap-3">
-            Scheduled Tasks
-            <Badge variant="default" size="sm">{tasks.length} tasks</Badge>
+            {t('tasks.pageTitle')}
+            <Badge variant="default" size="sm">{t('tasks.count', { count: tasks.length })}</Badge>
           </h2>
           <p className="text-sm text-surface-600 mt-1">
-            {enabledCount} enabled · {tasks.length - enabledCount} disabled
+            {t('tasks.summary', { enabled: enabledCount, disabled: tasks.length - enabledCount })}
           </p>
         </div>
         <Button onClick={() => setShowAddModal(true)} variant="primary">
           <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
           </svg>
-          Add Task
+          {t('tasks.addTask')}
         </Button>
       </div>
 
@@ -360,7 +368,7 @@ const TasksPage: React.FC = () => {
               : 'bg-surface-100 text-surface-600 hover:text-surface-900 hover:bg-surface-200'
           }`}
         >
-          All
+          {t('tasks.filter.all')}
         </button>
         <button
           onClick={() => setFilter('enabled')}
@@ -371,7 +379,7 @@ const TasksPage: React.FC = () => {
           }`}
         >
           <span className="w-1.5 h-1.5 rounded-full bg-semantic-success"></span>
-          Enabled
+          {t('tasks.filter.enabled')}
         </button>
         <button
           onClick={() => setFilter('disabled')}
@@ -382,7 +390,7 @@ const TasksPage: React.FC = () => {
           }`}
         >
           <span className="w-1.5 h-1.5 rounded-full bg-surface-500"></span>
-          Disabled
+          {t('tasks.filter.disabled')}
         </button>
       </div>
 
@@ -401,19 +409,19 @@ const TasksPage: React.FC = () => {
             <svg className="w-12 h-12 mb-3 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p className="text-surface-600 mb-2">No scheduled tasks yet</p>
+            <p className="text-surface-600 mb-2">{t('tasks.emptyTitle')}</p>
             <button
               onClick={() => setShowAddModal(true)}
               className="text-primary-400 hover:text-primary-300 transition-colors text-sm"
             >
-              Create your first task →
+              {t('tasks.emptyAction')}
             </button>
           </CardContent>
         </Card>
       ) : (
         <div className="space-y-2">
           {filteredTasks.map((task) => {
-            const nextRunText = task.state.next_run_at_ms ? formatRelativeTime(task.state.next_run_at_ms) : 'Not scheduled';
+            const nextRunText = task.state.next_run_at_ms ? formatRelativeTime(task.state.next_run_at_ms) : t('tasks.nextRun.notScheduled');
             
             return (
               <Card 
@@ -440,7 +448,7 @@ const TasksPage: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <h3 className="font-medium text-surface-900 truncate">{task.name}</h3>
                         {!task.enabled && (
-                          <Badge variant="default" size="sm">Disabled</Badge>
+                          <Badge variant="default" size="sm">{t('tasks.badge.disabled')}</Badge>
                         )}
                       </div>
                       <p className="text-xs text-surface-600 truncate">{task.payload.message}</p>
@@ -464,7 +472,7 @@ const TasksPage: React.FC = () => {
                       <button
                         onClick={() => handleEditTask(task)}
                         className="p-1.5 text-surface-600 hover:bg-surface-200 rounded transition-all"
-                        title="Edit"
+                        title={t('tasks.action.edit')}
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -478,7 +486,7 @@ const TasksPage: React.FC = () => {
                             ? 'text-semantic-warning hover:bg-semantic-warning/20' 
                             : 'text-semantic-success hover:bg-semantic-success/20'
                         }`}
-                        title={task.enabled ? 'Disable' : 'Enable'}
+                        title={task.enabled ? t('tasks.action.disable') : t('tasks.action.enable')}
                       >
                         {task.enabled ? (
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -498,7 +506,7 @@ const TasksPage: React.FC = () => {
                             ? 'text-semantic-warning bg-semantic-warning/20 animate-pulse'
                             : 'text-primary-400 hover:bg-primary-500/20'
                         }`}
-                        title={runningTasks.has(task.id) ? 'Running...' : 'Run Now'}
+                        title={runningTasks.has(task.id) ? t('tasks.action.running') : t('tasks.action.runNow')}
                         disabled={runningTasks.has(task.id)}
                       >
                         {runningTasks.has(task.id) ? (
@@ -516,7 +524,7 @@ const TasksPage: React.FC = () => {
                       <button
                         onClick={() => handleDeleteTask(task.id, task.name)}
                         className="p-1.5 text-semantic-error hover:bg-semantic-error/20 rounded transition-all"
-                        title="Delete"
+                        title={t('tasks.action.delete')}
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -528,10 +536,10 @@ const TasksPage: React.FC = () => {
                   {task.state.last_run_at_ms && (
                     <div className="mt-2 pt-2 border-t border-surface-200">
                       <div className="flex items-center gap-3 text-xs text-surface-600">
-                        <span>Last run: {formatRelativeTime(task.state.last_run_at_ms)}</span>
+                        <span>{t('tasks.lastRun', { value: formatRelativeTime(task.state.last_run_at_ms) })}</span>
                         {task.state.last_status && (
                           <span className={task.state.last_status === 'ok' ? 'text-semantic-success' : 'text-semantic-error'}>
-                            {task.state.last_status === 'ok' ? '✓ Success' : '✗ Failed'}
+                            {task.state.last_status === 'ok' ? t('tasks.lastStatus.success') : t('tasks.lastStatus.failed')}
                           </span>
                         )}
                         {task.state.last_error && (
@@ -549,17 +557,17 @@ const TasksPage: React.FC = () => {
         </div>
       )}
 
-      <Modal isOpen={showAddModal} onClose={handleCloseModal} title={editingTask ? 'Edit Task' : 'Add Scheduled Task'}>
+      <Modal isOpen={showAddModal} onClose={handleCloseModal} title={editingTask ? t('tasks.modal.editTitle') : t('tasks.modal.addTitle')}>
         <div className="space-y-4">
           <Input
-            label="Task Name *"
+            label={t('tasks.form.name')}
             value={newTask.name}
             onChange={(e) => setNewTask({ ...newTask, name: e.target.value })}
-            placeholder="e.g., Water reminder"
+            placeholder={t('tasks.form.namePlaceholder')}
           />
 
           <div>
-            <label className="block text-sm font-medium text-surface-700 mb-2">Schedule Type</label>
+            <label className="block text-sm font-medium text-surface-700 mb-2">{t('tasks.form.scheduleType')}</label>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -569,12 +577,12 @@ const TasksPage: React.FC = () => {
                     ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
                     : 'bg-surface-50 border-surface-200 text-surface-700 hover:border-surface-300'
                 }`}
-              >
-                <div className="flex items-center justify-center gap-1.5">
+                >
+                  <div className="flex items-center justify-center gap-1.5">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
-                  Interval Repeat
+                  {t('tasks.form.schedule.every')}
                 </div>
               </button>
               <button
@@ -585,12 +593,12 @@ const TasksPage: React.FC = () => {
                     ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
                     : 'bg-surface-50 border-surface-200 text-surface-700 hover:border-surface-300'
                 }`}
-              >
-                <div className="flex items-center justify-center gap-1.5">
+                >
+                  <div className="flex items-center justify-center gap-1.5">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  Cron Expression
+                  {t('tasks.form.schedule.cron')}
                 </div>
               </button>
             </div>
@@ -600,16 +608,16 @@ const TasksPage: React.FC = () => {
             <div className="flex gap-2">
               <div className="flex-1">
                 <Input
-                  label="Repeat Interval"
+                  label={t('tasks.form.repeatInterval')}
                   type="number"
                   value={String(newTask.everyMs / 3600000)}
                   onChange={(v) => setNewTask({ ...newTask, everyMs: Number(v) * 3600000 })}
-                  placeholder="1"
+                  placeholder={t('tasks.form.repeatIntervalPlaceholder')}
                 />
               </div>
               <div className="flex items-end">
                 <span className="px-3 py-2.5 bg-surface-100 border border-surface-200 rounded-lg text-surface-700 text-sm">
-                  Hours
+                  {t('tasks.form.hours')}
                 </span>
               </div>
             </div>
@@ -618,24 +626,24 @@ const TasksPage: React.FC = () => {
           {newTask.scheduleKind === 'cron' && (
             <div>
               <Input
-                label="Cron Expression"
+                label={t('tasks.form.cronExpression')}
                 value={newTask.expr}
                 onChange={(e) => setNewTask({ ...newTask, expr: e.target.value })}
-                placeholder="0 9 * * * (daily at 9 AM)"
+                placeholder={t('tasks.form.cronPlaceholder')}
                 className="font-mono"
               />
-              <p className="text-xs text-surface-600 mt-1">Format: minute hour day month weekday</p>
+              <p className="text-xs text-surface-600 mt-1">{t('tasks.form.cronHint')}</p>
             </div>
           )}
 
           <div>
-            <label className="block text-sm font-medium text-surface-700 mb-2">Message Content *</label>
+            <label className="block text-sm font-medium text-surface-700 mb-2">{t('tasks.form.message')}</label>
             <textarea
               value={newTask.message}
               onChange={(e) => setNewTask({ ...newTask, message: e.target.value })}
               className="w-full bg-surface-50 border border-surface-200 rounded-lg px-3 py-2 text-surface-900 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
               rows={2}
-              placeholder="e.g., Time to drink water! 💧"
+              placeholder={t('tasks.form.messagePlaceholder')}
             />
           </div>
 
@@ -648,14 +656,14 @@ const TasksPage: React.FC = () => {
               className="w-4 h-4 rounded border-surface-600 text-primary-500 focus:ring-primary-500"
             />
             <label htmlFor="deliver" className="text-sm text-surface-700">
-              Push to Channels
+              {t('tasks.form.pushToChannels')}
             </label>
           </div>
 
           {newTask.deliver && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <label className="block text-sm font-medium text-surface-700">Delivery Channels</label>
+                <label className="block text-sm font-medium text-surface-700">{t('tasks.form.deliveryChannels')}</label>
                 <button
                   type="button"
                   onClick={handleAddChannel}
@@ -664,35 +672,35 @@ const TasksPage: React.FC = () => {
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                   </svg>
-                  Add Channel
+                  {t('tasks.form.addChannel')}
                 </button>
               </div>
               
               {newTask.channels.length === 0 && (
-                <p className="text-xs text-surface-500 italic">Click "Add Channel" to add delivery targets</p>
+                <p className="text-xs text-surface-500 italic">{t('tasks.form.noChannels')}</p>
               )}
               
               {newTask.channels.map((ch, index) => (
                 <div key={index} className="flex gap-2 items-start p-2 bg-surface-50 rounded-lg border border-surface-200">
                   <div className="flex-1 grid grid-cols-2 gap-2">
                     <Input
-                      label="Channel"
+                      label={t('tasks.form.channel')}
                       value={ch.channel}
                       onChange={(e) => handleUpdateChannel(index, 'channel', e.target.value)}
-                      placeholder="web, sharecrm, telegram..."
+                      placeholder={t('tasks.form.channelPlaceholder')}
                     />
                     <Input
-                      label="Recipient"
+                      label={t('tasks.form.recipient')}
                       value={ch.to}
                       onChange={(e) => handleUpdateChannel(index, 'to', e.target.value)}
-                      placeholder="session_key, chat_id..."
+                      placeholder={t('tasks.form.recipientPlaceholder')}
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => handleRemoveChannel(index)}
                     className="mt-6 p-1.5 text-semantic-error hover:bg-semantic-error/20 rounded transition-all"
-                    title="Remove"
+                    title={t('tasks.form.removeChannel')}
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -706,10 +714,10 @@ const TasksPage: React.FC = () => {
 
         <div className="flex justify-end gap-2 mt-6">
           <Button variant="secondary" onClick={handleCloseModal}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button variant="primary" onClick={editingTask ? handleUpdateTask : handleAddTask}>
-            {editingTask ? 'Update' : 'Add'}
+            {editingTask ? t('tasks.form.update') : t('tasks.form.add')}
           </Button>
         </div>
       </Modal>

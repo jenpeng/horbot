@@ -492,7 +492,7 @@ const TeamsPage: React.FC = () => {
     deleteExternalAgent,
     testExternalAgent,
   } = useTeamsMutations({
-    onRefresh: fetchData,
+    onRefresh: () => fetchData({ force: true }),
   });
 
   const resetAgentForm = () => {

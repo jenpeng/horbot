@@ -4,6 +4,7 @@ import { PanelLeftClose } from 'lucide-react';
 import { navItems } from './NavConfig';
 import { useI18n } from '../../contexts/I18nContext';
 import LanguageSwitcher from './LanguageSwitcher';
+import { preloadRoute } from '../../utils/routePreload';
 
 interface NavigationPanelProps {
   isCollapsed?: boolean;
@@ -74,6 +75,9 @@ const NavigationPanel: React.FC<NavigationPanelProps> = React.memo(({
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  onMouseEnter={() => { void preloadRoute(item.path); }}
+                  onFocus={() => { void preloadRoute(item.path); }}
+                  onTouchStart={() => { void preloadRoute(item.path); }}
                   className={`group flex items-center rounded-lg transition-all duration-200 relative w-full gap-3 px-3 h-10 mb-1`}
                 >
                   {isActive && (
@@ -113,6 +117,9 @@ const NavigationPanel: React.FC<NavigationPanelProps> = React.memo(({
                   key={item.path}
                   to={item.path}
                   title={t(item.labelKey)}
+                  onMouseEnter={() => { void preloadRoute(item.path); }}
+                  onFocus={() => { void preloadRoute(item.path); }}
+                  onTouchStart={() => { void preloadRoute(item.path); }}
                   className={`
                     w-10 h-10 rounded-lg flex items-center justify-center mb-1
                     transition-all duration-200

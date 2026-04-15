@@ -4,6 +4,7 @@ import { Badge } from '../components/ui/Badge';
 import { Button, IconButton } from '../components/ui/Button';
 import Tabs from '../components/ui/Tabs';
 import { PageErrorState, PageLoadingState } from '../components/state';
+import { useI18n } from '../contexts/I18nContext';
 import skillsService from '../services/skills';
 import type { Skill, SkillDetail, MCPServerConfig, SkillInstallOption, SkillCompatibility } from '../types';
 import { lazyWithReload } from '../utils/lazyWithReload';
@@ -30,12 +31,6 @@ interface MCPServerEditorState {
   originalData: MCPServerConfig | null;
 }
 
-const markdownPreviewFallback = (
-  <div className="rounded-xl border border-surface-200 bg-white/70 px-4 py-6 text-sm text-surface-500">
-    正在加载 Markdown 预览...
-  </div>
-);
-
 const formatInstallCommand = (option: SkillInstallOption): string | null => {
   if (option.command) {
     return option.command;
@@ -49,17 +44,21 @@ const formatInstallCommand = (option: SkillInstallOption): string | null => {
   return null;
 };
 
-const getCompatibilityBadge = (compatibility?: SkillCompatibility) => {
+const getCompatibilityBadge = (
+  compatibility: SkillCompatibility | undefined,
+  t: (key: string, values?: Record<string, string | number>) => string,
+) => {
   if (!compatibility || compatibility.status === 'compatible') {
     return null;
   }
   if (compatibility.status === 'warning') {
-    return { label: 'Needs Setup', className: 'bg-accent-amber/15 text-accent-amber' };
+    return { label: t('skills.compatibility.needsSetup'), className: 'bg-accent-amber/15 text-accent-amber' };
   }
-  return { label: 'Incompatible', className: 'bg-semantic-error-light text-semantic-error' };
+  return { label: t('skills.compatibility.incompatible'), className: 'bg-semantic-error-light text-semantic-error' };
 };
 
 const SkillsPage: React.FC = () => {
+  const { t } = useI18n();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [mcpServers, setMcpServers] = useState<Record<string, MCPServerConfig>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -92,6 +91,11 @@ const SkillsPage: React.FC = () => {
   });
   const [mcpDeleteConfirm, setMcpDeleteConfirm] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const markdownPreviewFallback = useMemo(() => (
+    <div className="rounded-xl border border-surface-200 bg-white/70 px-4 py-6 text-sm text-surface-500">
+      {t('skills.markdownPreviewLoading')}
+    </div>
+  ), [t]);
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -104,7 +108,7 @@ const SkillsPage: React.FC = () => {
       setMcpServers(mcpData || {});
       setError(null);
     } catch (err) {
-      setError('Failed to fetch data');
+      setError(t('skills.notification.fetchFailed'));
       console.error('Error fetching data:', err);
     } finally {
       setIsLoading(false);
@@ -163,7 +167,7 @@ const SkillsPage: React.FC = () => {
       setShowPreview(true);
     } catch (err) {
       console.error('Error fetching skill for edit:', err);
-      showNotification('error', 'Failed to load skill for editing');
+      showNotification('error', t('skills.notification.loadForEditingFailed'));
     }
   };
 
@@ -181,7 +185,7 @@ const SkillsPage: React.FC = () => {
 
   const saveSkill = async () => {
     if (!editor.skillName.trim() || !editor.content.trim()) {
-      showNotification('error', 'Name and content are required');
+      showNotification('error', t('skills.notification.requiredNameContent'));
       return;
     }
 
@@ -192,17 +196,17 @@ const SkillsPage: React.FC = () => {
           name: editor.skillName.trim(),
           content: editor.content
         });
-        showNotification('success', `Skill '${editor.skillName}' created successfully`);
+        showNotification('success', t('skills.notification.created', { name: editor.skillName }));
       } else {
         await skillsService.updateSkill(editor.skillName, {
           content: editor.content
         });
-        showNotification('success', `Skill '${editor.skillName}' updated successfully`);
+        showNotification('success', t('skills.notification.updated', { name: editor.skillName }));
       }
       closeEditor();
       fetchData();
     } catch (err: any) {
-      const message = err.response?.data?.detail || 'Failed to save skill';
+      const message = err.response?.data?.detail || t('skills.notification.saveFailed');
       showNotification('error', message);
     } finally {
       setSaving(false);
@@ -213,11 +217,11 @@ const SkillsPage: React.FC = () => {
     setSaving(true);
     try {
       await skillsService.deleteSkill(skillName);
-      showNotification('success', `Skill '${skillName}' deleted successfully`);
+      showNotification('success', t('skills.notification.deleted', { name: skillName }));
       setDeleteConfirm(null);
       fetchData();
     } catch (err: any) {
-      const message = err.response?.data?.detail || 'Failed to delete skill';
+      const message = err.response?.data?.detail || t('skills.notification.deleteFailed');
       showNotification('error', message);
     } finally {
       setSaving(false);
@@ -227,10 +231,13 @@ const SkillsPage: React.FC = () => {
   const handleToggle = async (skillName: string, _currentEnabled: boolean) => {
     try {
       const newEnabled = await skillsService.toggleSkill(skillName);
-      showNotification('success', `Skill '${skillName}' ${newEnabled ? 'enabled' : 'disabled'} successfully`);
+      showNotification('success', t('skills.notification.toggled', {
+        name: skillName,
+        status: newEnabled ? t('tasks.status.enabled') : t('tasks.status.disabled'),
+      }));
       fetchData();
     } catch (err: any) {
-      const message = err.response?.data?.detail || 'Failed to toggle skill';
+      const message = err.response?.data?.detail || t('skills.notification.toggleFailed');
       showNotification('error', message);
     }
   };
@@ -251,14 +258,14 @@ const SkillsPage: React.FC = () => {
       const result = await skillsService.importSkill(file);
       const statusLabel =
         result.compatibility.status === 'compatible'
-          ? 'compatible'
+          ? t('skills.importStatus.compatible')
           : result.compatibility.status === 'warning'
-            ? 'imported with setup warnings'
-            : 'imported but incompatible';
-      showNotification('success', `${result.name} ${statusLabel}`);
+            ? t('skills.importStatus.warning')
+            : t('skills.importStatus.incompatible');
+      showNotification('success', t('skills.notification.imported', { name: result.name, status: statusLabel }));
       await fetchData();
     } catch (err: any) {
-      const message = err.message || err.response?.data?.detail || 'Failed to import skill package';
+      const message = err.message || err.response?.data?.detail || t('skills.notification.importFailed');
       showNotification('error', message);
     } finally {
       setSaving(false);
@@ -278,11 +285,14 @@ const SkillsPage: React.FC = () => {
           return Promise.resolve();
         })
       );
-      showNotification('success', `${skillsToToggle.length} skills ${enable ? 'enabled' : 'disabled'} successfully`);
+      showNotification('success', t('skills.notification.batchToggled', {
+        count: skillsToToggle.length,
+        status: enable ? t('tasks.status.enabled') : t('tasks.status.disabled'),
+      }));
       setSelectedSkills(new Set());
       fetchData();
     } catch (err: any) {
-      showNotification('error', 'Failed to toggle some skills');
+      showNotification('error', t('skills.notification.batchToggleFailed'));
     } finally {
       setSaving(false);
     }
@@ -350,11 +360,11 @@ const SkillsPage: React.FC = () => {
 
   const saveMcpServer = async () => {
     if (!mcpEditor.name.trim()) {
-      showNotification('error', 'Server name is required');
+      showNotification('error', t('skills.notification.serverNameRequired'));
       return;
     }
     if (!mcpEditor.command.trim() && !mcpEditor.url.trim()) {
-      showNotification('error', 'Command or URL is required');
+      showNotification('error', t('skills.notification.commandOrUrlRequired'));
       return;
     }
 
@@ -365,7 +375,7 @@ const SkillsPage: React.FC = () => {
         try {
           env = JSON.parse(mcpEditor.env);
         } catch {
-          showNotification('error', 'Invalid JSON format for environment variables');
+          showNotification('error', t('skills.notification.invalidEnvJson'));
           setSaving(false);
           return;
         }
@@ -381,15 +391,15 @@ const SkillsPage: React.FC = () => {
 
       if (mcpEditor.mode === 'create') {
         await skillsService.addMcpServer(mcpEditor.name.trim(), config);
-        showNotification('success', `MCP Server '${mcpEditor.name}' created successfully`);
+        showNotification('success', t('skills.notification.mcpCreated', { name: mcpEditor.name }));
       } else {
         await skillsService.updateMcpServer(mcpEditor.name.trim(), config);
-        showNotification('success', `MCP Server '${mcpEditor.name}' updated successfully`);
+        showNotification('success', t('skills.notification.mcpUpdated', { name: mcpEditor.name }));
       }
       closeMcpEditor();
       fetchData();
     } catch (err: any) {
-      const message = err.response?.data?.detail || 'Failed to save MCP server';
+      const message = err.response?.data?.detail || t('skills.notification.mcpSaveFailed');
       showNotification('error', message);
     } finally {
       setSaving(false);
@@ -400,11 +410,11 @@ const SkillsPage: React.FC = () => {
     setSaving(true);
     try {
       await skillsService.deleteMcpServer(name);
-      showNotification('success', `MCP Server '${name}' deleted successfully`);
+      showNotification('success', t('skills.notification.mcpDeleted', { name }));
       setMcpDeleteConfirm(null);
       fetchData();
     } catch (err: any) {
-      const message = err.response?.data?.detail || 'Failed to delete MCP server';
+      const message = err.response?.data?.detail || t('skills.notification.mcpDeleteFailed');
       showNotification('error', message);
     } finally {
       setSaving(false);
@@ -420,18 +430,18 @@ const SkillsPage: React.FC = () => {
       <PageErrorState
         error={error}
         onRetry={() => { void fetchData(); }}
-        title="技能加载失败"
+        title={t('skills.loadErrorTitle')}
       />
     );
   }
 
   const tabs = [
-    { id: 'skills', label: `Skills (${skills.length})`, icon: (
+    { id: 'skills', label: t('skills.tabSkills', { count: skills.length }), icon: (
       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
       </svg>
     )},
-    { id: 'mcp', label: `MCP Servers (${Object.keys(mcpServers).length})`, icon: (
+    { id: 'mcp', label: t('skills.tabMcpServers', { count: Object.keys(mcpServers).length }), icon: (
       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
       </svg>
@@ -465,8 +475,8 @@ const SkillsPage: React.FC = () => {
         <div className="mb-6">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-3xl font-bold text-surface-900">Skills & MCP</h2>
-              <p className="text-sm text-surface-600 mt-1">Manage your AI skills and MCP server connections</p>
+              <h2 className="text-3xl font-bold text-surface-900">{t('skills.pageTitle')}</h2>
+              <p className="text-sm text-surface-600 mt-1">{t('skills.pageSubtitle')}</p>
             </div>
             <div className="flex items-center gap-3">
               <Button
@@ -486,7 +496,7 @@ const SkillsPage: React.FC = () => {
                   </svg>
                 }
               >
-                Refresh
+                {t('common.refresh')}
               </Button>
               {activeTab === 'skills' && (
                 <>
@@ -508,7 +518,7 @@ const SkillsPage: React.FC = () => {
                       </svg>
                     }
                   >
-                    Import Skill
+                    {t('skills.importSkill')}
                   </Button>
                   <Button
                     variant="primary"
@@ -520,7 +530,7 @@ const SkillsPage: React.FC = () => {
                       </svg>
                     }
                   >
-                    New Skill
+                    {t('skills.newSkill')}
                   </Button>
                 </>
               )}
@@ -535,7 +545,7 @@ const SkillsPage: React.FC = () => {
                     </svg>
                   }
                 >
-                  Add MCP Server
+                  {t('skills.addMcpServer')}
                 </Button>
               )}
             </div>
@@ -572,7 +582,7 @@ const SkillsPage: React.FC = () => {
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search skills..."
+                    placeholder={t('skills.searchPlaceholder')}
                     className="w-full pl-10 pr-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-surface-900 placeholder-surface-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all"
                   />
                 </div>
@@ -581,7 +591,7 @@ const SkillsPage: React.FC = () => {
                     onClick={selectAllSkills}
                     className="text-sm text-primary-600 hover:text-primary-700 font-medium"
                   >
-                    {selectedSkills.size === filteredSkills.length ? 'Deselect All' : 'Select All'}
+                    {selectedSkills.size === filteredSkills.length ? t('skills.deselectAll') : t('skills.selectAll')}
                   </button>
                   {selectedSkills.size > 0 && (
                     <>
@@ -592,7 +602,7 @@ const SkillsPage: React.FC = () => {
                         onClick={() => handleBatchToggle(true)}
                         disabled={saving}
                       >
-                        Enable ({selectedSkills.size})
+                        {t('skills.batchEnable', { count: selectedSkills.size })}
                       </Button>
                       <Button
                         variant="secondary"
@@ -600,7 +610,7 @@ const SkillsPage: React.FC = () => {
                         onClick={() => handleBatchToggle(false)}
                         disabled={saving}
                       >
-                        Disable ({selectedSkills.size})
+                        {t('skills.batchDisable', { count: selectedSkills.size })}
                       </Button>
                     </>
                   )}
@@ -615,7 +625,7 @@ const SkillsPage: React.FC = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
                 </div>
-                <p className="text-surface-600 mb-4 font-medium">No skills found</p>
+                <p className="text-surface-600 mb-4 font-medium">{t('skills.emptyTitle')}</p>
                 <Button
                   variant="primary"
                   size="sm"
@@ -626,7 +636,7 @@ const SkillsPage: React.FC = () => {
                     </svg>
                   }
                 >
-                  Create Your First Skill
+                  {t('skills.emptyAction')}
                 </Button>
               </div>
             ) : (
@@ -689,7 +699,7 @@ const SkillsPage: React.FC = () => {
                               ? 'bg-gradient-to-r from-accent-emerald to-accent-teal shadow-lg shadow-accent-emerald/20' 
                               : 'bg-surface-300 hover:bg-surface-400'
                           }`}
-                          title={skill.enabled ? 'Click to disable' : 'Click to enable'}
+                          title={skill.enabled ? t('skills.action.disable') : t('skills.action.enable')}
                         >
                           <span
                             className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition-all duration-300 ${
@@ -706,12 +716,12 @@ const SkillsPage: React.FC = () => {
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                               </svg>
-                              Missing
+                              {t('skills.badge.missing')}
                             </Badge>
                           )}
-                          {getCompatibilityBadge(skill.compatibility) && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getCompatibilityBadge(skill.compatibility)?.className}`}>
-                              {getCompatibilityBadge(skill.compatibility)?.label}
+                          {getCompatibilityBadge(skill.compatibility, t) && (
+                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getCompatibilityBadge(skill.compatibility, t)?.className}`}>
+                              {getCompatibilityBadge(skill.compatibility, t)?.label}
                             </span>
                           )}
                           {skill.always && (
@@ -719,7 +729,7 @@ const SkillsPage: React.FC = () => {
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                               </svg>
-                              Always
+                              {t('skills.badge.always')}
                             </span>
                           )}
                           {skill.normalized_from_legacy && (
@@ -735,7 +745,7 @@ const SkillsPage: React.FC = () => {
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                               </svg>
-                              Custom
+                              {t('skills.badge.custom')}
                             </span>
                           )}
                         </div>
@@ -773,7 +783,7 @@ const SkillsPage: React.FC = () => {
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
-                                <span><strong>Missing:</strong> {skill.missing_requirements.join(', ')}</span>
+                                <span><strong>{t('skills.missingRequirements')}</strong> {skill.missing_requirements.join(', ')}</span>
                               </p>
                             )}
                             {skill.install && skill.install.length > 0 && !skill.available && (
@@ -783,7 +793,7 @@ const SkillsPage: React.FC = () => {
                                   return (
                                     <div key={`${option.id || option.kind || 'install'}-${index}`} className="space-y-1">
                                       <p className="font-medium text-semantic-error">
-                                        {option.label || 'Install dependency'}
+                                        {option.label || t('skills.installDependency')}
                                       </p>
                                       {command && (
                                         <code className="block rounded bg-white/80 px-2 py-1 font-mono text-[11px] text-surface-700 break-all">
@@ -801,10 +811,10 @@ const SkillsPage: React.FC = () => {
                       {skill.compatibility && (skill.compatibility.issues.length > 0 || skill.compatibility.warnings.length > 0) && (
                         <div className="mt-3 rounded-lg border border-surface-200 bg-surface-50 p-3 text-xs text-surface-700 space-y-2">
                           {skill.compatibility.issues.length > 0 && (
-                            <p><strong>Compatibility issues:</strong> {skill.compatibility.issues.join('; ')}</p>
+                            <p><strong>{t('skills.compatibilityIssues')}</strong> {skill.compatibility.issues.join('; ')}</p>
                           )}
                           {skill.compatibility.warnings.length > 0 && (
-                            <p><strong>Warnings:</strong> {skill.compatibility.warnings.join('; ')}</p>
+                            <p><strong>{t('skills.compatibilityWarnings')}</strong> {skill.compatibility.warnings.join('; ')}</p>
                           )}
                         </div>
                       )}
@@ -825,8 +835,8 @@ const SkillsPage: React.FC = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
                   </svg>
                 </div>
-                <p className="text-surface-600 font-medium">No MCP servers configured</p>
-                <p className="text-sm text-surface-500 mt-1">Add MCP servers to extend AI capabilities</p>
+                <p className="text-surface-600 font-medium">{t('skills.mcp.emptyTitle')}</p>
+                <p className="text-sm text-surface-500 mt-1">{t('skills.mcp.emptySubtitle')}</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -853,7 +863,7 @@ const SkillsPage: React.FC = () => {
                       )}
                       {server.has_secret_values && (
                         <Badge variant="warning" size="sm">
-                          Secret Hidden
+                          {t('skills.mcp.secretHidden')}
                         </Badge>
                       )}
                     </div>
@@ -864,17 +874,17 @@ const SkillsPage: React.FC = () => {
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                           </svg>
-                          Environment Variables
+                          {t('skills.mcp.environmentVariables')}
                         </p>
                         <div className="space-y-1">
                           {Object.entries(server.env).slice(0, 3).map(([key, value]) => (
                             <div key={key} className="flex justify-between text-xs bg-surface-50 rounded-lg px-3 py-1.5">
                               <span className="text-primary-600 font-mono font-medium">{key}</span>
-                              <span className="text-surface-400">{value ? '•••••••••' : '(empty)'}</span>
+                              <span className="text-surface-400">{value ? '•••••••••' : t('skills.mcp.emptyValue')}</span>
                             </div>
                           ))}
                           {Object.keys(server.env).length > 3 && (
-                            <p className="text-xs text-surface-400 mt-1 text-center">+{Object.keys(server.env).length - 3} more...</p>
+                            <p className="text-xs text-surface-400 mt-1 text-center">{t('skills.mcp.moreCount', { count: Object.keys(server.env).length - 3 })}</p>
                           )}
                         </div>
                       </div>
@@ -883,7 +893,7 @@ const SkillsPage: React.FC = () => {
                     <div className="mt-3 pt-3 border-t border-surface-100 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-accent-emerald animate-pulse"></div>
-                        <span className="text-xs text-surface-500">Active</span>
+                        <span className="text-xs text-surface-500">{t('skills.mcp.active')}</span>
                       </div>
                       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <IconButton
@@ -934,7 +944,7 @@ const SkillsPage: React.FC = () => {
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                             </svg>
-                            Always Active
+                            {t('skills.detail.alwaysActive')}
                           </span>
                         )}
                         <Badge variant={selectedSkill.available ? 'success' : 'error'} size="sm">
@@ -943,14 +953,14 @@ const SkillsPage: React.FC = () => {
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                               </svg>
-                              Available
+                              {t('skills.detail.available')}
                             </>
                           ) : (
                             <>
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                               </svg>
-                              Unavailable
+                              {t('skills.detail.unavailable')}
                             </>
                           )}
                         </Badge>
@@ -959,7 +969,7 @@ const SkillsPage: React.FC = () => {
                         </Badge>
                         {selectedSkill.normalized_from_legacy && (
                           <Badge variant="warning" size="sm">
-                            From {selectedSkill.source_schema} v{selectedSkill.source_schema_version ?? 'n/a'}
+                            {t('skills.detail.fromSchema', { schema: selectedSkill.source_schema, version: selectedSkill.source_schema_version ?? 'n/a' })}
                           </Badge>
                         )}
                       </div>
@@ -985,7 +995,7 @@ const SkillsPage: React.FC = () => {
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      Metadata
+                      {t('skills.detail.metadata')}
                     </h4>
                     <div className="bg-surface-50 rounded-xl p-4 border border-surface-200">
                       {Object.entries(selectedSkill.metadata).map(([key, value]) => (
@@ -1003,7 +1013,7 @@ const SkillsPage: React.FC = () => {
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
-                    Content
+                    {t('skills.detail.content')}
                   </h4>
                   <div className="bg-surface-50 rounded-xl p-4 border border-surface-200">
                     <Suspense fallback={markdownPreviewFallback}>
@@ -1029,17 +1039,19 @@ const SkillsPage: React.FC = () => {
                     </div>
                     <div>
                       <h3 className="text-xl font-bold text-surface-900">
-                        {editor.mode === 'create' ? 'Create New Skill' : `Edit: ${editor.skillName}`}
+                        {editor.mode === 'create'
+                          ? t('skills.editor.createTitle')
+                          : t('skills.editor.editTitle', { name: editor.skillName })}
                       </h3>
                       <p className="text-sm text-surface-500 mt-1">
-                        {editor.mode === 'create' ? 'Write a new skill in Markdown' : 'Modify the skill content'}
+                        {editor.mode === 'create' ? t('skills.editor.createSubtitle') : t('skills.editor.editSubtitle')}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     {hasChanges && (
                       <span className="text-xs text-semantic-warning bg-semantic-warning-light px-2 py-1 rounded-full">
-                        Unsaved changes
+                        {t('skills.editor.unsavedChanges')}
                       </span>
                     )}
                     <IconButton
@@ -1060,13 +1072,13 @@ const SkillsPage: React.FC = () => {
                 {editor.mode === 'create' && (
                   <div>
                     <label className="block text-sm font-semibold text-surface-700 mb-2">
-                      Skill Name
+                      {t('skills.editor.skillName')}
                     </label>
                     <input
                       type="text"
                       value={editor.skillName}
                       onChange={(e) => setEditor({ ...editor, skillName: e.target.value })}
-                      placeholder="my-skill"
+                      placeholder={t('skills.editor.skillNamePlaceholder')}
                       className="w-full bg-surface-50 border border-surface-200 rounded-xl px-4 py-3 text-surface-900 placeholder-surface-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all"
                     />
                   </div>
@@ -1075,7 +1087,7 @@ const SkillsPage: React.FC = () => {
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="block text-sm font-semibold text-surface-700">
-                      Content (Markdown)
+                      {t('skills.editor.content')}
                     </label>
                     <div className="flex items-center gap-2">
                       <button
@@ -1090,7 +1102,7 @@ const SkillsPage: React.FC = () => {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                         </svg>
-                        Preview
+                        {t('skills.editor.preview')}
                       </button>
                     </div>
                   </div>
@@ -1100,14 +1112,14 @@ const SkillsPage: React.FC = () => {
                       <textarea
                         value={editor.content}
                         onChange={(e) => setEditor({ ...editor, content: e.target.value })}
-                        placeholder="# My Skill&#10;&#10;Description...&#10;&#10;## Instructions&#10;&#10;- Step 1"
+                        placeholder={t('skills.editor.contentPlaceholder')}
                         rows={20}
                         className="w-full bg-surface-50 border border-surface-200 rounded-xl px-4 py-3 text-surface-900 font-mono text-sm placeholder-surface-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 resize-none transition-all"
                       />
                     </div>
                     {showPreview && (
                       <div className="bg-surface-50 border border-surface-200 rounded-xl p-4 overflow-y-auto max-h-[500px]">
-                        <div className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">Preview</div>
+                        <div className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">{t('skills.editor.previewLabel')}</div>
                         <Suspense fallback={markdownPreviewFallback}>
                           <MarkdownRenderer content={editor.content} theme="light" />
                         </Suspense>
@@ -1122,7 +1134,7 @@ const SkillsPage: React.FC = () => {
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  Supports Markdown formatting
+                  {t('skills.editor.markdownSupported')}
                 </div>
                 <div className="flex gap-3">
                   <Button
@@ -1130,7 +1142,7 @@ const SkillsPage: React.FC = () => {
                     size="sm"
                     onClick={closeEditor}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </Button>
                   {hasChanges && editor.mode === 'edit' && (
                     <Button
@@ -1139,7 +1151,7 @@ const SkillsPage: React.FC = () => {
                       onClick={() => setEditor({ ...editor, content: editor.originalContent })}
                       disabled={saving}
                     >
-                      Revert
+                      {t('skills.editor.revert')}
                     </Button>
                   )}
                   <Button
@@ -1149,7 +1161,7 @@ const SkillsPage: React.FC = () => {
                     isLoading={saving}
                     disabled={!editor.skillName.trim() || !editor.content.trim()}
                   >
-                    {editor.mode === 'create' ? 'Create' : 'Save Changes'}
+                    {editor.mode === 'create' ? t('skills.editor.createAction') : t('skills.editor.saveChanges')}
                   </Button>
                 </div>
               </div>
@@ -1168,12 +1180,12 @@ const SkillsPage: React.FC = () => {
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-surface-900">Delete Skill</h3>
-                    <p className="text-sm text-surface-500">This action cannot be undone</p>
+                    <h3 className="text-lg font-bold text-surface-900">{t('skills.delete.title')}</h3>
+                    <p className="text-sm text-surface-500">{t('skills.delete.subtitle')}</p>
                   </div>
                 </div>
                 <p className="text-surface-700 mb-6">
-                  Are you sure you want to delete <span className="font-semibold text-primary-600">{deleteConfirm}</span>?
+                  {t('skills.delete.confirm', { name: deleteConfirm })}
                 </p>
                 <div className="flex justify-end gap-3">
                   <Button
@@ -1181,7 +1193,7 @@ const SkillsPage: React.FC = () => {
                     size="sm"
                     onClick={() => setDeleteConfirm(null)}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </Button>
                   <Button
                     variant="danger"
@@ -1189,7 +1201,7 @@ const SkillsPage: React.FC = () => {
                     onClick={() => handleDelete(deleteConfirm)}
                     isLoading={saving}
                   >
-                    Delete
+                    {t('common.delete')}
                   </Button>
                 </div>
               </div>
@@ -1210,10 +1222,12 @@ const SkillsPage: React.FC = () => {
                     </div>
                     <div>
                       <h3 className="text-xl font-bold text-surface-900">
-                        {mcpEditor.mode === 'create' ? 'Add MCP Server' : `Edit: ${mcpEditor.name}`}
+                        {mcpEditor.mode === 'create'
+                          ? t('skills.mcpEditor.createTitle')
+                          : t('skills.mcpEditor.editTitle', { name: mcpEditor.name })}
                       </h3>
                       <p className="text-sm text-surface-500 mt-1">
-                        {mcpEditor.mode === 'create' ? 'Configure a new MCP server connection' : 'Modify the MCP server configuration'}
+                        {mcpEditor.mode === 'create' ? t('skills.mcpEditor.createSubtitle') : t('skills.mcpEditor.editSubtitle')}
                       </p>
                     </div>
                   </div>
@@ -1234,95 +1248,95 @@ const SkillsPage: React.FC = () => {
                 {mcpEditor.mode === 'create' && (
                   <div>
                     <label className="block text-sm font-semibold text-surface-700 mb-2">
-                      Server Name <span className="text-semantic-error">*</span>
+                      {t('skills.mcpEditor.serverName')} <span className="text-semantic-error">*</span>
                     </label>
                     <input
                       type="text"
                       value={mcpEditor.name}
                       onChange={(e) => setMcpEditor({ ...mcpEditor, name: e.target.value })}
-                      placeholder="browser"
+                      placeholder={t('skills.mcpEditor.serverNamePlaceholder')}
                       className="w-full bg-surface-50 border border-surface-200 rounded-xl px-4 py-3 text-surface-900 placeholder-surface-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all"
                     />
-                    <p className="text-xs text-surface-500 mt-1">A unique identifier for this MCP server</p>
+                    <p className="text-xs text-surface-500 mt-1">{t('skills.mcpEditor.serverNameHint')}</p>
                   </div>
                 )}
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-surface-700 mb-2">
-                      Command
+                      {t('skills.mcpEditor.command')}
                     </label>
                     <input
                       type="text"
                       value={mcpEditor.command}
                       onChange={(e) => setMcpEditor({ ...mcpEditor, command: e.target.value })}
-                      placeholder="python"
+                      placeholder={t('skills.mcpEditor.commandPlaceholder')}
                       className="w-full bg-surface-50 border border-surface-200 rounded-xl px-4 py-3 text-surface-900 placeholder-surface-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all"
                     />
-                    <p className="text-xs text-surface-500 mt-1">The command to run (e.g., python, npx)</p>
+                    <p className="text-xs text-surface-500 mt-1">{t('skills.mcpEditor.commandHint')}</p>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-surface-700 mb-2">
-                      Arguments
+                      {t('skills.mcpEditor.arguments')}
                     </label>
                     <input
                       type="text"
                       value={mcpEditor.args}
                       onChange={(e) => setMcpEditor({ ...mcpEditor, args: e.target.value })}
-                      placeholder="-m horbot.mcp.browser.server"
+                      placeholder={t('skills.mcpEditor.argumentsPlaceholder')}
                       className="w-full bg-surface-50 border border-surface-200 rounded-xl px-4 py-3 text-surface-900 placeholder-surface-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all"
                     />
-                    <p className="text-xs text-surface-500 mt-1">Space-separated arguments</p>
+                    <p className="text-xs text-surface-500 mt-1">{t('skills.mcpEditor.argumentsHint')}</p>
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-sm font-semibold text-surface-700 mb-2">
-                    URL (alternative to command)
+                    {t('skills.mcpEditor.url')}
                   </label>
                   <input
                     type="text"
                     value={mcpEditor.url}
                     onChange={(e) => setMcpEditor({ ...mcpEditor, url: e.target.value })}
-                    placeholder="http://localhost:8080/mcp"
+                    placeholder={t('skills.mcpEditor.urlPlaceholder')}
                     className="w-full bg-surface-50 border border-surface-200 rounded-xl px-4 py-3 text-surface-900 placeholder-surface-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all"
                   />
-                  <p className="text-xs text-surface-500 mt-1">For HTTP-based MCP servers (leave empty if using command)</p>
+                  <p className="text-xs text-surface-500 mt-1">{t('skills.mcpEditor.urlHint')}</p>
                 </div>
 
                 <div>
                   <label className="block text-sm font-semibold text-surface-700 mb-2">
-                    Environment Variables (JSON)
+                    {t('skills.mcpEditor.env')}
                   </label>
                   <textarea
                     value={mcpEditor.env}
                     onChange={(e) => setMcpEditor({ ...mcpEditor, env: e.target.value })}
-                    placeholder='{"API_KEY": "your-key-here"}'
+                    placeholder={t('skills.mcpEditor.envPlaceholder')}
                     rows={4}
                     className="w-full bg-surface-50 border border-surface-200 rounded-xl px-4 py-3 text-surface-900 font-mono text-sm placeholder-surface-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 resize-none transition-all"
                   />
                   <p className="text-xs text-surface-500 mt-1">
-                    JSON object with environment variables
+                    {t('skills.mcpEditor.envHint')}
                     {mcpEditor.mode === 'edit' && mcpEditor.originalData?.has_secret_values
-                      ? '。出于安全原因，已保存的敏感值不会回显；如需修改，请重新填写完整 JSON。'
+                      ? t('skills.mcpEditor.envSecretHint')
                       : ''}
                   </p>
                 </div>
 
                 <div>
                   <label className="block text-sm font-semibold text-surface-700 mb-2">
-                    Tool Timeout (seconds)
+                    {t('skills.mcpEditor.toolTimeout')}
                   </label>
                   <input
                     type="number"
                     value={mcpEditor.tool_timeout}
                     onChange={(e) => setMcpEditor({ ...mcpEditor, tool_timeout: parseInt(e.target.value) || 120 })}
-                    placeholder="120"
+                    placeholder={t('skills.mcpEditor.toolTimeoutPlaceholder')}
                     min={10}
                     max={600}
                     className="w-full bg-surface-50 border border-surface-200 rounded-xl px-4 py-3 text-surface-900 placeholder-surface-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all"
                   />
-                  <p className="text-xs text-surface-500 mt-1">Maximum time to wait for tool execution</p>
+                  <p className="text-xs text-surface-500 mt-1">{t('skills.mcpEditor.toolTimeoutHint')}</p>
                 </div>
 
                 <div className="bg-primary-50 rounded-xl p-4 border border-primary-100">
@@ -1330,7 +1344,7 @@ const SkillsPage: React.FC = () => {
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    Built-in MCP Servers
+                    {t('skills.mcpEditor.builtinTitle')}
                   </h4>
                   <div className="space-y-2 text-xs text-primary-600">
                     <p><strong>browser:</strong> python3 -m horbot.mcp.browser.server</p>
@@ -1344,7 +1358,7 @@ const SkillsPage: React.FC = () => {
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  Command or URL is required
+                  {t('skills.mcpEditor.commandOrUrlRequired')}
                 </div>
                 <div className="flex gap-3">
                   <Button
@@ -1352,7 +1366,7 @@ const SkillsPage: React.FC = () => {
                     size="sm"
                     onClick={closeMcpEditor}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </Button>
                   <Button
                     variant="primary"
@@ -1361,7 +1375,7 @@ const SkillsPage: React.FC = () => {
                     isLoading={saving}
                     disabled={!mcpEditor.name.trim() || (!mcpEditor.command.trim() && !mcpEditor.url.trim())}
                   >
-                    {mcpEditor.mode === 'create' ? 'Add Server' : 'Save Changes'}
+                    {mcpEditor.mode === 'create' ? t('skills.mcpEditor.addAction') : t('skills.mcpEditor.saveChanges')}
                   </Button>
                 </div>
               </div>
@@ -1380,12 +1394,12 @@ const SkillsPage: React.FC = () => {
                     </svg>
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-surface-900">Delete MCP Server</h3>
-                    <p className="text-sm text-surface-500">This action cannot be undone</p>
+                    <h3 className="text-lg font-bold text-surface-900">{t('skills.mcpDelete.title')}</h3>
+                    <p className="text-sm text-surface-500">{t('skills.mcpDelete.subtitle')}</p>
                   </div>
                 </div>
                 <p className="text-surface-700 mb-6">
-                  Are you sure you want to delete <span className="font-semibold text-primary-600">{mcpDeleteConfirm}</span>?
+                  {t('skills.mcpDelete.confirm', { name: mcpDeleteConfirm })}
                 </p>
                 <div className="flex justify-end gap-3">
                   <Button
@@ -1393,7 +1407,7 @@ const SkillsPage: React.FC = () => {
                     size="sm"
                     onClick={() => setMcpDeleteConfirm(null)}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </Button>
                   <Button
                     variant="danger"
@@ -1401,7 +1415,7 @@ const SkillsPage: React.FC = () => {
                     onClick={() => deleteMcpServer(mcpDeleteConfirm)}
                     isLoading={saving}
                   >
-                    Delete
+                    {t('common.delete')}
                   </Button>
                 </div>
               </div>

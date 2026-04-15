@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useI18n } from '../../contexts/I18nContext';
 
 export interface BreadcrumbItem {
   label: string;
@@ -26,18 +27,21 @@ interface HeaderProps {
   className?: string;
 }
 
-const getPageTitle = (pathname: string): string => {
+const getPageTitle = (
+  pathname: string,
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string => {
   const routes: Record<string, string> = {
-    '/': 'Dashboard',
-    '/chat': 'Chat',
-    '/skills': 'Skills & MCP',
-    '/tasks': 'Tasks',
-    '/channels': 'Channels',
-    '/status': 'Status',
-    '/tokens': 'Token统计',
-    '/config': 'Configuration',
+    '/': t('nav.dashboard'),
+    '/chat': t('nav.chat'),
+    '/skills': t('skills.pageTitle'),
+    '/tasks': t('tasks.pageTitle'),
+    '/channels': t('nav.channels'),
+    '/status': t('nav.status'),
+    '/tokens': t('nav.tokens'),
+    '/config': t('config.pageTitle'),
   };
-  return routes[pathname] || 'Horbot';
+  return routes[pathname] || t('brand.name');
 };
 
 const MenuIcon: React.FC = () => (
@@ -78,22 +82,27 @@ interface UserMenuProps {
   onClick?: () => void;
 }
 
-const UserMenu: React.FC<UserMenuProps> = ({ user, onClick }) => (
-  <button
-    onClick={onClick}
-    className="flex items-center gap-2 p-1.5 pr-3 rounded-lg hover:bg-surface-800/50 transition-colors"
-  >
-    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-500 to-accent-purple flex items-center justify-center">
-      {user?.avatar ? (
-        <img src={user.avatar} alt={user.name} className="w-full h-full rounded-lg object-cover" />
-      ) : (
-        <span className="text-xs font-bold text-white">{user?.name?.charAt(0).toUpperCase() || 'U'}</span>
-      )}
-    </div>
-    <span className="hidden sm:block text-sm font-medium text-surface-300">{user?.name || '用户'}</span>
-    <ChevronDownIcon />
-  </button>
-);
+const UserMenu: React.FC<UserMenuProps> = ({ user, onClick }) => {
+  const { t } = useI18n();
+
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-2 p-1.5 pr-3 rounded-lg hover:bg-surface-800/50 transition-colors"
+      aria-label={t('common.user')}
+    >
+      <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-500 to-accent-purple flex items-center justify-center">
+        {user?.avatar ? (
+          <img src={user.avatar} alt={user.name} className="w-full h-full rounded-lg object-cover" />
+        ) : (
+          <span className="text-xs font-bold text-white">{user?.name?.charAt(0).toUpperCase() || 'U'}</span>
+        )}
+      </div>
+      <span className="hidden sm:block text-sm font-medium text-surface-300">{user?.name || t('common.user')}</span>
+      <ChevronDownIcon />
+    </button>
+  );
+};
 
 interface PageTitleProps {
   title: string;
@@ -144,11 +153,12 @@ export const Header: React.FC<HeaderProps> = ({
   onUserClick,
   className = '',
 }) => {
+  const { t } = useI18n();
   const location = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const pageTitle = title || getPageTitle(location.pathname);
+  const pageTitle = title || getPageTitle(location.pathname, t);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -168,14 +178,14 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onMenuClick}
               className="lg:hidden p-2 -ml-2 rounded-lg text-surface-400 hover:text-surface-200 hover:bg-surface-800/50 transition-colors"
-              aria-label="Open menu"
+              aria-label={t('header.openMenu')}
             >
               <MenuIcon />
             </button>
           )}
 
           <PageTitle title={pageTitle} />
-          <MobileTitle title="Horbot" />
+          <MobileTitle title={t('brand.name')} />
 
           {breadcrumbs && breadcrumbs.length > 0 && (
             <nav className="hidden md:flex items-center gap-2 text-sm">
@@ -206,10 +216,11 @@ export const Header: React.FC<HeaderProps> = ({
                   : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50'
                 }
               `}
-              title={toolsActive ? 'Collapse Tools Panel' : 'Expand Tools Panel'}
+              title={toolsActive ? t('header.toolsCollapse') : t('header.toolsExpand')}
+              aria-label={toolsActive ? t('header.toolsCollapse') : t('header.toolsExpand')}
             >
               <ToolsIcon />
-              <span className="text-sm font-medium">Tools</span>
+              <span className="text-sm font-medium">{t('header.tools')}</span>
             </button>
           )}
 
@@ -221,9 +232,10 @@ export const Header: React.FC<HeaderProps> = ({
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search..."
+                    placeholder={t('common.searchPlaceholder')}
                     autoFocus
                     className="w-48 sm:w-64 px-3 py-1.5 pl-9 text-sm bg-surface-800 border border-surface-700 rounded-lg text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:border-brand-500"
+                    aria-label={t('header.search')}
                   />
                   <SearchIcon />
                   <button
@@ -243,7 +255,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   onClick={() => setSearchOpen(true)}
                   className="p-2 rounded-lg text-surface-400 hover:text-surface-200 hover:bg-surface-800/50 transition-colors"
-                  aria-label="Search"
+                  aria-label={t('header.search')}
                 >
                   <SearchIcon />
                 </button>
@@ -254,7 +266,8 @@ export const Header: React.FC<HeaderProps> = ({
           {showNotifications && (
             <button
               className="p-2 rounded-lg text-surface-400 hover:text-surface-200 hover:bg-surface-800/50 transition-colors relative"
-              aria-label="Notifications"
+              aria-label={t('header.notifications')}
+              title={t('header.notifications')}
             >
               <BellIcon />
               {notificationCount > 0 && (

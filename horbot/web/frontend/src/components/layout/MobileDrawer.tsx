@@ -4,6 +4,7 @@ import { X, Search } from 'lucide-react';
 import { navItems } from './NavConfig';
 import { useI18n } from '../../contexts/I18nContext';
 import LanguageSwitcher from './LanguageSwitcher';
+import { preloadRoute } from '../../utils/routePreload';
 
 interface MobileDrawerProps {
   isOpen: boolean;
@@ -96,6 +97,9 @@ const MobileDrawer: React.FC<MobileDrawerProps> = React.memo(({ isOpen, onClose 
                   key={item.path}
                   to={item.path}
                   onClick={onClose}
+                  onMouseEnter={() => { void preloadRoute(item.path); }}
+                  onFocus={() => { void preloadRoute(item.path); }}
+                  onTouchStart={() => { void preloadRoute(item.path); }}
                   className={`
                     flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium
                     transition-all duration-150 ease-out relative group

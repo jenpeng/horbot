@@ -3,6 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { MessageSquarePlus, History, Settings } from 'lucide-react';
 import { navItems } from './NavConfig';
 import { useI18n } from '../../contexts/I18nContext';
+import { preloadRoute } from '../../utils/routePreload';
 
 const IconBar: React.FC = React.memo(() => {
   const location = useLocation();
@@ -36,6 +37,9 @@ const IconBar: React.FC = React.memo(() => {
               <NavLink
                 key={item.path}
                 to={item.path}
+                onMouseEnter={() => { void preloadRoute(item.path); }}
+                onFocus={() => { void preloadRoute(item.path); }}
+                onTouchStart={() => { void preloadRoute(item.path); }}
                 className={`
                   w-10 h-10 rounded-lg flex items-center justify-center my-1
                   transition-all duration-200 group relative

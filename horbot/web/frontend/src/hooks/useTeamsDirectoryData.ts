@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getStorageItem } from '../utils/storage';
 import { readSelectionFromUrl } from '../pages/teams/selection';
+import { createAsyncResourceCache } from '../utils/asyncResourceCache';
 import type {
   AgentInfo,
   ExternalAgentInfo,
@@ -21,6 +22,40 @@ interface UseTeamsDirectoryDataOptions {
   }) => void;
 }
 
+interface TeamsDirectoryBundle {
+  agents: AgentInfo[];
+  teams: TeamInfo[];
+  externalAgents: ExternalAgentInfo[];
+  providers: ProviderInfo[];
+}
+
+const teamsDirectoryCache = createAsyncResourceCache(
+  async (): Promise<TeamsDirectoryBundle> => {
+    const [agentsRes, teamsRes, externalAgentsRes, providersRes] = await Promise.all([
+      fetch('/api/agents'),
+      fetch('/api/teams'),
+      fetch('/api/external-agents'),
+      fetch('/api/providers'),
+    ]);
+
+    const agentsData = await agentsRes.json();
+    const teamsData = await teamsRes.json();
+    const externalAgentsData = await externalAgentsRes.json();
+    const providersData = await providersRes.json();
+
+    return {
+      agents: agentsData.agents || [],
+      teams: teamsData.teams || [],
+      externalAgents: externalAgentsData.external_agents || [],
+      providers: providersData.providers || [],
+    };
+  },
+  {
+    ttlMs: 20_000,
+    keyFn: () => 'teams-directory',
+  },
+);
+
 export const useTeamsDirectoryData = ({
   currentSelectedAgentId,
   currentSelectedTeamId,
@@ -28,11 +63,12 @@ export const useTeamsDirectoryData = ({
   selectionStorageKey,
   onSelectionResolved,
 }: UseTeamsDirectoryDataOptions) => {
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [teams, setTeams] = useState<TeamInfo[]>([]);
-  const [externalAgents, setExternalAgents] = useState<ExternalAgentInfo[]>([]);
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cachedDirectory = teamsDirectoryCache.peek();
+  const [agents, setAgents] = useState<AgentInfo[]>(cachedDirectory?.agents || []);
+  const [teams, setTeams] = useState<TeamInfo[]>(cachedDirectory?.teams || []);
+  const [externalAgents, setExternalAgents] = useState<ExternalAgentInfo[]>(cachedDirectory?.externalAgents || []);
+  const [providers, setProviders] = useState<ProviderInfo[]>(cachedDirectory?.providers || []);
+  const [loading, setLoading] = useState(!cachedDirectory);
   const currentSelectedAgentIdRef = useRef(currentSelectedAgentId);
   const currentSelectedTeamIdRef = useRef(currentSelectedTeamId);
   const currentSelectedExternalAgentIdRef = useRef(currentSelectedExternalAgentId);
@@ -49,23 +85,19 @@ export const useTeamsDirectoryData = ({
     currentSelectedExternalAgentIdRef.current = currentSelectedExternalAgentId;
   }, [currentSelectedExternalAgentId]);
 
-  const refreshDirectory = useCallback(async () => {
+  const refreshDirectory = useCallback(async (options: { force?: boolean } = {}) => {
+    const hasCachedDirectory = Boolean(teamsDirectoryCache.peek());
+    if (options.force || !hasCachedDirectory) {
+      setLoading(true);
+    }
+
     try {
-      const [agentsRes, teamsRes, externalAgentsRes, providersRes] = await Promise.all([
-        fetch('/api/agents'),
-        fetch('/api/teams'),
-        fetch('/api/external-agents'),
-        fetch('/api/providers'),
-      ]);
-
-      const agentsData = await agentsRes.json();
-      const teamsData = await teamsRes.json();
-      const externalAgentsData = await externalAgentsRes.json();
-      const providersData = await providersRes.json();
-
-      const nextAgents = agentsData.agents || [];
-      const nextTeams = teamsData.teams || [];
-      const nextExternalAgents = externalAgentsData.external_agents || [];
+      const directory = options.force
+        ? await teamsDirectoryCache.refresh()
+        : await teamsDirectoryCache.get();
+      const nextAgents = directory.agents;
+      const nextTeams = directory.teams;
+      const nextExternalAgents = directory.externalAgents;
       const urlSelection = readSelectionFromUrl();
       const persistedSelection = getStorageItem<TeamsPageSelection | null>(selectionStorageKey, null);
       const preferredAgentId =
@@ -104,7 +136,7 @@ export const useTeamsDirectoryData = ({
       setAgents(nextAgents);
       setTeams(nextTeams);
       setExternalAgents(nextExternalAgents);
-      setProviders(providersData.providers || []);
+      setProviders(directory.providers);
       onSelectionResolved({
         selectedAgentId: resolvedAgentId,
         selectedTeam: resolvedTeam,
