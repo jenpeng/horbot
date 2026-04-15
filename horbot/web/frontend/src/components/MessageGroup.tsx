@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowUpRight, BookMarked, ChevronDown, Copy, FileAudio2, FileImage, FileText, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
@@ -421,6 +421,23 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
   const [inspectedSource, setInspectedSource] = useState<MemorySource | null>(null);
   const [previewedFile, setPreviewedFile] = useState<AttachmentFile | null>(null);
   const errorKindMeta = useMemo(() => getErrorKindMeta(t), [t]);
+  const previewableImageFiles = useMemo(
+    () => messages.flatMap((message) => (
+      (message.files || []).filter((file) => file.category === 'image' && Boolean(getFilePreviewUrl(file)))
+    )),
+    [messages]
+  );
+  const previewedImageIndex = useMemo(
+    () => (
+      previewedFile
+      && previewedFile.category === 'image'
+      ? previewableImageFiles.findIndex((file) => file.fileId === previewedFile.fileId)
+      : -1
+    ),
+    [previewableImageFiles, previewedFile]
+  );
+  const canPreviewPreviousImage = previewedImageIndex > 0;
+  const canPreviewNextImage = previewedImageIndex >= 0 && previewedImageIndex < previewableImageFiles.length - 1;
 
   const inspectedSourceOrigin = useMemo(() => {
     if (!inspectedSource) {
@@ -463,6 +480,43 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
     }
     window.open(targetUrl, '_blank', 'noopener,noreferrer');
   }, [previewedFile, t, toast]);
+
+  const handlePreviewPreviousImage = useCallback(() => {
+    if (!canPreviewPreviousImage) {
+      return;
+    }
+    setPreviewedFile(previewableImageFiles[previewedImageIndex - 1] || null);
+  }, [canPreviewPreviousImage, previewableImageFiles, previewedImageIndex]);
+
+  const handlePreviewNextImage = useCallback(() => {
+    if (!canPreviewNextImage) {
+      return;
+    }
+    setPreviewedFile(previewableImageFiles[previewedImageIndex + 1] || null);
+  }, [canPreviewNextImage, previewableImageFiles, previewedImageIndex]);
+
+  const handleSelectPreviewImage = useCallback((index: number) => {
+    setPreviewedFile(previewableImageFiles[index] || null);
+  }, [previewableImageFiles]);
+
+  useEffect(() => {
+    if (previewedImageIndex < 0) {
+      return undefined;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft' && canPreviewPreviousImage) {
+        event.preventDefault();
+        setPreviewedFile(previewableImageFiles[previewedImageIndex - 1] || null);
+      } else if (event.key === 'ArrowRight' && canPreviewNextImage) {
+        event.preventDefault();
+        setPreviewedFile(previewableImageFiles[previewedImageIndex + 1] || null);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [canPreviewNextImage, canPreviewPreviousImage, previewableImageFiles, previewedImageIndex]);
 
   const handleNavigateToSource = useCallback(() => {
     if (!inspectedSource) {
@@ -605,86 +659,116 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
       return null;
     }
 
+    const imageFiles = files.filter((file) => file.category === 'image' && Boolean(file.localPreview || file.previewUrl || file.url));
+    const otherFiles = files.filter((file) => !imageFiles.some((entry) => entry.fileId === file.fileId));
+    const hasImageGrid = imageFiles.length > 1;
+    const maxGridImages = 4;
+    const visibleImageFiles = hasImageGrid ? imageFiles.slice(0, maxGridImages) : imageFiles;
+    const hiddenImageCount = hasImageGrid ? Math.max(0, imageFiles.length - visibleImageFiles.length) : 0;
+
     return (
-      <div className="mb-2 flex flex-wrap gap-2">
-        {files.map((file) => {
-          const previewUrl = file.localPreview || file.previewUrl || file.url;
-          const cardTone = isUserMessage
-            ? 'border-white/30 bg-white/15 text-white'
-            : 'border-slate-200 bg-slate-50 text-slate-700';
-          if (file.category === 'image' && previewUrl) {
-            return (
-              <button
-                key={file.fileId}
-                type="button"
-                onClick={() => handleOpenFilePreview(file)}
-                data-testid="message-file-open-preview"
-                className={`overflow-hidden rounded-2xl border ${cardTone} text-left shadow-sm transition-opacity hover:opacity-90`}
-              >
-                <img
-                  src={previewUrl}
-                  alt={file.originalName}
-                  className="h-28 w-28 object-cover"
-                />
-                <div className="px-3 py-2 text-[11px]">
-                  <div className="truncate font-medium">{file.originalName}</div>
-                  <div className={isUserMessage ? 'text-white/75' : 'text-slate-500'}>{formatFileSize(file.size)}</div>
-                </div>
-              </button>
-            );
-          }
+      <div className="inline-flex max-w-full flex-col gap-2 align-top" data-testid="message-file-list">
+        {imageFiles.length > 0 && (
+          <div
+            className={hasImageGrid ? 'grid grid-cols-2 gap-2' : 'inline-flex max-w-full'}
+            data-testid={hasImageGrid ? 'message-file-image-grid' : 'message-file-image-single'}
+          >
+            {visibleImageFiles.map((file, imageIndex) => {
+              const previewUrl = file.localPreview || file.previewUrl || file.url;
+              const cardTone = isUserMessage
+                ? 'border-white/30 bg-white/15 text-white'
+                : 'border-slate-200 bg-slate-50 text-slate-700';
+              const showOverflowBadge = hiddenImageCount > 0 && imageIndex === visibleImageFiles.length - 1;
+              return (
+                <button
+                  key={file.fileId}
+                  type="button"
+                  onClick={() => handleOpenFilePreview(file)}
+                  data-testid="message-file-open-preview"
+                  className={`relative flex w-28 flex-col overflow-hidden rounded-2xl border ${cardTone} text-left shadow-sm transition-opacity hover:opacity-90`}
+                >
+                  <img
+                    src={previewUrl}
+                    alt={file.originalName}
+                    className="h-28 w-28 object-cover"
+                  />
+                  {showOverflowBadge && (
+                    <div
+                      className="absolute inset-x-0 top-0 flex h-28 items-center justify-center bg-slate-950/50 text-base font-semibold text-white backdrop-blur-[1px]"
+                      data-testid="message-file-image-overflow"
+                    >
+                      +{hiddenImageCount}
+                    </div>
+                  )}
+                  <div className="min-h-[3.4rem] px-3 py-2 text-[11px]">
+                    <div className="line-clamp-2 min-h-[2rem] font-medium leading-4">{file.originalName}</div>
+                    <div className={isUserMessage ? 'text-white/75' : 'text-slate-500'}>{formatFileSize(file.size)}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
-          if (file.category === 'audio' && file.url) {
-            return (
-              <button
-                key={file.fileId}
-                type="button"
-                onClick={() => handleOpenFilePreview(file)}
-                data-testid="message-file-open-preview"
-                className={`min-w-[220px] rounded-2xl border px-3 py-3 text-left shadow-sm transition-opacity hover:opacity-90 ${cardTone}`}
-              >
-                <div className="mb-2 flex items-center gap-2 text-xs font-medium">
-                  <FileAudio2 className="h-4 w-4" strokeWidth={2} />
-                  <span className="truncate">{file.originalName}</span>
-                </div>
-                <div className={`rounded-2xl border px-3 py-3 text-xs ${isUserMessage ? 'border-white/20 bg-white/10 text-white/85' : 'border-slate-200 bg-white text-slate-500'}`}>
-                  {t('messageGroup.filePreview.playAudio')}
-                </div>
-                <div className={`mt-2 text-[11px] ${isUserMessage ? 'text-white/75' : 'text-slate-500'}`}>
-                  {formatFileSize(file.size)}
-                </div>
-              </button>
-            );
-          }
+        {otherFiles.length > 0 && (
+          <div className="inline-flex max-w-full flex-wrap gap-2">
+            {otherFiles.map((file) => {
+              const cardTone = isUserMessage
+                ? 'border-white/30 bg-white/15 text-white'
+                : 'border-slate-200 bg-slate-50 text-slate-700';
+              if (file.category === 'audio' && file.url) {
+                return (
+                  <button
+                    key={file.fileId}
+                    type="button"
+                    onClick={() => handleOpenFilePreview(file)}
+                    data-testid="message-file-open-preview"
+                    className={`min-w-[220px] rounded-2xl border px-3 py-3 text-left shadow-sm transition-opacity hover:opacity-90 ${cardTone}`}
+                  >
+                    <div className="mb-2 flex items-center gap-2 text-xs font-medium">
+                      <FileAudio2 className="h-4 w-4" strokeWidth={2} />
+                      <span className="truncate">{file.originalName}</span>
+                    </div>
+                    <div className={`rounded-2xl border px-3 py-3 text-xs ${isUserMessage ? 'border-white/20 bg-white/10 text-white/85' : 'border-slate-200 bg-white text-slate-500'}`}>
+                      {t('messageGroup.filePreview.playAudio')}
+                    </div>
+                    <div className={`mt-2 text-[11px] ${isUserMessage ? 'text-white/75' : 'text-slate-500'}`}>
+                      {formatFileSize(file.size)}
+                    </div>
+                  </button>
+                );
+              }
 
-          return (
-            <button
-              key={file.fileId}
-              type="button"
-              onClick={() => handleOpenFilePreview(file)}
-              data-testid="message-file-open-preview"
-              className={`flex min-w-[220px] max-w-[320px] flex-col items-start gap-3 rounded-2xl border px-3 py-3 text-left shadow-sm transition-colors hover:bg-white/20 ${cardTone}`}
-            >
-              <div className="flex w-full items-start gap-3">
-                <span className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl ${isUserMessage ? 'bg-white/15' : 'bg-white'}`}>
-                  {file.category === 'image' ? <FileImage className="h-4 w-4" strokeWidth={2} /> : <FileText className="h-4 w-4" strokeWidth={2} />}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className={`mb-1 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${isUserMessage ? 'bg-white/15 text-white/90' : 'bg-slate-200 text-slate-600'}`}>
-                    {getFileKindLabel(file, t)}
-                  </span>
-                  <span className="block truncate text-sm font-medium">{file.originalName}</span>
-                  <span className={`block text-[11px] ${isUserMessage ? 'text-white/75' : 'text-slate-500'}`}>
-                    {formatFileSize(file.size)}
-                  </span>
-                </span>
-              </div>
-              <p className={`line-clamp-4 text-[12px] leading-5 ${isUserMessage ? 'text-white/80' : 'text-slate-500'}`}>
-                {getFilePreviewText(file, t)}
-              </p>
-            </button>
-          );
-        })}
+              return (
+                <button
+                  key={file.fileId}
+                  type="button"
+                  onClick={() => handleOpenFilePreview(file)}
+                  data-testid="message-file-open-preview"
+                  className={`flex min-w-[220px] max-w-[320px] flex-col items-start gap-3 rounded-2xl border px-3 py-3 text-left shadow-sm transition-colors hover:bg-white/20 ${cardTone}`}
+                >
+                  <div className="flex w-full items-start gap-3">
+                    <span className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl ${isUserMessage ? 'bg-white/15' : 'bg-white'}`}>
+                      {file.category === 'image' ? <FileImage className="h-4 w-4" strokeWidth={2} /> : <FileText className="h-4 w-4" strokeWidth={2} />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className={`mb-1 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${isUserMessage ? 'bg-white/15 text-white/90' : 'bg-slate-200 text-slate-600'}`}>
+                        {getFileKindLabel(file, t)}
+                      </span>
+                      <span className="block truncate text-sm font-medium">{file.originalName}</span>
+                      <span className={`block text-[11px] ${isUserMessage ? 'text-white/75' : 'text-slate-500'}`}>
+                        {formatFileSize(file.size)}
+                      </span>
+                    </span>
+                  </div>
+                  <p className={`line-clamp-4 text-[12px] leading-5 ${isUserMessage ? 'text-white/80' : 'text-slate-500'}`}>
+                    {getFilePreviewText(file, t)}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }, [handleOpenFilePreview, t]);
@@ -727,6 +811,11 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
       ? relayStatusTone
       : 'border-slate-200 bg-slate-50/90 text-slate-700';
     const shouldShowCompactStreamingStatus = !isUser && message.isStreaming && !!message.statusMessage && !!message.content;
+    const imageFiles = (message.files || []).filter((file) => file.category === 'image' && Boolean(file.localPreview || file.previewUrl || file.url));
+    const nonImageFiles = (message.files || []).filter((file) => !imageFiles.some((entry) => entry.fileId === file.fileId));
+    const shouldDetachImageBubble = imageFiles.length > 0 && (!message.isStreaming && (Boolean(cleanedContent.trim()) || nonImageFiles.length > 0));
+    const inlineFiles = shouldDetachImageBubble ? nonImageFiles : message.files;
+    const detachedImageBubble = shouldDetachImageBubble ? renderMessageFiles(imageFiles, isUser) : null;
 
     return (
       <div
@@ -795,6 +884,19 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
             </div>
           )}
 
+          {detachedImageBubble && (
+            <div
+              className={`mb-1.5 w-fit min-w-0 max-w-full rounded-2xl px-1.5 py-1.5 shadow-sm sm:max-w-[42rem] ${
+                isUser
+                  ? 'rounded-tr-md bg-blue-500 text-white'
+                  : 'rounded-tl-md border border-slate-200 bg-white text-slate-800'
+              }`}
+              data-testid="message-detached-image-bubble"
+            >
+              {detachedImageBubble}
+            </div>
+          )}
+
           <div
             className={`w-fit min-w-0 max-w-full rounded-2xl px-2.5 py-1.5 text-[13px] shadow-sm sm:max-w-[42rem] ${
               isUser
@@ -828,14 +930,22 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
             {message.isStreaming ? (
               <div className="flex items-center gap-1 whitespace-pre-wrap break-words leading-[1.55]">
                 <div className="min-w-0">
-                  {renderMessageFiles(message.files, isUser)}
+                  {inlineFiles && inlineFiles.length > 0 && (
+                    <div className="mb-2">
+                      {renderMessageFiles(inlineFiles, isUser)}
+                    </div>
+                  )}
                   <span>{cleanedContent}</span>
                 </div>
                 <span className="inline-block h-4 w-1.5 animate-pulse rounded-full bg-current" />
               </div>
             ) : (
               <div className="min-w-0 whitespace-pre-wrap break-words leading-[1.55]">
-                {renderMessageFiles(message.files, isUser)}
+                {inlineFiles && inlineFiles.length > 0 && (
+                  <div className="mb-2">
+                    {renderMessageFiles(inlineFiles, isUser)}
+                  </div>
+                )}
                 {shouldRenderMarkdown ? (
                   <MarkdownRenderer
                     content={cleanedContent}
@@ -1264,11 +1374,81 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                   {previewedFile.mimeType}
                 </span>
               )}
+              {previewedImageIndex >= 0 && previewableImageFiles.length > 1 && (
+                <span className="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 font-medium text-sky-700">
+                  {t('messageGroup.previewCounter', { current: previewedImageIndex + 1, total: previewableImageFiles.length })}
+                </span>
+              )}
             </div>
 
             {renderFilePreviewContent(previewedFile, t)}
 
-            <ModalFooter>
+            {previewedImageIndex >= 0 && previewableImageFiles.length > 1 && (
+              <div className="space-y-2" data-testid="message-file-preview-thumbnails">
+                <div className="overflow-x-auto pb-1">
+                  <div className="flex min-w-max gap-2">
+                    {previewableImageFiles.map((file, index) => {
+                      const previewUrl = getFilePreviewUrl(file);
+                      const isActive = index === previewedImageIndex;
+                      return (
+                        <button
+                          key={file.fileId}
+                          type="button"
+                          onClick={() => handleSelectPreviewImage(index)}
+                          data-testid="message-file-preview-thumbnail"
+                          aria-pressed={isActive}
+                          className={`group relative h-16 w-16 shrink-0 overflow-hidden rounded-2xl border transition-all sm:h-20 sm:w-20 ${
+                            isActive
+                              ? 'border-sky-500 ring-2 ring-sky-200'
+                              : 'border-slate-200 hover:border-slate-300'
+                          }`}
+                          title={file.originalName}
+                        >
+                          {previewUrl ? (
+                            <img
+                              src={previewUrl}
+                              alt={file.originalName}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-slate-100 text-[11px] font-medium text-slate-500">
+                              {index + 1}
+                            </div>
+                          )}
+                          <div className={`absolute inset-0 transition-colors ${isActive ? 'bg-sky-950/0' : 'bg-slate-950/5 group-hover:bg-slate-950/0'}`} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <ModalFooter className="flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                {previewedImageIndex >= 0 && previewableImageFiles.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handlePreviewPreviousImage}
+                      disabled={!canPreviewPreviousImage}
+                      data-testid="message-file-preview-prev"
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {t('messageGroup.previewPrevious')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePreviewNextImage}
+                      disabled={!canPreviewNextImage}
+                      data-testid="message-file-preview-next"
+                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {t('messageGroup.previewNext')}
+                    </button>
+                  </>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={handleOpenOriginalFile}

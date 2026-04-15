@@ -73,6 +73,7 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 - Markdown rendering for assistant messages
 - Denser chat bubbles and tighter Markdown spacing to reduce blank space in long conversations
 - Inline preview for image, audio, PDF, Office, and text attachments
+- Multi-image preview modals now include a bottom thumbnail strip for faster visual switching
 - Drag-and-drop, paste upload, and retry flows
 - Group chat history merge and recovery across legacy and current session paths
 - Team relay timeline now shows clearer baton status such as who handed work to whom and whether the next turn is a continuation or a final summary
@@ -117,7 +118,7 @@ Common commands:
 ./horbot.sh smoke browser-e2e
 ```
 
-`./horbot.sh start` now also starts the built-in `web-access` proxy on `127.0.0.1:3456`. The proxy will try to auto-launch a Chrome instance with remote debugging so browser-backed web operations work without a separately cloned service.
+`./horbot.sh start` now also starts the built-in `web-access` proxy on `127.0.0.1:3456`. Service startup no longer opens a visible browser window. The proxy only launches Chrome on the first real browser-backed request, and the default auto-launched instance runs headless.
 
 ## Documentation
 

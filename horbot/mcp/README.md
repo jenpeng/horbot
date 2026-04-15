@@ -18,7 +18,7 @@ Model Context Protocol (MCP) Server 集合，为 AI 提供各种工具能力。
 
 ```bash
 # 例如 browser server
-# ./horbot.sh start 会自动拉起内置 web-access 服务
+# ./horbot.sh start 会自动拉起内置 web-access 服务；真正需要浏览器能力时才按需拉起 headless Chrome
 pip install playwright
 playwright install chromium
 ```

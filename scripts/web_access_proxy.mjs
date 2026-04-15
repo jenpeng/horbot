@@ -13,7 +13,7 @@ const AUTO_LAUNCH_CHROME = !['0', 'false', 'no', 'off'].includes(
   (process.env.WEB_ACCESS_AUTO_LAUNCH_CHROME || '1').trim().toLowerCase(),
 );
 const CHROME_HEADLESS = ['1', 'true', 'yes', 'on'].includes(
-  (process.env.WEB_ACCESS_CHROME_HEADLESS || '0').trim().toLowerCase(),
+  (process.env.WEB_ACCESS_CHROME_HEADLESS || '1').trim().toLowerCase(),
 );
 const CHROME_USER_DATA_DIR = process.env.WEB_ACCESS_CHROME_USER_DATA_DIR
   || path.join(process.cwd(), '.horbot', 'runtime', 'chrome-web-access');
@@ -136,9 +136,9 @@ class ChromeProxy {
     }
   }
 
-  async health() {
+  async health({ allowAutoLaunch = false } = {}) {
     try {
-      const endpoint = await this._discoverBrowserEndpoint();
+      const endpoint = await this._discoverBrowserEndpoint({ allowAutoLaunch });
       if (!endpoint) {
         return {
           ok: false,
@@ -290,7 +290,7 @@ class ChromeProxy {
     }
   }
 
-  async _discoverBrowserEndpoint() {
+  async _discoverBrowserEndpoint({ allowAutoLaunch = true } = {}) {
     const explicitUrl = (process.env.CHROME_REMOTE_DEBUGGING_URL || '').trim();
     if (explicitUrl) {
       return {
@@ -311,7 +311,9 @@ class ChromeProxy {
       }
     }
 
-    await this._ensureChromeLaunched();
+    if (allowAutoLaunch) {
+      await this._ensureChromeLaunched();
+    }
 
     for (const port of COMMON_DEBUG_PORTS) {
       const endpoint = await this._queryDevToolsEndpoint(port);
@@ -696,7 +698,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || `127.0.0.1:${PORT}`}`);
   try {
     if (req.method === 'GET' && url.pathname === '/health') {
-      const health = await proxy.health();
+      const health = await proxy.health({ allowAutoLaunch: false });
       writeJson(res, health.ok ? 200 : 503, {
         service: 'web-access-proxy',
         port: PORT,
@@ -787,7 +789,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[web-access-proxy] listening on http://127.0.0.1:${PORT}`);
-  proxy.health().then((health) => {
+  proxy.health({ allowAutoLaunch: false }).then((health) => {
     if (health.ok) {
       console.log('[web-access-proxy] browser debugging endpoint is ready');
     } else if (health.error) {

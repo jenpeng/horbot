@@ -62,5 +62,6 @@ Recent chat updates also tightened assistant message spacing, improved Markdown 
 Current web runtime notes:
 
 - `./horbot.sh start` also starts the built-in `web-access` proxy on `127.0.0.1:3456`
-- the proxy can auto-launch Chrome with remote debugging for browser-backed actions
+- startup no longer opens a visible browser; Chrome is only auto-launched on the first browser-backed request
+- the default auto-launched Chrome runs headless with remote debugging
 - the agent now prefers `web_access` first for web/search work, with `browser`, `web_search`, and `web_fetch` as fallbacks

@@ -45,7 +45,8 @@ Horbot keeps the runtime intentionally small:
 
 - `horbot.sh` now manages a built-in `web-access` proxy service as part of the normal local stack
 - the proxy listens on `127.0.0.1:3456` and is started by `./horbot.sh start|restart`
-- on startup, it tries to auto-launch a Chrome instance with remote debugging on `127.0.0.1:9222`
+- startup only performs a passive readiness check and no longer opens a visible browser window
+- the first real browser-backed request can auto-launch a headless Chrome instance with remote debugging on `127.0.0.1:9222`
 - the browser MCP server prefers this proxy first, then falls back to Playwright if needed
 
 ### Channel Runtime
@@ -93,6 +94,7 @@ The Web UI currently covers:
 - agents and teams
 - chat and relay conversations
 - baton-aware relay navigation between direct chat and team chat during DM-initiated team dispatch flows
+- richer attachment preview UX, including inline previews and a bottom thumbnail strip for multi-image preview modals
 - skills import/edit/compatibility
 - channels and runtime status, including WeCom endpoint testing
 - dashboard and token usage
