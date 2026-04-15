@@ -63,7 +63,7 @@ class ExecutionResult:
 
 @dataclass(frozen=True)
 class WebRequirement:
-    """Classification result for whether a request should rely on native web access."""
+    """Classification result for whether a request should rely on web tools."""
 
     category: str = "none"
     requires_web_access: bool = False
@@ -226,7 +226,7 @@ class ToolRegistry:
 
     @staticmethod
     def classify_web_requirement(user_message: Any) -> WebRequirement:
-        """Infer whether the request should use native web access before answering."""
+        """Infer whether the request should use web tools before answering."""
         normalized = ToolRegistry._normalize_user_message_for_matching(user_message)
         if not normalized:
             return WebRequirement()
@@ -421,38 +421,38 @@ class ToolRegistry:
             "excel": {"mcp_excel"},
             "表格": {"mcp_excel"},
             "spreadsheet": {"mcp_excel"},
-            "web": {"web_access"},
-            "网页访问": {"web_access", "browser", "browser_", "mcp_browser"},
-            "联网": {"web_access", "web_search"},
+            "web": {"browser", "browser_", "mcp_browser", "web_search", "web_fetch"},
+            "网页访问": {"browser", "browser_", "mcp_browser"},
+            "联网": {"web_search", "web_fetch", "browser", "browser_", "mcp_browser"},
             "browser": {"browser", "browser_", "mcp_browser"},
             "浏览器": {"browser", "browser_", "mcp_browser"},
-            "打开": {"web_access", "browser", "browser_", "mcp_browser"},
-            "访问": {"web_access", "browser", "browser_", "mcp_browser"},
-            "页面": {"web_access", "browser", "browser_", "mcp_browser"},
-            "页面标题": {"web_access", "browser", "browser_", "mcp_browser"},
-            "标题": {"web_access", "browser", "browser_", "mcp_browser"},
-            "网页": {"web_access", "browser", "browser_", "mcp_browser"},
-            "website": {"web_access", "browser", "browser_", "mcp_browser"},
-            "url": {"web_access", "browser", "browser_", "mcp_browser"},
-            "http://": {"web_access", "browser", "browser_", "mcp_browser"},
-            "https://": {"web_access", "browser", "browser_", "mcp_browser"},
-            "screenshot": {"web_access", "browser", "browser_", "mcp_browser"},
-            "截图": {"web_access", "browser", "browser_", "mcp_browser"},
-            "click": {"web_access", "browser", "browser_", "mcp_browser"},
-            "点击": {"web_access", "browser", "browser_", "mcp_browser"},
-            "搜索": {"web_access", "web_search"},
-            "搜一下": {"web_access", "web_search"},
-            "检索": {"web_access", "web_search"},
-            "查询": {"web_access", "web_search"},
-            "search": {"web_access", "web_search"},
-            "google": {"web_access", "web_search"},
-            "bing": {"web_access", "web_search"},
-            "find": {"web_access", "web_search"},
-            "fetch": {"web_access", "web_fetch"},
-            "抓取": {"web_access", "web_fetch"},
-            "获取网页源码": {"web_access", "web_fetch"},
-            "下载网页": {"web_access", "web_fetch"},
-            "read url": {"web_access", "web_fetch"},
+            "打开": {"browser", "browser_", "mcp_browser"},
+            "访问": {"browser", "browser_", "mcp_browser"},
+            "页面": {"browser", "browser_", "mcp_browser", "web_fetch"},
+            "页面标题": {"browser", "browser_", "mcp_browser", "web_fetch"},
+            "标题": {"browser", "browser_", "mcp_browser", "web_fetch"},
+            "网页": {"browser", "browser_", "mcp_browser", "web_fetch"},
+            "website": {"browser", "browser_", "mcp_browser", "web_fetch"},
+            "url": {"browser", "browser_", "mcp_browser", "web_fetch"},
+            "http://": {"browser", "browser_", "mcp_browser", "web_fetch"},
+            "https://": {"browser", "browser_", "mcp_browser", "web_fetch"},
+            "screenshot": {"browser", "browser_", "mcp_browser"},
+            "截图": {"browser", "browser_", "mcp_browser"},
+            "click": {"browser", "browser_", "mcp_browser"},
+            "点击": {"browser", "browser_", "mcp_browser"},
+            "搜索": {"web_search"},
+            "搜一下": {"web_search"},
+            "检索": {"web_search"},
+            "查询": {"web_search"},
+            "search": {"web_search"},
+            "google": {"web_search"},
+            "bing": {"web_search"},
+            "find": {"web_search"},
+            "fetch": {"web_fetch"},
+            "抓取": {"web_fetch"},
+            "获取网页源码": {"web_fetch"},
+            "下载网页": {"web_fetch"},
+            "read url": {"web_fetch"},
             "提醒": {"cron"},
             "提醒我": {"task", "cron"},
             "定时": {"cron"},
@@ -489,9 +489,15 @@ class ToolRegistry:
 
         web_requirement = self.classify_web_requirement(normalized_user_message)
         if web_requirement.requires_web_access:
-            for tool in available:
-                if tool == "web_access":
-                    selected.add(tool)
+            required_prefixes: set[str]
+            if web_requirement.category == "direct_web":
+                required_prefixes = {"browser", "browser_", "mcp_browser", "web_fetch"}
+            else:
+                required_prefixes = {"web_search", "web_fetch", "browser", "browser_", "mcp_browser"}
+            for prefix in required_prefixes:
+                for tool in available:
+                    if tool.startswith(prefix) or tool == prefix:
+                        selected.add(tool)
 
         keyword_matched = False
         if normalized_user_message:

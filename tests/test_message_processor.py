@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, AsyncMock
 
 from horbot.agent.loop import AgentLoop
 from horbot.agent.message_processor import MessageProcessor
+from horbot.agent.tools.registry import WebRequirement
 from horbot.bus.events import InboundMessage, OutboundMessage
 
 
@@ -70,6 +71,7 @@ class MockAgentLoop:
 
         self.tools = MagicMock()
         self.tools.get.return_value = None
+        self.tools.classify_web_requirement.return_value = WebRequirement()
         
         self._agent_id = "agent_1"
         self._agent_name = "test_agent"
@@ -250,6 +252,30 @@ class TestMessageProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.content, "Mock response")
         # Ensure context clearing might have been called
         self.mock_agent._is_new_task.assert_called_once()
+
+    async def test_process_message_disables_fast_reply_when_web_tools_required(self):
+        self.mock_agent.context.should_use_fast_reply.return_value = True
+        self.mock_agent.tools.classify_web_requirement.return_value = WebRequirement(
+            category="direct_web",
+            requires_web_access=True,
+            reason="explicit webpage interaction requested",
+        )
+
+        msg = InboundMessage(
+            channel="web",
+            sender_id="web_user",
+            chat_id="dm_main",
+            content="在当前浏览器上打开新浪首页",
+        )
+
+        response = await self.processor.process_message(msg)
+
+        self.assertIsNotNone(response)
+        self.mock_agent.context.build_messages.assert_called_once()
+        self.mock_agent.context.build_fast_messages.assert_not_called()
+        self.mock_agent._run_agent_loop.assert_awaited_once()
+        self.assertEqual(self.mock_agent._run_agent_loop.await_args.kwargs["tool_mode"], "smart")
+        self.assertIsNone(self.mock_agent._run_agent_loop.await_args.kwargs["max_tokens_override"])
 
 
 if __name__ == "__main__":

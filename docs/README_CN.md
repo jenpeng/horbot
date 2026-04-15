@@ -33,7 +33,7 @@
 
 ## 📢 最新动态
 
-- **2026-04-15** 🌐 Agent 联网能力调整为默认优先使用原生 `web_access`，并将 `web-access` 代理内置到项目中；`./horbot.sh start` 会一并启动代理，但不再在启动阶段主动弹浏览器，真正需要时才按需拉起 headless Chrome。
+- **2026-04-15** 🌐 Agent 联网能力已改回默认使用 Playwright 浏览器链路，并以 `browser` / `web_search` / `web_fetch` 作为标准联网工具；`horbot.sh` 不再托管 `web-access` 服务。
 - **2026-04-14** 🛡️ 新增外部 Agent 接入管理、`AGENTS.md` 治理文件、工具审计摘要与聊天 `request_id` 诊断增强；并修复一类前端误报 provider timeout 的假超时场景。
 - **2026-04-12** 🚀 新增 **WeCom（企业微信 AI Bot）** 渠道支持，包含 reply-mode 流式回复、媒体上传、入站媒体下载/解密，以及对应的文档与诊断能力同步。
 - **2026-02-24** 🚀 发布 **v0.1.4.post2** — 可靠性版本，重新设计心跳、提示缓存优化、提供商和渠道稳定性增强。
@@ -62,7 +62,7 @@
 | 📝 **Markdown 聊天** | Assistant 回复支持标题、列表、表格、引用、代码块与高亮 |
 | 📎 **多模态附件** | 支持图片、音频、PDF、Word、Excel、PowerPoint、文本上传、拖拽与粘贴 |
 | 👀 **历史预览** | 历史消息中的图片、音频、PDF、Office、文本附件可直接内联预览；远程图片链接会尽量自动转成统一图片卡片；多图弹窗支持底部缩略条快速切换 |
-| 🌐 **原生联网工具** | Agent 默认优先使用 `web_access` 做搜索、抓取与网页交互，`browser` / `web_search` / `web_fetch` 作为回退 |
+| 🌐 **浏览器与联网工具** | Agent 默认使用 `browser` / `web_search` / `web_fetch` 处理网页交互、搜索与抓取，浏览器 MCP 默认走 Playwright |
 | 🔁 **团队接力可视化** | 聊天区会直接显示接力棒次、交棒来源、继续讨论/返回总结状态 |
 | 🌐 **外部 Agent 接入** | 支持独立配置、连接探测、团队成员编排和 capability tags 管理 |
 | 🛡️ **Agent 治理与审计** | 支持 `AGENTS.md` / `SOUL.md` / `USER.md` 资产管理、工具审计摘要与风险筛选 |
@@ -118,11 +118,8 @@ cd horbot
 ```bash
 ./horbot.sh start   # 启动前后端和 Gateway
 ./horbot.sh status  # 查看服务状态
-./horbot.sh logs web-access  # 查看内置 web-access 代理日志
 ./horbot.sh stop    # 停止所有服务
 ```
-
-当前 `./horbot.sh start` 也会同时拉起项目内置的 `web-access` 代理服务，默认监听 `127.0.0.1:3456`。服务启动阶段不再主动弹出浏览器；只有首次真正调用浏览器型能力时，代理才会按需自动拉起带 remote debugging 的 Chrome，且默认使用 headless 模式。
 
 当前这轮聊天与附件能力落地没有新增第三方依赖，因此不需要额外修改 `package.json`、`pyproject.toml` 或部署 `yml`。
 

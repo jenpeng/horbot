@@ -1,4 +1,4 @@
-"""Browser MCP server with web-access proxy preference and Playwright fallback."""
+"""Browser MCP server backed by Playwright."""
 
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ class ProxyActionError(RuntimeError):
 
 
 class WebAccessProxyClient:
-    """Thin async client for web-access CDP proxy endpoints."""
+    """Thin async client for optional CDP proxy endpoints."""
 
     def __init__(self, base_url: str, timeout: float, prefer_proxy: bool) -> None:
         self.base_url = base_url.rstrip("/")
@@ -375,7 +375,7 @@ def get_proxy_client() -> WebAccessProxyClient:
         _proxy_client = WebAccessProxyClient(
             base_url=os.getenv("WEB_ACCESS_PROXY_URL", "http://127.0.0.1:3456"),
             timeout=_env_float("WEB_ACCESS_PROXY_TIMEOUT", 30.0),
-            prefer_proxy=_env_flag("WEB_ACCESS_PREFER_PROXY", True),
+            prefer_proxy=False,
         )
     return _proxy_client
 
@@ -682,7 +682,7 @@ async def browser_close() -> str:
         try:
             if await proxy.is_available():
                 result = await proxy.close_target()
-                proxy_result = "✅ web-access 页面已关闭" if result != "noop" else None
+                proxy_result = "✅ 浏览器页面已关闭" if result != "noop" else None
         except Exception as exc:
             logger.warning("Browser MCP: proxy close failed: {}", exc)
 

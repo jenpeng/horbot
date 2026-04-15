@@ -22,7 +22,6 @@
 ./horbot.sh logs backend
 ./horbot.sh restart
 ./horbot.sh stop
-./horbot.sh logs web-access
 ```
 
 如果要做真实浏览器回归测试，可直接运行：

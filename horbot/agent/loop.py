@@ -34,7 +34,7 @@ from horbot.agent.tools.registry import (
 from horbot.agent.tools.permission import PermissionLevel
 from horbot.agent.tools.shell import ExecTool
 from horbot.agent.tools.spawn import SpawnTool
-from horbot.agent.tools.web import WebAccessTool, WebFetchTool, WebSearchTool
+from horbot.agent.tools.web import WebFetchTool, WebSearchTool
 from horbot.agent.tools.token_usage import TokenUsageTool
 from horbot.agent.planner import TaskAnalyzer, PlanGenerator, PlanValidator
 from horbot.agent.planner.models import Plan, PlanStatus
@@ -54,32 +54,33 @@ if TYPE_CHECKING:
 class AgentLoop:
     WEB_INTERACTIVE_COMPACT_MAX_TOKENS = 30000
     MAX_AUTO_CONTINUE_ROUNDS = 2
-    MAX_WEB_ACCESS_ENFORCEMENT_ROUNDS = 2
-    MAX_UNSUCCESSFUL_WEB_ACCESS_ATTEMPTS = 3
+    MAX_WEB_ENFORCEMENT_ROUNDS = 2
+    MAX_UNSUCCESSFUL_WEB_ATTEMPTS = 3
     AUTO_CONTINUE_PROMPT = (
         "请从上一条 assistant 回复中断的位置继续输出，不要重复已经给出的内容。"
         "如果上一条回复其实已经完整结束，只回复 __COMPLETE__。"
     )
-    WEB_ACCESS_ENFORCEMENT_PROMPT = (
-        "你尚未完成本轮必须的联网核实。请先调用 `web_access` 获取外部信息，再基于结果回答。"
-        "在成功拿到 `web_access` 结果之前，不要直接给最终结论，也不要调用 `message` 发送最终答案。"
+    WEB_ENFORCEMENT_PROMPT = (
+        "你尚未完成本轮必须的联网核实。请先使用浏览器、网页搜索或网页抓取工具获取外部信息，再基于结果回答。"
+        "如果用户要求打开或操作网页，优先调用 `browser`；如果用户要查资料或最新信息，优先调用 `web_search` 或 `web_fetch`。"
+        "在成功拿到联网工具结果之前，不要直接给最终结论，也不要调用 `message` 发送最终答案。"
     )
-    WEB_ACCESS_ENFORCEMENT_FAILURE = (
-        "这类请求需要先通过 `web_access` 联网核实，但本轮未能成功完成该步骤，"
-        "所以我不能直接给出结论。请稍后重试；如果静默搜索仍失败，建议改用打开浏览器（CDP）方式继续搜索。"
+    WEB_ENFORCEMENT_FAILURE = (
+        "这类请求需要先通过浏览器、网页搜索或网页抓取工具联网核实，但本轮未能成功完成该步骤，"
+        "所以我不能直接给出结论。请稍后重试。"
     )
     WEB_REQUIREMENT_PROMPT_MAP = {
         "direct_web": (
-            "当前请求明确涉及网页/链接/外部页面操作。请先使用 `web_access` 获取页面或搜索结果，"
-            "不要直接凭内部记忆回答外部事实。"
+            "当前请求明确涉及网页/链接/外部页面操作。请先使用 `browser` 执行网页动作，"
+            "不要只给链接或凭内部记忆描述网页内容。"
         ),
         "fresh_knowledge": (
-            "当前请求包含明显的时效性知识（如最新、当前、最近、今日动态等）。请先使用 `web_access`"
-            " 进行联网检索或抓取，再基于结果回答，不要直接假设事实仍然最新。"
+            "当前请求包含明显的时效性知识（如最新、当前、最近、今日动态等）。请先使用 `web_search`"
+            " 或 `web_fetch` 进行联网检索或抓取，再基于结果回答，不要直接假设事实仍然最新。"
         ),
         "lookup_knowledge": (
             "当前请求明显是在查官网、文档、API、GitHub、论文或发布说明等外部资料。请先使用 "
-            "`web_access` 查证相关来源，再给结论。"
+            "`web_search` 或 `web_fetch` 查证相关来源，再给结论。"
         ),
     }
 
@@ -238,7 +239,7 @@ class AgentLoop:
         messages: list[dict[str, Any]],
         requirement: WebRequirement,
     ) -> list[dict[str, Any]]:
-        """Inject a short system instruction when the request must use web access."""
+        """Inject a short system instruction when the request must use web tools."""
         if not requirement.requires_web_access:
             return messages
 
@@ -270,15 +271,14 @@ class AgentLoop:
             return False
         if normalized.startswith("Error") or normalized.startswith("[Security notice]"):
             return False
-        if tool_name == "web_access":
-            if normalized.lower().startswith("no results for:"):
-                return False
-            try:
-                parsed = json.loads(normalized)
-            except Exception:
-                parsed = None
-            if isinstance(parsed, dict) and parsed.get("error"):
-                return False
+        if tool_name == "web_search" and normalized.lower().startswith("no results for:"):
+            return False
+        try:
+            parsed = json.loads(normalized)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict) and parsed.get("error"):
+            return False
         return True
 
     @staticmethod
@@ -288,6 +288,52 @@ class AgentLoop:
                 continue
             content = str(message.get("content") or "")
             if AgentLoop._is_usable_tool_output(tool_name, content):
+                return True
+        return False
+
+    @staticmethod
+    def _is_browser_tool_name(tool_name: str) -> bool:
+        normalized = str(tool_name or "").strip().lower()
+        return (
+            normalized == "browser"
+            or normalized.startswith("browser_")
+            or normalized.startswith("mcp_browser")
+        )
+
+    @staticmethod
+    def _matches_tool_prefixes(tool_name: str, prefixes: set[str]) -> bool:
+        normalized = str(tool_name or "").strip().lower()
+        for prefix in prefixes:
+            if normalized == prefix or normalized.startswith(prefix):
+                return True
+        return False
+
+    @classmethod
+    def _required_web_tool_prefixes(cls, requirement: WebRequirement) -> set[str]:
+        if requirement.category == "direct_web":
+            return {"browser", "browser_", "mcp_browser", "web_fetch"}
+        if requirement.category in {"fresh_knowledge", "lookup_knowledge"}:
+            return {"web_search", "web_fetch", "browser", "browser_", "mcp_browser"}
+        return {"browser", "browser_", "mcp_browser", "web_search", "web_fetch"}
+
+    @classmethod
+    def _has_satisfied_web_requirement(
+        cls,
+        messages: list[dict[str, Any]],
+        requirement: WebRequirement,
+        start_index: int = 0,
+    ) -> bool:
+        if not requirement.requires_web_access:
+            return True
+        required_prefixes = cls._required_web_tool_prefixes(requirement)
+        for message in messages[start_index:]:
+            if message.get("role") != "tool":
+                continue
+            tool_name = str(message.get("name") or "")
+            content = str(message.get("content") or "")
+            if not cls._is_usable_tool_output(tool_name, content):
+                continue
+            if cls._matches_tool_prefixes(tool_name, required_prefixes):
                 return True
         return False
 
@@ -464,10 +510,6 @@ class AgentLoop:
         web_fetch_tool = WebFetchTool()
         self.tools.register(web_search_tool)
         self.tools.register(web_fetch_tool)
-        self.tools.register(WebAccessTool(
-            search_tool=web_search_tool,
-            fetch_tool=web_fetch_tool,
-        ))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         self.tools.register(ConfigureMCPTool())
@@ -1194,6 +1236,51 @@ class AgentLoop:
             cleaned.append({k: v for k, v in message.items() if k != "_ephemeral"})
         return cleaned
 
+    @classmethod
+    def _is_runtime_context_message(cls, message: dict[str, Any]) -> bool:
+        content = message.get("content")
+        if isinstance(content, str):
+            return cls._RUNTIME_CONTEXT_TAG in content
+        if isinstance(content, list):
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                text = item.get("text") or item.get("content") or ""
+                if isinstance(text, str) and cls._RUNTIME_CONTEXT_TAG in text:
+                    return True
+        return False
+
+    @classmethod
+    def _find_latest_real_user_message(cls, messages: list[dict[str, Any]]) -> Any:
+        fallback: Any = None
+        for message in reversed(messages):
+            if message.get("role") != "user":
+                continue
+            if fallback is None:
+                fallback = message.get("content", "")
+            if message.get("_ephemeral"):
+                continue
+            if cls._is_runtime_context_message(message):
+                continue
+            return message.get("content", "")
+        return fallback
+
+    @classmethod
+    def _find_latest_real_user_message_index(cls, messages: list[dict[str, Any]]) -> int:
+        fallback_index = -1
+        for index in range(len(messages) - 1, -1, -1):
+            message = messages[index]
+            if message.get("role") != "user":
+                continue
+            if fallback_index < 0:
+                fallback_index = index
+            if message.get("_ephemeral"):
+                continue
+            if cls._is_runtime_context_message(message):
+                continue
+            return index
+        return fallback_index
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -1233,19 +1320,16 @@ class AgentLoop:
         reset_count = 0
         max_resets = 3
         auto_continue_round = 0
-        web_access_enforcement_round = 0
-        unsuccessful_web_access_attempts = 0
+        web_enforcement_round = 0
+        unsuccessful_web_attempts = 0
         continued_prefix = ""
         
         self.tools.set_web_search_enabled(web_search)
         
-        user_message = None
-        for msg in reversed(initial_messages):
-            if msg.get("role") == "user":
-                user_message = msg.get("content", "")
-                break
+        user_message = self._find_latest_real_user_message(initial_messages)
         web_requirement = self.tools.classify_web_requirement(user_message)
         messages = self._inject_web_requirement_guidance(messages, web_requirement)
+        current_request_start = self._find_latest_real_user_message_index(messages)
 
         # Detect file types for model selection
         has_image = False
@@ -1357,8 +1441,12 @@ class AgentLoop:
                 logger.debug("No usage info in response")
 
             if response.has_tool_calls:
-                web_access_satisfied = self._has_successful_tool_result(messages, "web_access")
-                if web_requirement.requires_web_access and not web_access_satisfied:
+                web_requirement_satisfied = self._has_satisfied_web_requirement(
+                    messages,
+                    web_requirement,
+                    start_index=max(current_request_start, 0),
+                )
+                if web_requirement.requires_web_access and not web_requirement_satisfied:
                     blocked_message_calls = [
                         tc for tc in response.tool_calls if tc.name == "message"
                     ]
@@ -1392,7 +1480,7 @@ class AgentLoop:
                                 messages,
                                 blocked_call.id,
                                 blocked_call.name,
-                                "Error: This request requires a successful web_access call before sending the final answer.",
+                                "Error: This request requires a successful browser, web_search, or web_fetch result before sending the final answer.",
                             )
 
                         if executable_tool_calls:
@@ -1417,13 +1505,13 @@ class AgentLoop:
                                 final_content = result.final_content
                                 break
 
-                        web_access_enforcement_round += 1
-                        if web_access_enforcement_round > self.MAX_WEB_ACCESS_ENFORCEMENT_ROUNDS:
-                            final_content = self.WEB_ACCESS_ENFORCEMENT_FAILURE
+                        web_enforcement_round += 1
+                        if web_enforcement_round > self.MAX_WEB_ENFORCEMENT_ROUNDS:
+                            final_content = self.WEB_ENFORCEMENT_FAILURE
                             break
                         messages.append({
                             "role": "user",
-                            "content": self.WEB_ACCESS_ENFORCEMENT_PROMPT,
+                            "content": self.WEB_ENFORCEMENT_PROMPT,
                             "_ephemeral": True,
                         })
                         continue
@@ -1480,15 +1568,25 @@ class AgentLoop:
                 )
                 messages = result.messages
                 tools_used = result.tools_used
-                attempted_web_access = any(tc.name == "web_access" for tc in response.tool_calls)
-                if web_requirement.requires_web_access and attempted_web_access:
-                    web_access_satisfied = self._has_successful_tool_result(messages, "web_access")
-                    if web_access_satisfied:
-                        unsuccessful_web_access_attempts = 0
+                attempted_web_tool = any(
+                    self._matches_tool_prefixes(
+                        tc.name,
+                        self._required_web_tool_prefixes(web_requirement),
+                    )
+                    for tc in response.tool_calls
+                )
+                if web_requirement.requires_web_access and attempted_web_tool:
+                    web_requirement_satisfied = self._has_satisfied_web_requirement(
+                        messages,
+                        web_requirement,
+                        start_index=max(current_request_start, 0),
+                    )
+                    if web_requirement_satisfied:
+                        unsuccessful_web_attempts = 0
                     else:
-                        unsuccessful_web_access_attempts += 1
-                        if unsuccessful_web_access_attempts >= self.MAX_UNSUCCESSFUL_WEB_ACCESS_ATTEMPTS:
-                            final_content = self.WEB_ACCESS_ENFORCEMENT_FAILURE
+                        unsuccessful_web_attempts += 1
+                        if unsuccessful_web_attempts >= self.MAX_UNSUCCESSFUL_WEB_ATTEMPTS:
+                            final_content = self.WEB_ENFORCEMENT_FAILURE
                             break
                 if result.confirmations:
                     confirmations.update(result.confirmations)
@@ -1515,26 +1613,30 @@ class AgentLoop:
                 if not clean:
                     clean = self._fallback_from_recent_tool_result(messages)
 
-                web_access_satisfied = self._has_successful_tool_result(messages, "web_access")
-                if web_requirement.requires_web_access and not web_access_satisfied:
-                    web_access_enforcement_round += 1
-                    if web_access_enforcement_round > self.MAX_WEB_ACCESS_ENFORCEMENT_ROUNDS:
-                        final_content = self.WEB_ACCESS_ENFORCEMENT_FAILURE
+                web_requirement_satisfied = self._has_satisfied_web_requirement(
+                    messages,
+                    web_requirement,
+                    start_index=max(current_request_start, 0),
+                )
+                if web_requirement.requires_web_access and not web_requirement_satisfied:
+                    web_enforcement_round += 1
+                    if web_enforcement_round > self.MAX_WEB_ENFORCEMENT_ROUNDS:
+                        final_content = self.WEB_ENFORCEMENT_FAILURE
                         messages = self._strip_ephemeral_messages(messages)
                         messages = self.context.add_assistant_message(messages, final_content)
                         if on_progress:
                             await on_progress(final_content)
                         break
                     if on_status:
-                        await on_status("当前请求需要先联网核实，正在强制补做 web_access...")
+                        await on_status("当前请求需要先联网核实，正在强制补做浏览器/搜索步骤...")
                     messages.append({
                         "role": "assistant",
-                        "content": clean or self.WEB_ACCESS_ENFORCEMENT_FAILURE,
+                        "content": clean or self.WEB_ENFORCEMENT_FAILURE,
                         "_ephemeral": True,
                     })
                     messages.append({
                         "role": "user",
-                        "content": self.WEB_ACCESS_ENFORCEMENT_PROMPT,
+                        "content": self.WEB_ENFORCEMENT_PROMPT,
                         "_ephemeral": True,
                     })
                     continue

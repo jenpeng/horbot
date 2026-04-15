@@ -8,7 +8,7 @@ Model Context Protocol (MCP) Server 集合，为 AI 提供各种工具能力。
 
 | Server | 功能 | 状态 |
 |--------|------|------|
-| [browser](./browser/) | 浏览器自动化操作，默认优先走项目内置 web-access 代理，失败时回退 Playwright | ✅ 可用 |
+| [browser](./browser/) | 浏览器自动化操作，默认使用 Playwright | ✅ 可用 |
 
 ## 🚀 快速开始
 
@@ -18,7 +18,6 @@ Model Context Protocol (MCP) Server 集合，为 AI 提供各种工具能力。
 
 ```bash
 # 例如 browser server
-# ./horbot.sh start 会自动拉起内置 web-access 服务；真正需要浏览器能力时才按需拉起 headless Chrome
 pip install playwright
 playwright install chromium
 ```
@@ -34,10 +33,6 @@ playwright install chromium
       "browser": {
         "command": "python",
         "args": ["-m", "horbot.mcp.browser.server"],
-        "env": {
-          "WEB_ACCESS_PREFER_PROXY": "1",
-          "WEB_ACCESS_PROXY_URL": "http://127.0.0.1:3456"
-        },
         "tool_timeout": 120
       }
     }
@@ -49,7 +44,7 @@ playwright install chromium
 
 启动 horbot 后，AI 会自动加载 MCP 工具，可以直接使用。
 
-对于 browser server，推荐直接通过 `./horbot.sh start` 或 `./horbot.sh restart` 启动整套服务，内置 `web-access` 会一并拉起。
+对于 browser server，推荐直接通过 `./horbot.sh start` 或 `./horbot.sh restart` 启动整套服务，然后由 MCP browser 使用 Playwright。
 
 ## 🛠️ 添加新 Server
 

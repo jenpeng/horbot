@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -318,7 +319,7 @@ class WebAccessTool(Tool):
     def description(self) -> str:
         return (
             "Unified native web-access tool. Use this first for web work: search, fetch page content, "
-            "open URLs, click/type on webpages, wait for elements, extract text/HTML, run JavaScript, "
+            "open URLs in the current browser, click/type on webpages, wait for elements, extract text/HTML, run JavaScript, "
             "capture screenshots, and inspect the current page."
         )
 
@@ -330,6 +331,7 @@ class WebAccessTool(Tool):
                 "action": {
                     "type": "string",
                     "enum": [
+                        "open",
                         "search",
                         "fetch",
                         "navigate",
@@ -380,6 +382,9 @@ class WebAccessTool(Tool):
 
     async def execute(self, action: str, **kwargs: Any) -> str:
         normalized_action = str(action or "").strip().lower()
+        if normalized_action == "open":
+            url = str(kwargs.get("url") or "").strip()
+            return await self._open_in_current_browser(url)
         if normalized_action == "search":
             query = str(kwargs.get("query") or "").strip()
             return await self._search_tool.execute(query=query, count=kwargs.get("count"))
@@ -406,6 +411,90 @@ class WebAccessTool(Tool):
             return f"Error: web_access {normalized_action} failed: {exc}"
         except ProxyUnavailableError as exc:
             return f"Error: web-access proxy is unavailable: {exc}"
+
+    @staticmethod
+    def _applescript_quote(value: str) -> str:
+        return value.replace("\\", "\\\\").replace('"', '\\"')
+
+    async def _run_local_command(self, *args: str) -> tuple[int, str, str]:
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        return (
+            int(process.returncode or 0),
+            stdout.decode("utf-8", errors="ignore").strip(),
+            stderr.decode("utf-8", errors="ignore").strip(),
+        )
+
+    async def _open_in_current_browser(self, url: str) -> str:
+        is_valid, error = _validate_url(url)
+        if not is_valid:
+            return f"Error: Invalid URL for web_access open: {error}"
+
+        if sys.platform == "darwin":
+            quoted_url = self._applescript_quote(url)
+            script = f'''
+set targetUrl to "{quoted_url}"
+set browserName to ""
+tell application "System Events"
+    try
+        set browserName to name of first application process whose frontmost is true
+    end try
+end tell
+if browserName is "Google Chrome" or browserName is "Arc" or browserName is "Microsoft Edge" or browserName is "Brave Browser" then
+    tell application browserName
+        activate
+        if (count of windows) is 0 then make new window
+        tell front window
+            set newTab to make new tab with properties {{URL:targetUrl}}
+            set active tab index to (index of newTab)
+        end tell
+    end tell
+    return browserName
+else if browserName is "Safari" then
+    tell application "Safari"
+        activate
+        if (count of windows) is 0 then make new document
+        tell front window
+            set newTab to make new tab with properties {{URL:targetUrl}}
+            set current tab to newTab
+        end tell
+    end tell
+    return browserName
+else
+    do shell script "open " & quoted form of targetUrl
+    if browserName is "" then
+        return "default"
+    end if
+    return browserName
+end if
+'''
+            returncode, stdout, stderr = await self._run_local_command("osascript", "-e", script)
+            if returncode == 0:
+                browser_name = stdout or "current browser"
+                return f"✅ 已在当前浏览器打开新页签: {url}\n浏览器: {browser_name}"
+
+            fallback_code, _, fallback_error = await self._run_local_command("open", url)
+            if fallback_code == 0:
+                return f"✅ 已在默认浏览器打开: {url}"
+            return f"Error: web_access open failed: {stderr or fallback_error or 'unknown error'}"
+
+        if sys.platform.startswith("linux"):
+            returncode, _, stderr = await self._run_local_command("xdg-open", url)
+            if returncode == 0:
+                return f"✅ 已在默认浏览器打开: {url}"
+            return f"Error: web_access open failed: {stderr or 'unknown error'}"
+
+        if sys.platform.startswith("win"):
+            returncode, _, stderr = await self._run_local_command("cmd", "/c", "start", "", url)
+            if returncode == 0:
+                return f"✅ 已在默认浏览器打开: {url}"
+            return f"Error: web_access open failed: {stderr or 'unknown error'}"
+
+        return f"Error: web_access open is not supported on platform '{sys.platform}'"
 
     async def _execute_proxy_action(self, proxy: WebAccessProxyClient, action: str, **kwargs: Any) -> str:
         selector = str(kwargs.get("selector") or "").strip()

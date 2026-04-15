@@ -882,9 +882,9 @@ Your workspace is at: {workspace_path}
 - After writing or editing a file, re-read it if accuracy matters.
 - If a tool call fails, analyze the error before retrying with a different approach.
 - Ask for clarification when the request is ambiguous.
-- For browser or webpage operations, prefer the native `web_access` tool first when available.
-- Use `browser` as the interactive fallback when `web_access` cannot handle the selector or local proxy/browser path.
-- Use `web_search` / `web_fetch` as explicit search/fetch tools or lightweight fallback when interactive browsing is unnecessary.
+- For browser or webpage operations, prefer `browser` for interactive page actions.
+- Use `web_search` / `web_fetch` for lookup, search, and lightweight page retrieval when interactive browsing is unnecessary.
+- If a request is time-sensitive or explicitly asks for external sources, verify with web tools before answering.
 - For reminders or scheduled tasks, prefer the `task` tool for natural-language scheduling requests; use `cron` when you need lower-level scheduling control.
 
 ## CRITICAL: Task Execution Rules

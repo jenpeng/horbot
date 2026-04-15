@@ -356,6 +356,7 @@ class MessageProcessor:
         has_attachments = bool(
             msg.metadata and (msg.metadata.get("file_ids") or msg.metadata.get("files"))
         )
+        web_requirement = self.agent.tools.classify_web_requirement(msg.content)
         use_fast_reply = self.agent.context.should_use_fast_reply(
             msg.content,
             history_size=len(history),
@@ -363,6 +364,14 @@ class MessageProcessor:
             has_attachments=has_attachments,
             web_search=bool(msg.metadata.get("web_search", False)) if msg.metadata else False,
         )
+        if use_fast_reply and web_requirement.requires_web_access:
+            logger.info(
+                "Fast reply disabled for {}:{} because request requires web tools ({})",
+                msg.channel,
+                msg.chat_id,
+                web_requirement.category,
+            )
+            use_fast_reply = False
 
         if use_fast_reply:
             history_for_prompt = history[-self.agent.context.FAST_REPLY_HISTORY_LIMIT:]

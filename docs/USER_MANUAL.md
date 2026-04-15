@@ -24,7 +24,6 @@ Useful commands:
 ./horbot.sh restart
 ./horbot.sh stop
 ./horbot.sh logs backend
-./horbot.sh logs web-access
 ```
 
 ## Main Pages

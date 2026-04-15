@@ -16,7 +16,7 @@ from horbot.agent.tools.registry import ToolRegistry
 from horbot.agent.tools.filesystem import ReadFileTool, ListDirTool
 from horbot.agent.tools.safe_editor import SafeWriteFileTool, SafeEditFileTool
 from horbot.agent.tools.shell import ExecTool
-from horbot.agent.tools.web import WebAccessTool, WebSearchTool, WebFetchTool
+from horbot.agent.tools.web import WebSearchTool, WebFetchTool
 
 
 class SubagentInfo:
@@ -162,11 +162,6 @@ class SubagentManager:
             web_fetch_tool = WebFetchTool()
             tools.register(web_search_tool)
             tools.register(web_fetch_tool)
-            tools.register(WebAccessTool(
-                search_tool=web_search_tool,
-                fetch_tool=web_fetch_tool,
-            ))
-            
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
             messages: list[dict[str, Any]] = [

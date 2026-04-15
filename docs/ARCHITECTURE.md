@@ -37,17 +37,15 @@ Horbot keeps the runtime intentionally small:
 
 - provider registry and provider adapters
 - local tools, browser tools, MCP tools, and file operations
-- native `web_access` is the preferred web/search entrypoint for agents
-- `browser`, `web_search`, and `web_fetch` remain available as interactive or lightweight fallbacks
+- `browser`, `web_search`, and `web_fetch` are the standard web/search tools exposed to agents
+- Playwright is the default interactive browser runtime
 - permission profiles and workspace restrictions
 
 ### Built-In Browser Access Runtime
 
-- `horbot.sh` now manages a built-in `web-access` proxy service as part of the normal local stack
-- the proxy listens on `127.0.0.1:3456` and is started by `./horbot.sh start|restart`
-- startup only performs a passive readiness check and no longer opens a visible browser window
-- the first real browser-backed request can auto-launch a headless Chrome instance with remote debugging on `127.0.0.1:9222`
-- the browser MCP server prefers this proxy first, then falls back to Playwright if needed
+- the browser MCP server now defaults to Playwright for interactive browsing
+- `horbot.sh` manages the normal local stack only: backend, frontend, and gateway
+- browser-backed requests no longer depend on a built-in `web-access` proxy service
 
 ### Channel Runtime
 

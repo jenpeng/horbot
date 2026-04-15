@@ -66,7 +66,6 @@ class ToolRegistryTests(unittest.TestCase):
     def test_get_definitions_smart_prefers_browser_over_web_tools_for_page_requests(self):
         registry = ToolRegistry()
         registry.register(DummyTool("message"))
-        registry.register(DummyTool("web_access"))
         registry.register(DummyTool("browser"))
         registry.register(DummyTool("browser_click"))
         registry.register(DummyTool("web_search"))
@@ -78,15 +77,13 @@ class ToolRegistryTests(unittest.TestCase):
         )
         names = {definition["function"]["name"] for definition in definitions}
 
-        self.assertIn("web_access", names)
         self.assertIn("browser", names)
+        self.assertIn("web_fetch", names)
         self.assertNotIn("web_search", names)
-        self.assertNotIn("web_fetch", names)
 
     def test_get_definitions_smart_keeps_web_search_for_explicit_search_requests(self):
         registry = ToolRegistry()
         registry.register(DummyTool("message"))
-        registry.register(DummyTool("web_access"))
         registry.register(DummyTool("browser"))
         registry.register(DummyTool("web_search"))
         registry.register(DummyTool("web_fetch"))
@@ -97,31 +94,36 @@ class ToolRegistryTests(unittest.TestCase):
         )
         names = {definition["function"]["name"] for definition in definitions}
 
-        self.assertIn("web_access", names)
         self.assertIn("web_search", names)
 
-    def test_get_definitions_smart_forces_web_access_for_fresh_knowledge_requests(self):
+    def test_get_definitions_smart_forces_web_search_for_fresh_knowledge_requests(self):
         registry = ToolRegistry()
         registry.register(DummyTool("message"))
-        registry.register(DummyTool("web_access"))
+        registry.register(DummyTool("browser"))
         registry.register(DummyTool("web_search"))
 
-        definitions = registry.get_definitions_smart("帮我整理一下当前美伊局势的最新动态")
+        definitions = registry.get_definitions_smart(
+            "帮我整理一下当前美伊局势的最新动态",
+            include_web_search=True,
+        )
         names = {definition["function"]["name"] for definition in definitions}
 
-        self.assertIn("web_access", names)
-        self.assertNotIn("web_search", names)
+        self.assertIn("web_search", names)
+        self.assertIn("browser", names)
 
-    def test_get_definitions_smart_forces_web_access_for_external_source_lookup(self):
+    def test_get_definitions_smart_forces_web_search_for_external_source_lookup(self):
         registry = ToolRegistry()
         registry.register(DummyTool("message"))
-        registry.register(DummyTool("web_access"))
+        registry.register(DummyTool("web_search"))
         registry.register(DummyTool("read_file"))
 
-        definitions = registry.get_definitions_smart("帮我看一下 OpenAI Responses API 官方文档怎么用")
+        definitions = registry.get_definitions_smart(
+            "帮我看一下 OpenAI Responses API 官方文档怎么用",
+            include_web_search=True,
+        )
         names = {definition["function"]["name"] for definition in definitions}
 
-        self.assertIn("web_access", names)
+        self.assertIn("web_search", names)
 
     def test_classify_web_requirement_keeps_stable_knowledge_local(self):
         requirement = ToolRegistry.classify_web_requirement("解释一下 CAP 定理")

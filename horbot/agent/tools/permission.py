@@ -58,7 +58,7 @@ TOOL_GROUPS: dict[str, ToolGroup] = {
     ),
     "web": ToolGroup(
         name="web",
-        tools=["web_access", "web_search", "web_fetch", "browser"],
+        tools=["web_search", "web_fetch", "browser"],
         description="Web tools for searching and fetching web content"
     ),
     "runtime": ToolGroup(

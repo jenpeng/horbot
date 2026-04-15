@@ -4,13 +4,12 @@
 
 ## 2026-04-15
 
-### 原生 web-access 与浏览器联网
+### 浏览器联网回归 Playwright 默认模式
 
-- 新增原生 `web_access` 工具，统一承接搜索、抓取、导航、点击、输入、截图、取标题/正文等网页能力
-- Agent 提示词与工具筛选规则已调整为默认优先使用 `web_access` 处理联网任务，`browser` / `web_search` / `web_fetch` 作为回退
-- `web-access` 代理不再依赖外部 clone 目录，而是以项目内置脚本形式集成到仓库中
-- `./horbot.sh start|restart|stop|status|logs` 已纳入 `web-access` 服务管理，默认监听 `127.0.0.1:3456`
-- 内置代理启动阶段只做被动健康检查，不再主动弹浏览器；首次收到真实浏览器请求时，才按需拉起支持 remote debugging 的 headless Chrome，并复用 `127.0.0.1:9222` 作为 CDP 浏览器入口
+- Agent 默认联网路径已改回 `browser` / `web_search` / `web_fetch`
+- `browser` MCP 默认直接使用 Playwright，不再优先依赖内置 `web-access` 代理
+- `horbot.sh start|restart|status|logs` 不再把 `web-access` 作为常规托管服务的一部分
+- 主 agent、subagent、提示词和工具筛选规则已同步去除默认 `web_access` 优先路径
 - Web Chat 现在会把 Agent 通过 `message(..., media=...)` 发送的图片等媒体正确落盘并即时展示，而不再在 SSE / 前端层丢失
 
 ### 聊天图片卡片与远程图片缓存
@@ -23,7 +22,7 @@
 
 ### 文档同步
 
-- README、文档索引、MCP 文档和架构文档已同步更新为当前的原生 `web_access` 与内置代理运行模式
+- README、文档索引、MCP 文档和架构文档已同步更新为当前的 Playwright 默认运行模式
 
 ## 2026-04-14
 

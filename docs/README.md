@@ -17,7 +17,7 @@ Horbot is a lightweight multi-agent assistant stack with:
 - automatic DM -> team -> DM baton navigation in Web Chat, with a temporary top banner so relay-driven view changes are explicit
 - promoted remote image links that render as normal image-card attachments, plus a manual remote-image cache clear entry in Configuration
 - MCP and external channel integration
-- native `web_access` with a built-in `web-access` proxy that starts alongside Horbot
+- Playwright-backed browser tooling with `browser`, `web_search`, and `web_fetch` as the standard web tool path
 - background skill distillation from reusable work
 - validated `.skill` / `.zip` imports with compatibility checks
 - WeCom AI Bot channel support with reply streaming and media handling
@@ -62,8 +62,7 @@ Recent chat updates also tightened assistant message spacing, improved Markdown 
 
 Current web runtime notes:
 
-- `./horbot.sh start` also starts the built-in `web-access` proxy on `127.0.0.1:3456`
-- startup no longer opens a visible browser; Chrome is only auto-launched on the first browser-backed request
-- the default auto-launched Chrome runs headless with remote debugging
-- the agent now prefers `web_access` first for web/search work, with `browser`, `web_search`, and `web_fetch` as fallbacks
+- `browser` MCP now defaults to Playwright instead of a built-in `web-access` proxy
+- `./horbot.sh start` only starts the normal Horbot services: backend, frontend, and gateway
+- the agent now uses `browser`, `web_search`, and `web_fetch` as the standard web/search tools
 - Configuration now exposes a remote-image cache status panel and manual clear action for chat image-card materialization

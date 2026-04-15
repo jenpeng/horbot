@@ -84,7 +84,7 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 
 - Multiple provider backends
 - MCP integration
-- Native `web_access` as the default web/search entrypoint, with browser/file-oriented tooling around it
+- `browser`, `web_search`, and `web_fetch` as the standard browser/search toolset, with Playwright as the default browser runtime
 - External channels such as WeCom, Feishu, ShareCRM, Telegram, Discord, Slack, Matrix, Email, Mochat, and others
 - WeCom AI Bot support with reply-mode streaming, media upload, and inbound media download/decryption
 
@@ -116,11 +116,8 @@ Common commands:
 ./horbot.sh status
 ./horbot.sh restart
 ./horbot.sh logs backend
-./horbot.sh logs web-access
 ./horbot.sh smoke browser-e2e
 ```
-
-`./horbot.sh start` now also starts the built-in `web-access` proxy on `127.0.0.1:3456`. Service startup no longer opens a visible browser window. The proxy only launches Chrome on the first real browser-backed request, and the default auto-launched instance runs headless.
 
 ## Documentation
 
