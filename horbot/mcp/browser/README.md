@@ -2,11 +2,16 @@
 
 让 AI 可以通过 MCP 工具控制浏览器，实现可视化自动化操作。
 
+当前实现默认优先接入项目内置的 `web-access` CDP 代理能力；代理不可用、选择器语法不兼容或动作未实现时，再自动回退到内置 Playwright 浏览器。
+
 本项目核心代码借鉴自 [HKUDS/nanobot](https://github.com/HKUDS/nanobot) 仓库内容，并在此基础上扩展了浏览器 MCP 能力。
 
 ## 📦 安装依赖
 
 ```bash
+# 项目会在 ./horbot.sh start|restart 时自动启动内置 web-access 服务
+# 服务默认监听 127.0.0.1:3456，并会自动尝试拉起支持 remote debugging 的 Chrome
+
 # 安装 Playwright
 pip install playwright
 
@@ -15,6 +20,8 @@ playwright install chromium
 ```
 
 ## ⚙️ 配置
+
+默认情况下，无需再单独 clone 或手工启动外部 `web-access` 仓库。
 
 编辑 `config.json`，添加 MCP Server 配置：
 
@@ -25,6 +32,11 @@ playwright install chromium
       "browser": {
         "command": "python",
         "args": ["-m", "horbot.mcp.browser.server"],
+        "env": {
+          "WEB_ACCESS_PREFER_PROXY": "1",
+          "WEB_ACCESS_PROXY_URL": "http://127.0.0.1:3456",
+          "WEB_ACCESS_PROXY_TIMEOUT": "30"
+        },
         "tool_timeout": 120
       }
     }
@@ -134,11 +146,13 @@ input:visible  /* 可见元素 */
 
 ## ⚠️ 注意事项
 
-1. **浏览器窗口可见** - 你可以看到 AI 的每一步操作
-2. **模拟人类行为** - 鼠标移动、打字都有延迟，更像真人
-3. **反检测** - 隐藏了自动化特征
-4. **超时控制** - 工具默认 120 秒超时
-5. **安全性** - 浏览器关闭后需要重新启动
+1. **默认代理优先** - 配置了 `WEB_ACCESS_PREFER_PROXY=1` 时，会优先走 web-access 代理。
+2. **内置服务托管** - `./horbot.sh start|restart|status|logs` 已纳入 `web-access` 管理。
+3. **自动拉起 Chrome** - 代理会尝试自动启动带 `--remote-debugging-port=9222` 的 Chrome；可通过 `WEB_ACCESS_AUTO_LAUNCH_CHROME=0` 关闭。
+4. **自动回退** - 代理不可达、接口未实现或使用了 Playwright 专属选择器时，会自动回退到 Playwright。
+5. **浏览器窗口可见** - Playwright 回退模式下，你可以看到 AI 的每一步操作。
+6. **超时控制** - MCP 工具超时默认 120 秒，代理 HTTP 超时默认 30 秒。
+7. **安全性** - 浏览器关闭后需要重新启动，代理目标页关闭后会自动清理当前 target。
 
 ## 🔧 高级配置
 
@@ -160,7 +174,11 @@ input:visible  /* 可见元素 */
 
 ### 无头模式（后台运行）
 
-修改 `browser_server.py` 中的 `headless=False` 为 `headless=True`
+设置环境变量 `BROWSER_HEADLESS=1`
+
+### 关闭代理优先模式
+
+设置环境变量 `WEB_ACCESS_PREFER_PROXY=0`
 
 ## 🐛 故障排查
 
@@ -184,6 +202,14 @@ playwright install chromium
 
 - 增加 `tool_timeout` 配置值
 - 使用 `browser_wait_for` 等待元素加载
+
+### 问题：web-access 没有生效
+
+- 检查 `./horbot.sh status` 是否显示 `web-access`
+- 检查 `WEB_ACCESS_PROXY_URL` 指向的代理是否可访问，且 `/health` 返回成功
+- 检查 `web-access.log` 中是否已自动拉起 Chrome remote debugging
+- 检查代理是否支持 `/new`、`/click`、`/eval`、`/screenshot`、`/close` 等基础接口
+- 如果只是临时不可用，系统会自动回退到 Playwright
 
 ## 📚 相关文档
 

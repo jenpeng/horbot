@@ -660,11 +660,13 @@ async def _dispatch_internal_web_outbound(source_loop: AgentLoop, msg: OutboundM
     )
 
     session = session_manager.get_or_create(session_key)
+    outbound_files = _import_local_media_files(msg.media)
     message_id = session.add_message(
         "assistant",
         clean_message_content(msg.content),
         dedup=True,
         message_id=str(uuid.uuid4())[:8],
+        files=outbound_files or None,
         metadata=_build_dispatched_message_metadata(
             source_loop,
             msg,
@@ -687,6 +689,7 @@ async def _dispatch_internal_web_outbound(source_loop: AgentLoop, msg: OutboundM
             agent_name=source_agent_name,
             content=clean_message_content(msg.content),
             message_id=message_id,
+            files=outbound_files or None,
         ),
     )
 
@@ -3476,6 +3479,59 @@ class UploadResponse(BaseModel):
     extracted_text: Optional[str] = None  # Extracted text content from documents
 
 
+def _build_upload_response_for_path(
+    stored_path: Path,
+    *,
+    file_id: str,
+    original_name: str,
+) -> UploadResponse:
+    mime_type = mimetypes.guess_type(stored_path.name)[0] or "application/octet-stream"
+    category = _get_file_category(mime_type)
+    extracted_text = _extract_document_content(stored_path, mime_type) if category == "document" else None
+    return UploadResponse(
+        file_id=file_id,
+        filename=stored_path.name,
+        original_name=original_name,
+        mime_type=mime_type,
+        size=stored_path.stat().st_size,
+        category=category,
+        url=f"/api/files/{file_id}",
+        preview_url=f"/api/files/{file_id}/preview" if category == "image" else None,
+        minimax_file_id=None,
+        extracted_text=extracted_text,
+    )
+
+
+def _import_local_media_files(media: list[str] | None) -> list[dict[str, Any]]:
+    if not media:
+        return []
+
+    upload_dir = _get_upload_dir()
+    results: list[dict[str, Any]] = []
+
+    for item in media:
+        raw_path = str(item or "").strip()
+        if not raw_path:
+            continue
+        source_path = Path(raw_path).expanduser()
+        if not source_path.exists() or not source_path.is_file():
+            logger.warning("[ChatAPI] message media path not found, skipping: {}", source_path)
+            continue
+
+        file_id = str(uuid.uuid4())
+        stored_path = upload_dir / f"{file_id}{source_path.suffix}"
+        shutil.copy2(source_path, stored_path)
+        response = _build_upload_response_for_path(
+            stored_path,
+            file_id=file_id,
+            original_name=source_path.name,
+        )
+        results.append(response.model_dump())
+        logger.info("[ChatAPI] Imported outbound media {} -> {}", source_path, stored_path.name)
+
+    return results
+
+
 def _extract_text_from_pdf(file_path: Path) -> Optional[str]:
     """Extract text content from PDF file."""
     try:
@@ -4407,6 +4463,7 @@ async def _stream_generator(
     final_response = {"content": None}
     execution_steps: list[dict] = []
     content_state = {"content": ""}
+    message_tool_dispatch_state: dict[str, Any] = {}
     idle_status_index = 0
     idle_status_messages = [
         f"{agent_name} 正在分析较长上下文...",
@@ -4416,6 +4473,10 @@ async def _stream_generator(
 
     def store_message_tool_content(content: str) -> None:
         content_state["content"] = content
+
+    def store_message_tool_dispatch(arguments: dict[str, Any]) -> None:
+        message_tool_dispatch_state.clear()
+        message_tool_dispatch_state.update(arguments)
 
     callbacks = _create_chat_stream_callbacks(
         queue=queue,
@@ -4428,6 +4489,7 @@ async def _stream_generator(
         execution_steps=execution_steps,
         content_state=content_state,
         on_message_tool_content=store_message_tool_content,
+        on_message_tool_dispatch=store_message_tool_dispatch,
         on_step_start_hook=lambda step: logger.info(
             f"[ChatAPI] Added step: id={step['id']}, type={step['type']}, title={step['title']}, total steps: {len(execution_steps)}"
         ),
@@ -4578,6 +4640,7 @@ async def _stream_generator(
                         final_response["content"],
                         content_state["content"],
                     )
+                    outbound_files = _import_local_media_files(message_tool_dispatch_state.get("media"))
                     provider_error = final_response.get("metadata", {}).get("_provider_error")
                     if cleaned_content:
                         yield _sse_event(
@@ -4589,6 +4652,7 @@ async def _stream_generator(
                                 agent_name=agent_name,
                                 turn_id=turn_id,
                                 message_id=assistant_message_id,
+                                files=outbound_files or None,
                             )
                         )
                         yield _sse_event(
@@ -4600,6 +4664,7 @@ async def _stream_generator(
                                 agent_name=agent_name,
                                 turn_id=turn_id,
                                 message_id=assistant_message_id,
+                                files=outbound_files or None,
                             )
                         )
                     content_to_save = cleaned_content
@@ -4609,6 +4674,8 @@ async def _stream_generator(
                             session.messages[existing_msg_idx]["content"] = content_to_save
                         if exec_steps_to_save:
                             session.messages[existing_msg_idx]["execution_steps"] = exec_steps_to_save
+                        if outbound_files:
+                            session.messages[existing_msg_idx]["files"] = outbound_files
                         msg_meta = session.messages[existing_msg_idx].setdefault("metadata", {})
                         msg_meta["turn_id"] = turn_id
                         msg_meta["request_id"] = request_id
@@ -4625,6 +4692,7 @@ async def _stream_generator(
                             execution_steps=exec_steps_to_save,
                             dedup=True,
                             message_id=assistant_message_id,
+                            files=outbound_files or None,
                             metadata={
                                 "turn_id": turn_id,
                                 "request_id": request_id,

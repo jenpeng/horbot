@@ -29,7 +29,7 @@ from horbot.agent.tools.registry import ToolRegistry, ConfirmationRequiredError,
 from horbot.agent.tools.permission import PermissionLevel
 from horbot.agent.tools.shell import ExecTool
 from horbot.agent.tools.spawn import SpawnTool
-from horbot.agent.tools.web import WebFetchTool, WebSearchTool
+from horbot.agent.tools.web import WebAccessTool, WebFetchTool, WebSearchTool
 from horbot.agent.tools.token_usage import TokenUsageTool
 from horbot.agent.planner import TaskAnalyzer, PlanGenerator, PlanValidator
 from horbot.agent.planner.models import Plan, PlanStatus
@@ -359,12 +359,18 @@ class AgentLoop:
         
         # Get web search config from config file
         web_search_config = self._get_web_search_config()
-        self.tools.register(WebSearchTool(
+        web_search_tool = WebSearchTool(
             provider=web_search_config.get("provider", "duckduckgo"),
             api_key=web_search_config.get("apiKey", ""),
             max_results=web_search_config.get("maxResults", 5),
+        )
+        web_fetch_tool = WebFetchTool()
+        self.tools.register(web_search_tool)
+        self.tools.register(web_fetch_tool)
+        self.tools.register(WebAccessTool(
+            search_tool=web_search_tool,
+            fetch_tool=web_fetch_tool,
         ))
-        self.tools.register(WebFetchTool())
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         self.tools.register(ConfigureMCPTool())

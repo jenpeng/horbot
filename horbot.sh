@@ -717,6 +717,13 @@ is_expected_service_pid() {
                 [ -n "$recorded_pid" ] && [ "$recorded_pid" = "$pid" ]
             fi
             ;;
+        web-access)
+            if [ -n "$command" ]; then
+                [[ "$command" == *"scripts/web_access_proxy.mjs"* ]]
+            else
+                pid_listens_on_port "$pid" "$(get_web_access_proxy_port)"
+            fi
+            ;;
         *)
             return 1
             ;;
@@ -756,6 +763,9 @@ list_service_pids() {
                 ;;
             gateway)
                 [[ "$command_line" == *"horbot gateway"* ]] || continue
+                ;;
+            web-access)
+                [[ "$command_line" == *"scripts/web_access_proxy.mjs"* ]] || continue
                 ;;
             *)
                 return 1
@@ -930,6 +940,7 @@ persist_backend_runtime_fingerprint() {
 }
 
 ensure_browser_services_ready() {
+    start_web_access_proxy
     start_backend
     start_frontend
 }
@@ -1162,8 +1173,100 @@ except Exception:
 PY
 }
 
+get_web_access_proxy_port() {
+    if [ -n "${WEB_ACCESS_PROXY_PORT:-}" ]; then
+        echo "$WEB_ACCESS_PROXY_PORT"
+        return 0
+    fi
+
+    if [ -n "${CDP_PROXY_PORT:-}" ]; then
+        echo "$CDP_PROXY_PORT"
+        return 0
+    fi
+
+    local config_file="$DATA_ROOT/config.json"
+    local default_port="3456"
+
+    if [ ! -f "$config_file" ]; then
+        echo "$default_port"
+        return 0
+    fi
+
+    python3 - "$config_file" "$default_port" <<'PY'
+import json
+import sys
+from urllib.parse import urlparse
+
+config_file = sys.argv[1]
+default_port = sys.argv[2]
+
+try:
+    with open(config_file, encoding="utf-8") as f:
+        data = json.load(f)
+    url = (
+        (((data.get("tools") or {}).get("mcpServers") or {}).get("browser") or {})
+        .get("env", {})
+        .get("WEB_ACCESS_PROXY_URL")
+    )
+    if not url:
+        print(default_port)
+        raise SystemExit(0)
+    parsed = urlparse(str(url))
+    print(int(parsed.port or default_port))
+except Exception:
+    print(default_port)
+PY
+}
+
+start_web_access_proxy() {
+    ensure_dirs
+
+    local pid_file="$PID_DIR/web-access.pid"
+    local port
+    port="$(get_web_access_proxy_port)"
+    local current_pid
+    current_pid="$(resolve_service_pid web-access "$pid_file" "$port" || true)"
+
+    if is_running "$current_pid"; then
+        print_warning "web-access 服务已在运行 (PID: $current_pid)"
+        return 0
+    fi
+
+    local port_pid
+    port_pid="$(get_port_pid "$port")"
+    if [ -n "$port_pid" ] && ! is_expected_service_pid "$port_pid" web-access; then
+        print_warning "端口 $port 被进程 $port_pid 占用"
+        cleanup_port "$port" || return 1
+    fi
+
+    if ! command -v node >/dev/null 2>&1; then
+        print_error "未找到 node，无法启动 web-access 服务"
+        return 1
+    fi
+
+    print_info "启动 web-access 服务..."
+
+    local new_pid
+    new_pid="$(spawn_detached "$PROJECT_ROOT" "$LOG_DIR/web-access.log" \
+        env WEB_ACCESS_PROXY_PORT="$port" node "$PROJECT_ROOT/scripts/web_access_proxy.mjs")"
+    echo "$new_pid" > "$pid_file"
+
+    if wait_for_port "$port" web-access "$pid_file" 15; then
+        local actual_pid
+        actual_pid="$(read_pid "$pid_file")"
+        print_success "web-access 服务已启动 (PID: $actual_pid)"
+        print_info "web-access 入口: http://127.0.0.1:$port"
+    else
+        print_error "web-access 服务启动失败"
+        rm -f "$pid_file"
+        cat "$LOG_DIR/web-access.log"
+        return 1
+    fi
+}
+
 # 启动所有服务
 start_all() {
+    start_web_access_proxy
     start_backend
     start_frontend
     start_gateway
@@ -1176,6 +1279,7 @@ start_all() {
     print_info "Web UI: http://localhost:3000"
     print_info "后端API: http://localhost:8000"
     print_info "Gateway: http://localhost:$gateway_port"
+    print_info "web-access: http://127.0.0.1:$(get_web_access_proxy_port)"
     if [ -n "$local_ip" ]; then
         echo ""
         echo -e "${CYAN}局域网访问(需管理员令牌):${NC}"
@@ -1198,6 +1302,7 @@ stop_service() {
         backend)  port=8000 ;;
         frontend) port=3000 ;;
         gateway)  port=18790 ;;
+        web-access) port="$(get_web_access_proxy_port)" ;;
     esac
     
     local pid=""
@@ -1251,6 +1356,7 @@ stop_service() {
 
 # 停止所有服务
 stop_all() {
+    stop_service web-access
     stop_service backend
     stop_service frontend
     stop_service gateway
@@ -1273,9 +1379,13 @@ status() {
     local gateway_port
     gateway_port="$(get_gateway_port)"
     gateway_pid="$(resolve_service_pid gateway "$PID_DIR/gateway.pid" "$gateway_port" || true)"
+    local web_access_pid
+    local web_access_port
+    web_access_port="$(get_web_access_proxy_port)"
+    web_access_pid="$(resolve_service_pid web-access "$PID_DIR/web-access.pid" "$web_access_port" || true)"
     
     local any_running=false
-    if [ -n "$backend_pid" ] || [ -n "$frontend_pid" ] || [ -n "$gateway_pid" ]; then
+    if [ -n "$backend_pid" ] || [ -n "$frontend_pid" ] || [ -n "$gateway_pid" ] || [ -n "$web_access_pid" ]; then
         any_running=true
     fi
     
@@ -1329,12 +1439,25 @@ status() {
     else
         echo -e "  ${RED}Gateway${NC}  已停止"
     fi
+
+    if [ -n "$web_access_pid" ]; then
+        local web_access_mem=$(ps -o rss= -p "$web_access_pid" 2>/dev/null | awk '{printf "%.1f MB", $1/1024}')
+        local web_access_cpu=$(ps -o %cpu= -p "$web_access_pid" 2>/dev/null | awk '{printf "%.1f%%", $1}')
+        if [ -n "$web_access_mem" ] && [ -n "$web_access_cpu" ]; then
+            echo -e "  ${GREEN}web-access${NC} PID: $web_access_pid  CPU: $web_access_cpu  Memory: $web_access_mem  Port: $web_access_port"
+        else
+            echo -e "  ${GREEN}web-access${NC} PID: $web_access_pid  Port: $web_access_port"
+        fi
+    else
+        echo -e "  ${RED}web-access${NC} 已停止"
+    fi
     
     echo ""
     echo -e "${CYAN}访问地址:${NC}"
     echo -e "  Web UI:   http://localhost:3000"
     echo -e "  Backend:  http://localhost:8000"
     echo -e "  Gateway:  http://localhost:$gateway_port"
+    echo -e "  web-access: http://127.0.0.1:$web_access_port"
     local local_ip=$(get_local_ip)
     if [ -n "$local_ip" ]; then
         echo ""
@@ -1351,6 +1474,7 @@ status() {
     echo -e "  Frontend: $LOG_DIR/frontend.log"
     echo -e "  Backend:  $LOG_DIR/backend.log"
     echo -e "  Gateway:  $LOG_DIR/gateway.log"
+    echo -e "  web-access: $LOG_DIR/web-access.log"
     echo ""
     echo -e "${CYAN}常用命令:${NC}"
     echo -e "  ${RED}./horbot.sh stop${NC}      停止服务"
@@ -1390,6 +1514,10 @@ restart() {
         gateway)
             stop_service gateway
             start_gateway
+            ;;
+        web-access)
+            stop_service web-access
+            start_web_access_proxy
             ;;
         all)
             stop_all
@@ -1997,14 +2125,16 @@ show_help() {
     echo "  start backend      启动后端服务"
     echo "  start frontend     启动前端服务"
     echo "  start gateway      启动 Gateway 服务"
+    echo "  start web-access   启动 web-access 服务"
     echo ""
     echo "  stop               停止所有服务"
     echo "  stop backend       停止后端服务"
     echo "  stop frontend      停止前端服务"
     echo "  stop gateway       停止 Gateway 服务"
+    echo "  stop web-access    停止 web-access 服务"
     echo ""
     echo "  restart            重启所有服务"
-    echo "  restart <service>  重启指定服务 (backend/frontend/gateway)"
+    echo "  restart <service>  重启指定服务 (backend/frontend/gateway/web-access)"
     echo ""
     echo "  archive legacy-main-workspace  归档旧主 Agent 工作区和错误嵌套残留"
     echo ""
@@ -2035,7 +2165,7 @@ show_help() {
     echo "  smoke chat-ui --headed  可视化运行聊天页面烟雾测试"
     echo ""
     echo "  status             查看服务状态"
-    echo "  logs <service>     查看服务日志 (backend/frontend/gateway)"
+    echo "  logs <service>     查看服务日志 (backend/frontend/gateway/web-access)"
     echo ""
     echo "  dev                开发模式（启动后端和前端，带热重载）"
     echo "  help               显示此帮助信息"
@@ -2123,6 +2253,7 @@ main() {
                 backend) start_backend ;;
                 frontend) start_frontend ;;
                 gateway) start_gateway ;;
+                web-access) start_web_access_proxy ;;
                 *) print_error "未知参数: $2"; show_help; exit 1 ;;
             esac
             ;;
@@ -2132,6 +2263,7 @@ main() {
                 backend) stop_service backend ;;
                 frontend) stop_service frontend ;;
                 gateway) stop_service gateway ;;
+                web-access) stop_service web-access ;;
                 *) print_error "未知参数: $2"; show_help; exit 1 ;;
             esac
             ;;
@@ -2145,7 +2277,7 @@ main() {
             ;;
         logs)
             if [ -z "$2" ]; then
-                print_error "请指定服务名称: backend, frontend, gateway"
+                print_error "请指定服务名称: backend, frontend, gateway, web-access"
                 exit 1
             fi
             logs "$2"

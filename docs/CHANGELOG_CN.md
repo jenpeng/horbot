@@ -2,6 +2,21 @@
 
 本记录用于概览 Horbot 的关键功能和文档演进。更细粒度的代码改动请直接查看 Git 历史。
 
+## 2026-04-15
+
+### 原生 web-access 与浏览器联网
+
+- 新增原生 `web_access` 工具，统一承接搜索、抓取、导航、点击、输入、截图、取标题/正文等网页能力
+- Agent 提示词与工具筛选规则已调整为默认优先使用 `web_access` 处理联网任务，`browser` / `web_search` / `web_fetch` 作为回退
+- `web-access` 代理不再依赖外部 clone 目录，而是以项目内置脚本形式集成到仓库中
+- `./horbot.sh start|restart|stop|status|logs` 已纳入 `web-access` 服务管理，默认监听 `127.0.0.1:3456`
+- 内置代理会自动尝试拉起支持 remote debugging 的 Chrome，并复用 `127.0.0.1:9222` 作为 CDP 浏览器入口
+- Web Chat 现在会把 Agent 通过 `message(..., media=...)` 发送的图片等媒体正确落盘并即时展示，而不再在 SSE / 前端层丢失
+
+### 文档同步
+
+- README、文档索引、MCP 文档和架构文档已同步更新为当前的原生 `web_access` 与内置代理运行模式
+
 ## 2026-04-14
 
 ### 多 Agent 管理与外部 Agent

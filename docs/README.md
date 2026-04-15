@@ -16,6 +16,7 @@ Horbot is a lightweight multi-agent assistant stack with:
 - compact chat layout plus baton-aware relay status in team conversations
 - automatic DM -> team -> DM baton navigation in Web Chat, with a temporary top banner so relay-driven view changes are explicit
 - MCP and external channel integration
+- native `web_access` with a built-in `web-access` proxy that starts alongside Horbot
 - background skill distillation from reusable work
 - validated `.skill` / `.zip` imports with compatibility checks
 - WeCom AI Bot channel support with reply streaming and media handling
@@ -57,3 +58,9 @@ Legacy `.horbot/context` and `.horbot/memory` directories are no longer used by 
 Creating an agent in the current UI requires choosing both `provider` and `model` up front.
 
 Recent chat updates also tightened assistant message spacing, improved Markdown density, and surfaced clearer relay baton state for multi-agent team discussions.
+
+Current web runtime notes:
+
+- `./horbot.sh start` also starts the built-in `web-access` proxy on `127.0.0.1:3456`
+- the proxy can auto-launch Chrome with remote debugging for browser-backed actions
+- the agent now prefers `web_access` first for web/search work, with `browser`, `web_search`, and `web_fetch` as fallbacks

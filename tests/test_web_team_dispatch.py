@@ -250,6 +250,46 @@ class WebTeamDispatchTests(unittest.IsolatedAsyncioTestCase):
         broadcast.assert_awaited_once()
         followups.assert_awaited_once()
 
+    async def test_dispatch_internal_web_outbound_persists_media_as_files(self):
+        fake_manager = FakeSessionManager()
+        fake_loop = SimpleNamespace(_agent_id="main", _agent_name="小项 🐎")
+        msg = OutboundMessage(
+            channel="web",
+            chat_id="team_team-001",
+            content="图已发出",
+            media=["/tmp/demo.png"],
+            metadata={"team_id": "team-001"},
+        )
+        imported_files = [
+            {
+                "file_id": "file-1",
+                "filename": "file-1.png",
+                "original_name": "demo.png",
+                "mime_type": "image/png",
+                "size": 123,
+                "category": "image",
+                "url": "/api/files/file-1",
+                "preview_url": "/api/files/file-1/preview",
+            }
+        ]
+
+        with patch("horbot.web.api._get_team_session_manager", new=AsyncMock(return_value=fake_manager)), patch(
+            "horbot.web.api._import_local_media_files",
+            return_value=imported_files,
+        ), patch(
+            "horbot.web.api._dispatch_team_group_followups",
+            new=AsyncMock(),
+        ), patch(
+            "horbot.web.websocket.broadcast_to_session",
+            new=AsyncMock(),
+        ) as broadcast:
+            await _dispatch_internal_web_outbound(fake_loop, msg)
+
+        saved = fake_manager.session.messages[0]
+        self.assertEqual(saved["files"], imported_files)
+        broadcast_payload = broadcast.await_args.args[1]
+        self.assertEqual(broadcast_payload["files"], imported_files)
+
     async def test_dispatch_internal_web_outbound_prefers_existing_team_session_manager(self):
         fake_manager = FakeSessionManager("/tmp/team-001-sessions")
         fake_loop = SimpleNamespace(

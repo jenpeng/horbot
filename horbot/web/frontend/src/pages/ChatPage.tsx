@@ -2208,6 +2208,7 @@ const ChatPage: React.FC = () => {
         const messageId = messageIdFromEvent || Math.random().toString(36).substring(2, 15);
         const normalizedError = normalizeAssistantErrorContent(t, eventData.content as string);
         const providerError = normalizeProviderErrorPayload(eventData.provider_error);
+        const eventFiles = normalizeMessageFiles(eventData.files);
         registry.set(streamKey, {
           messageId,
           content: normalizedError.content || '',
@@ -2227,6 +2228,7 @@ const ChatPage: React.FC = () => {
             agentName,
             isStreaming: false,
             isThinking: false,
+            files: eventFiles,
             executionSteps: incomingExecutionSteps,
             metadata: {
               ...(providerError ? { _provider_error: providerError } : {}),
@@ -2411,6 +2413,7 @@ const ChatPage: React.FC = () => {
         (eventData.content as string) || matchedStreamEntry.content,
       );
       const providerError = normalizeProviderErrorPayload(eventData.provider_error);
+      const eventFiles = normalizeMessageFiles(eventData.files);
       matchedStreamEntry.phase = 'done';
       if (normalizedError.content) {
         matchedStreamEntry.content = normalizedError.content;
@@ -2424,6 +2427,7 @@ const ChatPage: React.FC = () => {
         isStreaming: false,
         isThinking: false,
         statusMessage: undefined,
+        files: eventFiles ?? currentMessage?.files,
         executionSteps: matchedStreamEntry.executionSteps,
         metadata: {
           ...(currentMessage?.metadata || {}),

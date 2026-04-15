@@ -2,6 +2,21 @@
 
 This file summarizes notable Horbot product and documentation changes. For fine-grained code history, use Git directly.
 
+## 2026-04-15
+
+### Native Web Access Runtime
+
+- Added a native `web_access` tool as the unified entrypoint for web search, fetch, navigation, page interaction, screenshots, and page inspection
+- Updated agent guidance and tool-selection heuristics so web work prefers `web_access` first, with `browser`, `web_search`, and `web_fetch` as fallbacks
+- Replaced the temporary external `web-access` clone approach with an in-repo built-in proxy service
+- Extended `./horbot.sh start|restart|stop|status|logs` to manage the built-in `web-access` service on `127.0.0.1:3456`
+- The built-in proxy now tries to auto-launch a Chrome instance with remote debugging on `127.0.0.1:9222`
+- Fixed Web Chat media handling so images emitted by agents through `message(..., media=...)` are persisted and rendered in chat instead of being dropped in the session/SSE/frontend path
+
+### Docs
+
+- Synced the homepage, docs index, MCP docs, and architecture docs with the current native `web_access` runtime model
+
 ## 2026-04-13
 
 ### Localization And Docs

@@ -24,6 +24,8 @@ horbot 采用模块化设计，核心组件包括：
 - 工具审计支持按风险级别、时间窗口、`session_key` 聚合，并在管理页顶部展示摘要
 - 聊天错误卡片、顶部状态条和 turn badge 都会尽量保留 `request_id` 作为统一诊断线索
 - `AgentLoop` 对 `web:` 会话引入更激进的上下文压缩预算，并在 `finish_reason=length` 时自动发起续答，最终把多段内容合并成一条 assistant 消息落盘
+- Agent 默认优先使用原生 `web_access` 处理联网搜索、网页抓取与基础网页交互，`browser` / `web_search` / `web_fetch` 作为回退
+- `web-access` 代理已内置到项目运行栈，由 `horbot.sh` 统一托管启动/停止/日志，并会自动尝试拉起带 `--remote-debugging-port=9222` 的 Chrome
 
 ### 架构概览图
 
@@ -753,6 +755,7 @@ class Tool(ABC):
 | `edit_file`  | safe\_editor.py | 安全编辑文件      |
 | `list_dir`   | filesystem.py   | 列出目录内容      |
 | `exec`       | shell.py        | 执行 Shell 命令 |
+| `web_access` | web.py          | 原生统一联网入口，优先处理搜索、抓取和网页交互 |
 | `web_search` | web.py          | 网络搜索        |
 | `web_fetch`  | web.py          | 获取网页内容      |
 | `message`    | message.py      | 发送消息到渠道     |

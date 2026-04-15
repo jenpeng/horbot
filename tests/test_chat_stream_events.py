@@ -61,10 +61,14 @@ class ChatStreamCallbackTests(unittest.IsolatedAsyncioTestCase):
         execution_steps: list[dict] = []
         content_state = {"content": ""}
         message_tool_contents: list[str] = []
+        message_tool_dispatches: list[dict] = []
 
         def on_message_tool_content(content: str) -> None:
             message_tool_contents.append(content)
             content_state["content"] = content
+
+        def on_message_tool_dispatch(arguments: dict) -> None:
+            message_tool_dispatches.append(arguments)
 
         callbacks = _create_chat_stream_callbacks(
             queue=queue,
@@ -77,6 +81,7 @@ class ChatStreamCallbackTests(unittest.IsolatedAsyncioTestCase):
             execution_steps=execution_steps,
             content_state=content_state,
             on_message_tool_content=on_message_tool_content,
+            on_message_tool_dispatch=on_message_tool_dispatch,
         )
 
         await callbacks["on_progress"]("hello")
@@ -104,11 +109,12 @@ class ChatStreamCallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(execution_steps[0]["details"], {"thinking": "ok"})
         self.assertEqual(step_complete_event["details"], {"thinking": "ok"})
 
-        await callbacks["on_tool_start"]("message", {"content": "tool text"})
+        await callbacks["on_tool_start"]("message", {"content": "tool text", "media": ["/tmp/demo.png"]})
         tool_start_event = await queue.get()
         self.assertEqual(tool_start_event["event"], "tool_start")
         self.assertEqual(message_tool_contents, ["tool text"])
         self.assertEqual(content_state["content"], "tool text")
+        self.assertEqual(message_tool_dispatches, [{"content": "tool text", "media": ["/tmp/demo.png"]}])
 
     async def test_callbacks_emit_synthetic_progress_when_enabled_without_real_delta(self):
         queue: asyncio.Queue = asyncio.Queue()

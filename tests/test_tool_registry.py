@@ -63,6 +63,43 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertTrue(names)
         self.assertIn("browser", names)
 
+    def test_get_definitions_smart_prefers_browser_over_web_tools_for_page_requests(self):
+        registry = ToolRegistry()
+        registry.register(DummyTool("message"))
+        registry.register(DummyTool("web_access"))
+        registry.register(DummyTool("browser"))
+        registry.register(DummyTool("browser_click"))
+        registry.register(DummyTool("web_search"))
+        registry.register(DummyTool("web_fetch"))
+
+        definitions = registry.get_definitions_smart(
+            "请打开这个网页 https://example.com 并查看标题",
+            include_web_search=True,
+        )
+        names = {definition["function"]["name"] for definition in definitions}
+
+        self.assertIn("web_access", names)
+        self.assertIn("browser", names)
+        self.assertNotIn("web_search", names)
+        self.assertNotIn("web_fetch", names)
+
+    def test_get_definitions_smart_keeps_web_search_for_explicit_search_requests(self):
+        registry = ToolRegistry()
+        registry.register(DummyTool("message"))
+        registry.register(DummyTool("web_access"))
+        registry.register(DummyTool("browser"))
+        registry.register(DummyTool("web_search"))
+        registry.register(DummyTool("web_fetch"))
+
+        definitions = registry.get_definitions_smart(
+            "请搜索一下最新的 AI 安全论文",
+            include_web_search=True,
+        )
+        names = {definition["function"]["name"] for definition in definitions}
+
+        self.assertIn("web_access", names)
+        self.assertIn("web_search", names)
+
 
 class GuardedToolRegistryTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_with_result_blocks_suspicious_tool_output(self):
