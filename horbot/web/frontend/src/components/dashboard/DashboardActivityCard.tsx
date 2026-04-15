@@ -12,6 +12,21 @@ const localizeDashboardActivity = (
   activity: DashboardActivitySummary,
   t: (key: string, values?: Record<string, number | string>) => string,
 ) => {
+  const localizeAlertTitle = (alertId: string, fallback: string) => {
+    switch (alertId) {
+      case 'channel-misconfigured':
+        return t('dashboard.alert.channelMisconfiguredTitle');
+      case 'agent-not-ready':
+        return t('dashboard.alert.agentNotReadyTitle');
+      case 'memory-high':
+        return t('dashboard.alert.memoryHighTitle');
+      case 'disk-high':
+        return t('dashboard.alert.diskHighTitle');
+      default:
+        return fallback;
+    }
+  };
+
   const localizeTime = (time: string) => {
     switch (time) {
       case '刚刚':
@@ -54,8 +69,9 @@ const localizeDashboardActivity = (
     }
     default:
       if (activity.id.startsWith('alert-')) {
+        const alertId = activity.id.slice('alert-'.length);
         return {
-          message: activity.message,
+          message: localizeAlertTitle(alertId, activity.message),
           time: localizeTime(activity.time),
         };
       }
