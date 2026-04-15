@@ -267,6 +267,12 @@ Skills 页面现在支持直接导入 `.skill` 与 `.zip` 技能包，并在导�
 
 导入成功后，页面会直接显示 `compatible`、`Needs Setup`、`Incompatible` 等兼容性状态，避免把不兼容 skill 静默导入后才发现无法运行。
 
+## 📄 许可证
+
+Horbot 当前使用 [MIT License](../LICENSE)。
+
+该许可证允许商业使用、修改、分发、私有部署和再销售，但前提是保留原始版权声明和许可证文本。
+
 ## 🏢 WeCom 与 Mochat 的区别
 
 - `WeCom`：对接企业微信官方 AI Bot WebSocket 网关，支持 reply-mode 流式回复、媒体上传、入站媒体下载与解密。

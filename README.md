@@ -174,6 +174,12 @@ The current runtime model is agent-scoped:
 
 Legacy `.horbot/context` and `.horbot/memory` directories are no longer part of the active memory model and can be removed from existing local environments.
 
+## License
+
+Horbot is released under the [MIT License](./LICENSE).
+
+This license allows commercial use, modification, distribution, private deployment, and resale, provided that the original copyright notice and license text are retained.
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=jenpeng/horbot&type=Date)](https://star-history.com/#jenpeng/horbot&Date)
