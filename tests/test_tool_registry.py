@@ -131,6 +131,32 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertFalse(requirement.requires_web_access)
         self.assertEqual(requirement.category, "none")
 
+    def test_get_definitions_smart_selects_officecli_tools_for_docx_requests(self):
+        registry = ToolRegistry(PermissionManager(profile="full", allow=["mcp_officecli_get", "mcp_officecli_set", "read_file", "message"]))
+        registry.register(DummyTool("message"))
+        registry.register(DummyTool("mcp_officecli_get"))
+        registry.register(DummyTool("mcp_officecli_set"))
+        registry.register(DummyTool("read_file"))
+
+        definitions = registry.get_definitions_smart("请帮我修改这个 docx 文档里的标题")
+        names = {definition["function"]["name"] for definition in definitions}
+
+        self.assertIn("mcp_officecli_get", names)
+        self.assertIn("mcp_officecli_set", names)
+
+    def test_get_definitions_smart_selects_officecli_tools_for_xlsx_requests(self):
+        registry = ToolRegistry(PermissionManager(profile="full", allow=["mcp_officecli_query", "mcp_officecli_set", "mcp_excel_read_data", "message"]))
+        registry.register(DummyTool("message"))
+        registry.register(DummyTool("mcp_officecli_query"))
+        registry.register(DummyTool("mcp_officecli_set"))
+        registry.register(DummyTool("mcp_excel_read_data"))
+
+        definitions = registry.get_definitions_smart("把这个 xlsx 表格里的汇总区域改成红色")
+        names = {definition["function"]["name"] for definition in definitions}
+
+        self.assertIn("mcp_officecli_query", names)
+        self.assertIn("mcp_officecli_set", names)
+
 
 class GuardedToolRegistryTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_with_result_blocks_suspicious_tool_output(self):

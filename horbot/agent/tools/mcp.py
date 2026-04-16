@@ -18,6 +18,8 @@ from horbot.agent.tools.registry import ToolRegistry
 MCP_SERVER_CATEGORIES: dict[str, ToolCategory] = {
     "browser": ToolCategory.WEB,
     "excel": ToolCategory.FILESYSTEM,
+    "officecli": ToolCategory.FILESYSTEM,
+    "office-excel": ToolCategory.FILESYSTEM,
     "office-powerpoint": ToolCategory.FILESYSTEM,
     "office-word": ToolCategory.FILESYSTEM,
     "puppeteer": ToolCategory.WEB,

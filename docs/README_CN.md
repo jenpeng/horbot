@@ -571,6 +571,9 @@ horbot 支持 [MCP](https://modelcontextprotocol.io/) — 连接外部工具服�
 | **Stdio** | `command` + `args` | 通过 `npx` / `uvx` 的本地进程 |
 | **HTTP** | `url` + `headers`（可选） | 远程端点 (`https://mcp.example.com/sse`) |
 
+> [!TIP]
+> 如果你接入 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) 的内置 MCP server，建议把 server 名称命名为 `officecli`、`office-word`、`office-excel` 或 `office-powerpoint`。horbot 会把这些名称识别为 Office 文件工具，并在用户提到 `docx` / `xlsx` / `pptx` / `Word` / `Excel` / `PowerPoint` / `OpenXML` 时更积极地把对应 MCP 工具暴露给 Agent。
+
 ### 安全
 
 > [!TIP]
