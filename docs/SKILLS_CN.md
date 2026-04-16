@@ -147,6 +147,20 @@ AI 自主改进能力，包括代码审查、能力评估、错误分析。
 
 通过 `gh` CLI 与 GitHub 交互。
 
+### officecli - Office 文档操作
+
+在已接入 OfficeCLI MCP 时，用于处理 Word / Excel / PowerPoint / OpenXML 文档。
+
+**适用场景**：
+- `.docx` / `.xlsx` / `.pptx`
+- 需要保留 Office 原生结构、样式、公式或版式
+- 需要比普通文件读写更可靠的 Office 文档编辑能力
+
+**规则**：
+- 优先用 `view` / `get` / `query` 类工具先读结构，再做写入
+- 优先使用高层 Office 操作，只有必要时才退到 raw XML / XPath
+- OfficeCLI 不可用时，不要伪造 Office 原生编辑结果
+
 ### weather - 天气查询
 
 获取天气信息，支持 wttr.in 和 Open-Meteo。

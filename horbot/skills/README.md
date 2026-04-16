@@ -42,6 +42,7 @@ The normalized result records compatibility details such as:
 | `cron` | Manage scheduled tasks |
 | `github` | Interact with GitHub using the `gh` CLI |
 | `memory` | Memory management with hierarchical context (L0/L1/L2) |
+| `officecli` | Use OfficeCLI-backed MCP tools for Word, Excel, and PowerPoint files |
 | `self-improvement` | AI self-improvement capabilities: code review, capability assessment, error analysis |
 | `skill-creator` | Create new skills |
 | `summarize` | Summarize URLs, files, and YouTube videos |
