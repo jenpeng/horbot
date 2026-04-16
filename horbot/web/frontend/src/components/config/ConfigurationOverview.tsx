@@ -20,9 +20,11 @@ interface ConfigurationOverviewProps {
   validationSummary: ConfigurationValidationSummary | null;
   hasPendingChanges: boolean;
   dirtySections: ConfigurationSectionKey[];
+  webSearchEnabled: boolean;
   webSearchProvider: string;
   webSearchProviderName: string;
-  webSearchTavilyEnabled: boolean;
+  webSearchProviderEnabled: boolean;
+  webSearchProviderToggleable: boolean;
   webSearchRequiresApiKey: boolean;
   webSearchHasApiKey: boolean;
   webSearchMaxResults: number;
@@ -44,9 +46,11 @@ const ConfigurationOverview: React.FC<ConfigurationOverviewProps> = ({
   validationSummary,
   hasPendingChanges,
   dirtySections,
+  webSearchEnabled,
   webSearchProvider,
   webSearchProviderName,
-  webSearchTavilyEnabled,
+  webSearchProviderEnabled,
+  webSearchProviderToggleable,
   webSearchRequiresApiKey,
   webSearchHasApiKey,
   webSearchMaxResults,
@@ -57,9 +61,12 @@ const ConfigurationOverview: React.FC<ConfigurationOverviewProps> = ({
     workspace: { label: t('config.section.workspace'), href: '#config-workspace' },
     'web-search': { label: t('config.section.webSearch'), href: '#config-web-search' },
   };
-  const tavilyDisabled = webSearchProvider === 'tavily' && !webSearchTavilyEnabled;
-  const webSearchStatus = tavilyDisabled
-    ? t('config.overview.webSearchTavilyDisabled')
+  const webSearchGloballyDisabled = !webSearchEnabled;
+  const providerDisabled = webSearchProviderToggleable && !webSearchProviderEnabled;
+  const webSearchStatus = webSearchGloballyDisabled
+    ? t('config.overview.webSearchDisabled')
+    : providerDisabled
+    ? t('config.overview.webSearchProviderDisabled', { provider: webSearchProviderName || webSearchProvider })
     : webSearchRequiresApiKey
       ? webSearchHasApiKey
         ? t('config.overview.webSearchKeyConfigured')
@@ -160,7 +167,7 @@ const ConfigurationOverview: React.FC<ConfigurationOverviewProps> = ({
           </p>
           <span
             className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-              tavilyDisabled
+              webSearchGloballyDisabled || providerDisabled
                 ? 'bg-accent-orange/12 text-accent-orange'
                 : webSearchRequiresApiKey && !webSearchHasApiKey
                 ? 'bg-accent-red/12 text-accent-red'

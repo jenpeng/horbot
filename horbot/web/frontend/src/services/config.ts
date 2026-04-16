@@ -41,8 +41,10 @@ export interface AgentRecord {
 }
 
 export interface WebSearchUpdateData {
+  enabled?: boolean;
   provider?: string;
   tavilyEnabled?: boolean;
+  langsearchEnabled?: boolean;
   apiKey?: string;
   maxResults?: number;
 }

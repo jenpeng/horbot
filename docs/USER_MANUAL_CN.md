@@ -145,15 +145,18 @@
 
 Configuration 页面当前除基础 Provider / 模型配置外，还支持：
 
+- 全局开启或关闭联网搜索
 - 切换联网搜索 Provider
-- 单独开启或关闭 Tavily API
+- 单独开启或关闭已支持的 API Provider，例如 Tavily / LangSearch
+- 按 Provider 分开保存各自的 API Key，避免切换供应商时沿用上一家的密钥状态
 - 调整默认最大搜索结果数
 - 查看“远程图片缓存”的文件数、累计大小与最近更新时间
 - 手动清理远程图片缓存
 
 其中：
 
-- 关闭 Tavily 后，即使 Provider 仍停留在 Tavily，运行时也会回退到默认静默 HTTP 搜索
+- 当联网搜索总开关被关闭后，即使 Provider 和 API Key 已配置，运行时也不会调用 web search 工具
+- 当当前 Provider 对应的 API 开关被关闭后，即使 Provider 仍停留在该项，运行时也会回退到默认静默 HTTP 搜索
 - “远程图片缓存”只清理自动从远程图片链接落盘的缓存文件，不会删除普通上传附件
 
 ## 1.2 多 Agent 页面如何配置 Agent 档案

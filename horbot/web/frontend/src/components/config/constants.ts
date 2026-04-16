@@ -1,4 +1,4 @@
-import type { ModelsConfig } from '../../types';
+import type { ModelsConfig, WebSearchProvider } from '../../types';
 
 export type ModelScenarioKey = keyof ModelsConfig;
 
@@ -41,11 +41,45 @@ export const BUILTIN_PROVIDER_NAMES = [
 ];
 
 export const DEFAULT_WEB_SEARCH = {
+  enabled: true,
   provider: 'duckduckgo',
   tavilyEnabled: true,
+  langsearchEnabled: true,
   apiKey: '',
   maxResults: 5,
 };
+
+export const BUILTIN_WEB_SEARCH_PROVIDERS: WebSearchProvider[] = [
+  {
+    id: 'duckduckgo',
+    name: 'DuckDuckGo',
+    description: '免费搜索，无需 API key',
+    requires_api_key: false,
+  },
+  {
+    id: 'brave',
+    name: 'Brave Search',
+    description: 'Brave 搜索 API，需要 API key',
+    requires_api_key: true,
+    api_key_url: 'https://brave.com/search/api/',
+  },
+  {
+    id: 'tavily',
+    name: 'Tavily',
+    description: 'AI 优化的搜索 API，可通过 Tavily 开关显式启用或关闭',
+    requires_api_key: true,
+    api_key_url: 'https://tavily.com/',
+    enabled_config_key: 'tavilyEnabled' as const,
+  },
+  {
+    id: 'langsearch',
+    name: 'LangSearch',
+    description: '免费 Web Search API，可通过 LangSearch 开关显式启用或关闭',
+    requires_api_key: true,
+    api_key_url: 'https://langsearch.com/',
+    enabled_config_key: 'langsearchEnabled' as const,
+  },
+];
 
 export const normalizeModelsConfig = (models?: Partial<ModelsConfig> | null): ModelsConfig => ({
   main: { ...DEFAULT_MODELS_CONFIG.main, ...(models?.main || {}) },

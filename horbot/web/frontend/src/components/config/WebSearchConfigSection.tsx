@@ -5,10 +5,14 @@ import type { WebSearchProvider } from '../../types';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 
+type WebSearchToggleKey = 'tavilyEnabled' | 'langsearchEnabled';
+
 interface WebSearchConfigSectionProps {
   currentWebSearchConfig: {
+    enabled: boolean;
     provider: string;
     tavilyEnabled: boolean;
+    langsearchEnabled: boolean;
     apiKey: string;
     apiKeyMode: WebSearchApiKeyMode;
     hasApiKey: boolean;
@@ -27,7 +31,7 @@ interface WebSearchConfigSectionProps {
     newest_updated_at?: string | null;
   };
   isClearingRemoteImageCache: boolean;
-  onWebSearchChange: (patch: Partial<{ provider: string; tavilyEnabled: boolean; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>) => void;
+  onWebSearchChange: (patch: Partial<{ enabled: boolean; provider: string; tavilyEnabled: boolean; langsearchEnabled: boolean; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>) => void;
   onSaveWebSearch: () => void | Promise<void>;
   onClearRemoteImageCache: () => void | Promise<void>;
 }
@@ -48,7 +52,8 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
 }) => {
   const { t } = useI18n();
   const providerRequiresApiKey = Boolean(selectedWebSearchProvider?.requires_api_key);
-  const tavilySelected = currentWebSearchConfig.provider === 'tavily';
+  const providerToggleKey = selectedWebSearchProvider?.enabled_config_key as WebSearchToggleKey | undefined;
+  const providerToggleEnabled = providerToggleKey ? currentWebSearchConfig[providerToggleKey] : true;
   const hasMaskedKey = currentWebSearchConfig.hasApiKey && currentWebSearchConfig.apiKeyMasked;
   const apiKeyActionLabel = currentWebSearchConfig.apiKeyMode === 'clear'
     ? t('config.webSearch.keyClear')
@@ -72,6 +77,39 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
         <p className="text-base text-surface-600 mt-2 ml-12">{t('config.webSearch.subtitle')}</p>
       </div>
       <div className="p-6 space-y-4">
+        <div className="rounded-2xl border border-surface-200 bg-surface-50/80 p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-surface-900">{t('config.webSearch.globalToggleLabel')}</p>
+              <p className="mt-1 text-sm text-surface-600">
+                {currentWebSearchConfig.enabled
+                  ? t('config.webSearch.globalEnabledHint')
+                  : t('config.webSearch.globalDisabledHint')}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={currentWebSearchConfig.enabled}
+              onClick={() => onWebSearchChange({ enabled: !currentWebSearchConfig.enabled })}
+              className={`relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition-colors ${
+                currentWebSearchConfig.enabled ? 'bg-primary-600' : 'bg-surface-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                  currentWebSearchConfig.enabled ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+          <div className="mt-3 rounded-xl border border-dashed border-surface-200 bg-white/70 px-3 py-2 text-xs text-surface-600">
+            {currentWebSearchConfig.enabled
+              ? t('config.webSearch.globalEnabledMode')
+              : t('config.webSearch.globalDisabledMode')}
+          </div>
+        </div>
+
         <div>
           <label className="block text-sm font-semibold text-surface-700 mb-2">{t('config.webSearch.providerLabel')}</label>
           <select
@@ -93,37 +131,39 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
           )}
         </div>
 
-        {tavilySelected && (
+        {providerToggleKey && (
           <div className="rounded-2xl border border-surface-200 bg-surface-50/80 p-4">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold text-surface-900">{t('config.webSearch.tavilyToggleLabel')}</p>
+                <p className="text-sm font-semibold text-surface-900">
+                  {t('config.webSearch.providerToggleLabel', { provider: selectedWebSearchProvider?.name || currentWebSearchConfig.provider })}
+                </p>
                 <p className="mt-1 text-sm text-surface-600">
-                  {currentWebSearchConfig.tavilyEnabled
-                    ? t('config.webSearch.tavilyEnabledHint')
-                    : t('config.webSearch.tavilyDisabledHint')}
+                  {providerToggleEnabled
+                    ? t('config.webSearch.providerEnabledHint', { provider: selectedWebSearchProvider?.name || currentWebSearchConfig.provider })
+                    : t('config.webSearch.providerDisabledHint', { provider: selectedWebSearchProvider?.name || currentWebSearchConfig.provider })}
                 </p>
               </div>
               <button
                 type="button"
                 role="switch"
-                aria-checked={currentWebSearchConfig.tavilyEnabled}
-                onClick={() => onWebSearchChange({ tavilyEnabled: !currentWebSearchConfig.tavilyEnabled })}
+                aria-checked={providerToggleEnabled}
+                onClick={() => onWebSearchChange({ [providerToggleKey]: !providerToggleEnabled } as Partial<{ enabled: boolean; provider: string; tavilyEnabled: boolean; langsearchEnabled: boolean; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>)}
                 className={`relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition-colors ${
-                  currentWebSearchConfig.tavilyEnabled ? 'bg-primary-600' : 'bg-surface-300'
+                  providerToggleEnabled ? 'bg-primary-600' : 'bg-surface-300'
                 }`}
               >
                 <span
                   className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-                    currentWebSearchConfig.tavilyEnabled ? 'translate-x-6' : 'translate-x-1'
+                    providerToggleEnabled ? 'translate-x-6' : 'translate-x-1'
                   }`}
                 />
               </button>
             </div>
             <div className="mt-3 rounded-xl border border-dashed border-surface-200 bg-white/70 px-3 py-2 text-xs text-surface-600">
-              {currentWebSearchConfig.tavilyEnabled
-                ? t('config.webSearch.tavilyEnabledMode')
-                : t('config.webSearch.tavilyDisabledMode')}
+              {providerToggleEnabled
+                ? t('config.webSearch.providerEnabledMode', { provider: selectedWebSearchProvider?.name || currentWebSearchConfig.provider })
+                : t('config.webSearch.providerDisabledMode', { provider: selectedWebSearchProvider?.name || currentWebSearchConfig.provider })}
             </div>
           </div>
         )}
@@ -212,7 +252,11 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
 
         <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
           <p className="font-medium">{t('config.webSearch.fallbackTitle')}</p>
-          <p className="mt-1 text-amber-800">{t('config.webSearch.fallbackHint')}</p>
+          <p className="mt-1 text-amber-800">
+            {currentWebSearchConfig.enabled
+              ? t('config.webSearch.fallbackHint')
+              : t('config.webSearch.disabledFallbackHint')}
+          </p>
         </div>
 
         <div className="rounded-2xl border border-surface-200 bg-surface-50/80 px-4 py-4">
@@ -253,10 +297,17 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
       <div className="flex items-center justify-between gap-3 pt-5 border-t border-surface-200 px-6 pb-6 flex-wrap">
         <div className="text-sm">
           {hasWebSearchChanges ? (
-            <span className="inline-flex items-center gap-2 text-accent-orange font-medium">
-              <span className="h-2.5 w-2.5 rounded-full bg-accent-orange"></span>
-              {t('config.webSearch.unsaved')}
-            </span>
+            <div className="space-y-1">
+              <span className="inline-flex items-center gap-2 text-accent-orange font-medium">
+                <span className="h-2.5 w-2.5 rounded-full bg-accent-orange"></span>
+                {t('config.webSearch.unsaved')}
+              </span>
+              {providerRequiresApiKey && !canSaveWebSearch && (
+                <p className="text-xs text-accent-red">
+                  {t('config.webSearch.keyRequiredBeforeSave', { provider: selectedWebSearchProvider?.name || currentWebSearchConfig.provider })}
+                </p>
+              )}
+            </div>
           ) : (
             <span className="inline-flex items-center gap-2 text-surface-500">
               <span className="h-2.5 w-2.5 rounded-full bg-surface-300"></span>

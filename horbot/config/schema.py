@@ -573,9 +573,12 @@ class GatewayConfig(Base):
 class WebSearchConfig(Base):
     """Web search tool configuration."""
 
-    provider: str = "duckduckgo"  # "duckduckgo", "brave", "tavily"
+    enabled: bool = True
+    provider: str = "duckduckgo"  # "duckduckgo", "brave", "tavily", "langsearch"
     tavily_enabled: bool = True
-    api_key: str = ""  # API key for brave or tavily
+    langsearch_enabled: bool = True
+    api_key: str = ""  # API key for brave, tavily, or langsearch
+    provider_api_keys: dict[str, str] = Field(default_factory=dict)  # Provider-specific API keys
     max_results: int = 5
 
 

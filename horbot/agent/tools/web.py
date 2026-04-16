@@ -556,7 +556,7 @@ end if
 
 
 class WebSearchTool(Tool):
-    """Search the web using multiple providers: Tavily, Brave Search, or DuckDuckGo."""
+    """Search the web using multiple providers: Tavily, LangSearch, Brave Search, or DuckDuckGo."""
     
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
@@ -573,11 +573,13 @@ class WebSearchTool(Tool):
         self,
         provider: str = "duckduckgo",
         tavily_enabled: bool = True,
+        langsearch_enabled: bool = True,
         api_key: str | None = None,
         max_results: int = 5
     ):
         self._init_provider = provider
         self._init_tavily_enabled = tavily_enabled
+        self._init_langsearch_enabled = langsearch_enabled
         self._init_api_key = api_key
         self.max_results = max_results
 
@@ -586,6 +588,12 @@ class WebSearchTool(Tool):
         if self._init_tavily_enabled is not None:
             return bool(self._init_tavily_enabled)
         return os.environ.get("WEB_SEARCH_TAVILY_ENABLED", "1").strip().lower() not in {"0", "false", "off", "no"}
+
+    @property
+    def langsearch_enabled(self) -> bool:
+        if self._init_langsearch_enabled is not None:
+            return bool(self._init_langsearch_enabled)
+        return os.environ.get("WEB_SEARCH_LANGSEARCH_ENABLED", "1").strip().lower() not in {"0", "false", "off", "no"}
 
     @staticmethod
     def _browser_cdp_suggestion() -> str:
@@ -599,6 +607,8 @@ class WebSearchTool(Tool):
         provider = self._init_provider or os.environ.get("WEB_SEARCH_PROVIDER", "duckduckgo")
         if str(provider).lower() == "tavily" and not self.tavily_enabled:
             return "duckduckgo"
+        if str(provider).lower() == "langsearch" and not self.langsearch_enabled:
+            return "duckduckgo"
         return provider
 
     @property
@@ -609,6 +619,8 @@ class WebSearchTool(Tool):
         provider = self.provider
         if provider == "tavily":
             return os.environ.get("TAVILY_API_KEY", "")
+        elif provider == "langsearch":
+            return os.environ.get("LANGSEARCH_API_KEY", "")
         elif provider == "brave":
             return os.environ.get("BRAVE_API_KEY", "")
         return ""
@@ -619,6 +631,10 @@ class WebSearchTool(Tool):
 
         if provider == "tavily" and self.tavily_enabled and self.api_key:
             result = await self._search_tavily(query, n)
+            return self._finalize_search_output(result, query)
+
+        if provider == "langsearch" and self.langsearch_enabled and self.api_key:
+            result = await self._search_langsearch(query, n)
             return self._finalize_search_output(result, query)
 
         if provider == "brave" and self.api_key:
@@ -672,6 +688,42 @@ class WebSearchTool(Tool):
             return "\n".join(lines)
         except Exception as e:
             return f"Error searching Tavily: {e}"
+
+    async def _search_langsearch(self, query: str, max_results: int) -> str:
+        """Search using LangSearch Web Search API."""
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.post(
+                    "https://api.langsearch.com/v1/web-search",
+                    json={"query": query, "count": max_results},
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.api_key}",
+                    },
+                    timeout=15.0,
+                )
+                r.raise_for_status()
+
+            data = r.json()
+            payload = data.get("data", {}) if isinstance(data, dict) else {}
+            web_pages = payload.get("webPages", {}) if isinstance(payload, dict) else {}
+            results = web_pages.get("value", []) if isinstance(web_pages, dict) else []
+
+            if not results:
+                return f"No results for: {query}"
+
+            lines = [f"Results for: {query} (via LangSearch)\n"]
+            for i, item in enumerate(results[:max_results], 1):
+                title = item.get("name") or item.get("title") or ""
+                url = item.get("url") or ""
+                snippet = item.get("snippet") or item.get("summary") or item.get("description") or ""
+                lines.append(f"{i}. {title}\n   {url}")
+                if snippet:
+                    lines.append(f"   {snippet}")
+
+            return "\n".join(lines)
+        except Exception as e:
+            return f"Error searching LangSearch: {e}"
 
     async def _search_brave(self, query: str, max_results: int) -> str | None:
         """Search using Brave Search API."""

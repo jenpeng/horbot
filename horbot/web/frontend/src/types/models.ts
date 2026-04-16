@@ -454,11 +454,14 @@ export interface PermissionConfig {
 export interface ToolsConfig {
   web?: {
     search?: {
+      enabled?: boolean;
       provider?: string;
       tavilyEnabled?: boolean;
+      langsearchEnabled?: boolean;
       apiKey?: string;
       hasApiKey?: boolean;
       apiKeyMasked?: string;
+      providerApiKeyStatus?: Record<string, { hasApiKey?: boolean; apiKeyMasked?: string }>;
       maxResults?: number;
     };
   };
@@ -477,6 +480,7 @@ export interface WebSearchProvider {
   description: string;
   requires_api_key: boolean;
   api_key_url?: string;
+  enabled_config_key?: 'tavilyEnabled' | 'langsearchEnabled';
 }
 
 export interface Config {

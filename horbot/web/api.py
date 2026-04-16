@@ -88,6 +88,19 @@ _session_manager = None
 _api_started_at = time.time()
 
 
+def _resolve_web_search_provider_api_key(search_config: Any, provider: str | None = None) -> str:
+    """Return the effective API key for the requested web-search provider."""
+    resolved_provider = str(provider or getattr(search_config, "provider", "") or "").strip().lower()
+    provider_api_keys = getattr(search_config, "provider_api_keys", {}) or {}
+    if resolved_provider and isinstance(provider_api_keys, dict):
+        provider_key = provider_api_keys.get(resolved_provider)
+        if isinstance(provider_key, str) and provider_key:
+            return provider_key
+        if provider_api_keys:
+            return ""
+    return str(getattr(search_config, "api_key", "") or "")
+
+
 def _gateway_base_url(config: Config) -> str:
     host = (getattr(config.gateway, "host", "") or "127.0.0.1").strip()
     port = int(getattr(config.gateway, "port", 18790) or 18790)
@@ -2226,8 +2239,11 @@ async def get_config():
     raw_data = config.model_dump(by_alias=True)
     data = sanitize_config_for_client(raw_data)
 
-    search_config = getattr(getattr(getattr(config.tools, "web", None), "search", None), "tavily_enabled", True)
-    data.setdefault("tools", {}).setdefault("web", {}).setdefault("search", {})["tavilyEnabled"] = bool(search_config)
+    search_config = getattr(getattr(config.tools, "web", None), "search", None)
+    sanitized_search = data.setdefault("tools", {}).setdefault("web", {}).setdefault("search", {})
+    sanitized_search["enabled"] = bool(getattr(search_config, "enabled", True))
+    sanitized_search["tavilyEnabled"] = bool(getattr(search_config, "tavily_enabled", True))
+    sanitized_search["langsearchEnabled"] = bool(getattr(search_config, "langsearch_enabled", True))
     
     # Predefined providers (always show in UI)
     PREDEFINED_PROVIDERS = {
@@ -3254,8 +3270,10 @@ class AgentDefaultsUpdateRequest(BaseModel):
 
 class WebSearchConfigUpdateRequest(BaseModel):
     """Partial update request for web search config."""
+    enabled: Optional[bool] = None
     provider: Optional[str] = None
     tavilyEnabled: Optional[bool] = None
+    langsearchEnabled: Optional[bool] = None
     apiKey: Optional[str] = None
     maxResults: Optional[int] = None
 
@@ -3335,15 +3353,32 @@ async def update_web_search_config(request: WebSearchConfigUpdateRequest):
     try:
         config = get_cached_config()
         search_config = config.tools.web.search
+        provider_api_keys = dict(getattr(search_config, "provider_api_keys", {}) or {})
+        current_provider = str(getattr(search_config, "provider", "") or "duckduckgo").strip().lower() or "duckduckgo"
+        legacy_api_key = str(getattr(search_config, "api_key", "") or "")
+        if legacy_api_key and not provider_api_keys:
+            provider_api_keys[current_provider] = legacy_api_key
+        search_config.provider_api_keys = provider_api_keys
+        target_provider = str(request.provider or search_config.provider or "duckduckgo").strip().lower() or "duckduckgo"
 
+        if request.enabled is not None:
+            search_config.enabled = request.enabled
         if request.provider is not None:
-            search_config.provider = request.provider
+            search_config.provider = target_provider
         if request.tavilyEnabled is not None:
             search_config.tavily_enabled = request.tavilyEnabled
+        if request.langsearchEnabled is not None:
+            search_config.langsearch_enabled = request.langsearchEnabled
         if request.apiKey is not None:
-            search_config.api_key = request.apiKey
+            provider_api_keys = dict(getattr(search_config, "provider_api_keys", {}) or {})
+            if request.apiKey:
+                provider_api_keys[target_provider] = request.apiKey
+            else:
+                provider_api_keys.pop(target_provider, None)
+            search_config.provider_api_keys = provider_api_keys
         if request.maxResults is not None:
             search_config.max_results = request.maxResults
+        search_config.api_key = _resolve_web_search_provider_api_key(search_config, search_config.provider)
 
         saved_path = save_config(config)
         await reset_agent_loop()
@@ -7326,7 +7361,16 @@ async def get_web_search_providers():
             "name": "Tavily",
             "description": "AI 优化的搜索 API，可通过 Tavily 开关显式启用或关闭",
             "requires_api_key": True,
-            "api_key_url": "https://tavily.com/"
+            "api_key_url": "https://tavily.com/",
+            "enabled_config_key": "tavilyEnabled",
+        },
+        {
+            "id": "langsearch",
+            "name": "LangSearch",
+            "description": "免费 Web Search API，可通过 LangSearch 开关显式启用或关闭",
+            "requires_api_key": True,
+            "api_key_url": "https://langsearch.com/",
+            "enabled_config_key": "langsearchEnabled",
         }
     ]
     

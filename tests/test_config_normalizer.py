@@ -58,6 +58,27 @@ class ConfigNormalizerTests(unittest.TestCase):
         self.assertFalse(config.agents.instances["main"].is_main)
         self.assertFalse(config.agents.instances["worker"].is_main)
 
+    def test_normalize_config_migrates_legacy_web_search_key_to_provider_specific_map(self):
+        config = Config()
+        config.tools.web.search.provider = "tavily"
+        config.tools.web.search.api_key = "tv-secret"
+
+        normalize_config(config)
+
+        self.assertEqual(config.tools.web.search.provider_api_keys["tavily"], "tv-secret")
+        self.assertEqual(config.tools.web.search.api_key, "tv-secret")
+
+    def test_normalize_config_does_not_reuse_legacy_key_for_a_different_provider(self):
+        config = Config()
+        config.tools.web.search.provider = "langsearch"
+        config.tools.web.search.provider_api_keys = {"tavily": "tv-secret"}
+        config.tools.web.search.api_key = "tv-secret"
+
+        normalize_config(config)
+
+        self.assertEqual(config.tools.web.search.provider_api_keys["tavily"], "tv-secret")
+        self.assertEqual(config.tools.web.search.api_key, "")
+
     def test_authoritative_sync_helpers_replace_old_memberships(self):
         config = Config()
         config.agents.instances = {

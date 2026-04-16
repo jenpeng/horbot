@@ -17,6 +17,18 @@ class WebSearchToolTests(unittest.IsolatedAsyncioTestCase):
         tool._search_tavily.assert_not_awaited()
         tool._search_duckduckgo.assert_awaited_once_with("agent memory", 3)
 
+    async def test_langsearch_provider_falls_back_when_disabled(self):
+        tool = WebSearchTool(provider="langsearch", langsearch_enabled=False, api_key="secret", max_results=5)
+        tool._search_langsearch = AsyncMock(return_value="should-not-be-used")
+        tool._search_duckduckgo = AsyncMock(return_value="Results for: agent memory (via DuckDuckGo)")
+
+        result = await tool.execute(query="agent memory", count=3)
+
+        self.assertEqual(tool.provider, "duckduckgo")
+        self.assertEqual(result, "Results for: agent memory (via DuckDuckGo)")
+        tool._search_langsearch.assert_not_awaited()
+        tool._search_duckduckgo.assert_awaited_once_with("agent memory", 3)
+
     async def test_no_results_appends_browser_fallback_hint(self):
         tool = WebSearchTool()
 

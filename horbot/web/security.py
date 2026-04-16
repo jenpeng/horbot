@@ -217,8 +217,17 @@ def sanitize_config_for_client(data: dict[str, Any]) -> dict[str, Any]:
     sanitized_search = sanitized_web.setdefault("search", {})
     if isinstance(web_search, dict):
         api_key = web_search.get("apiKey") or web_search.get("api_key")
+        provider_api_keys = web_search.get("providerApiKeys") or web_search.get("provider_api_keys") or {}
         sanitized_search["hasApiKey"] = bool(api_key)
         sanitized_search["apiKeyMasked"] = mask_secret(api_key)
+        if isinstance(provider_api_keys, dict):
+            sanitized_search["providerApiKeyStatus"] = {
+                str(provider_id): {
+                    "hasApiKey": bool(provider_key),
+                    "apiKeyMasked": mask_secret(provider_key if isinstance(provider_key, str) else ""),
+                }
+                for provider_id, provider_key in provider_api_keys.items()
+            }
         if "apiKey" in sanitized_search:
             sanitized_search["apiKey"] = ""
         if "api_key" in sanitized_search:

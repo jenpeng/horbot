@@ -392,13 +392,21 @@ class AgentLoop:
         config = self._get_config()
         if config and hasattr(config, 'tools') and hasattr(config.tools, 'web') and hasattr(config.tools.web, 'search'):
             search_config = config.tools.web.search
+            provider = getattr(search_config, 'provider', 'duckduckgo')
+            provider_api_keys = getattr(search_config, 'provider_api_keys', {}) or {}
+            if provider_api_keys:
+                resolved_api_key = provider_api_keys.get(provider, '')
+            else:
+                resolved_api_key = getattr(search_config, 'api_key', '')
             return {
-                "provider": getattr(search_config, 'provider', 'duckduckgo'),
+                "enabled": getattr(search_config, 'enabled', True),
+                "provider": provider,
                 "tavilyEnabled": getattr(search_config, 'tavily_enabled', True),
-                "apiKey": getattr(search_config, 'api_key', ''),
+                "langsearchEnabled": getattr(search_config, 'langsearch_enabled', True),
+                "apiKey": resolved_api_key,
                 "maxResults": getattr(search_config, 'max_results', 5),
             }
-        return {"provider": "duckduckgo", "tavilyEnabled": True, "apiKey": "", "maxResults": 5}
+        return {"enabled": True, "provider": "duckduckgo", "tavilyEnabled": True, "langsearchEnabled": True, "apiKey": "", "maxResults": 5}
 
     def _init_subagents(self, provider, workspace, bus, brave_api_key, restrict_to_workspace):
         """Initialize subagents manager."""
@@ -504,6 +512,7 @@ class AgentLoop:
         web_search_tool = WebSearchTool(
             provider=web_search_config.get("provider", "duckduckgo"),
             tavily_enabled=bool(web_search_config.get("tavilyEnabled", True)),
+            langsearch_enabled=bool(web_search_config.get("langsearchEnabled", True)),
             api_key=web_search_config.get("apiKey", ""),
             max_results=web_search_config.get("maxResults", 5),
         )
@@ -1324,7 +1333,7 @@ class AgentLoop:
         unsuccessful_web_attempts = 0
         continued_prefix = ""
         
-        self.tools.set_web_search_enabled(web_search)
+        self.tools.set_web_search_enabled(bool(web_search) and bool(self._get_web_search_config().get("enabled", True)))
         
         user_message = self._find_latest_real_user_message(initial_messages)
         web_requirement = self.tools.classify_web_requirement(user_message)

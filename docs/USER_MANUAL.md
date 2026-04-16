@@ -69,10 +69,14 @@ If a remote image link can be cached successfully, later history loads use a loc
 
 The `Configuration` page now also exposes runtime web-search controls:
 
+- enable or disable web search globally
 - switch the preferred web-search provider
-- enable or disable Tavily without changing the stored provider selection
+- enable or disable supported API providers such as Tavily or LangSearch without changing the stored provider selection
+- keep API keys isolated per search provider so switching providers does not reuse the previous provider's key state
 - adjust the default max-results limit
 - inspect and manually clear the remote image cache used for promoted image cards
+
+If global web search is disabled, runtime requests will not call web-search tools even when a provider and API key are already configured.
 
 The remote image cache panel shows:
 

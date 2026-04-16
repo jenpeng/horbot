@@ -8,6 +8,7 @@ import type { ConfigCheckResultData } from '../components/ConfigCheckResult';
 import { useI18n } from '../contexts/I18nContext';
 import { createAsyncResourceCache } from '../utils/asyncResourceCache';
 import {
+  BUILTIN_WEB_SEARCH_PROVIDERS,
   BUILTIN_PROVIDER_NAMES,
   DEFAULT_MODELS_CONFIG,
   DEFAULT_WEB_SEARCH,
@@ -69,6 +70,7 @@ export interface ConfigurationValidationSummary {
 
 export type WebSearchApiKeyMode = 'keep' | 'replace' | 'clear';
 export type ConfigurationSectionKey = 'agent' | 'workspace' | 'web-search';
+export type WebSearchProviderToggleKey = 'tavilyEnabled' | 'langsearchEnabled';
 
 export interface MainAgentSummary {
   id: string;
@@ -111,8 +113,10 @@ export interface UseConfigurationStateResult {
   webSearchProviders: WebSearchProvider[];
   isLoadingProviders: boolean;
   currentWebSearchConfig: {
+    enabled: boolean;
     provider: string;
     tavilyEnabled: boolean;
+    langsearchEnabled: boolean;
     apiKey: string;
     apiKeyMode: WebSearchApiKeyMode;
     hasApiKey: boolean;
@@ -142,7 +146,7 @@ export interface UseConfigurationStateResult {
   setWorkspacePath: Dispatch<SetStateAction<string>>;
   updateModelConfig: (scenario: ModelScenarioKey, field: keyof ModelConfig, value: string) => void;
   updateWebSearchConfig: (
-    patch: Partial<{ provider: string; tavilyEnabled: boolean; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>
+    patch: Partial<{ enabled: boolean; provider: string; tavilyEnabled: boolean; langsearchEnabled: boolean; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>
   ) => void;
   handleSaveAgentSettings: () => Promise<void>;
   handleSaveWorkspace: () => Promise<void>;
@@ -189,8 +193,10 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
   const [hasWebSearchChanges, setHasWebSearchChanges] = useState(false);
   const [isSavingWebSearch, setIsSavingWebSearch] = useState(false);
   const [webSearchSettings, setWebSearchSettings] = useState({
+    enabled: DEFAULT_WEB_SEARCH.enabled,
     provider: DEFAULT_WEB_SEARCH.provider,
     tavilyEnabled: DEFAULT_WEB_SEARCH.tavilyEnabled,
+    langsearchEnabled: DEFAULT_WEB_SEARCH.langsearchEnabled,
     maxResults: DEFAULT_WEB_SEARCH.maxResults,
   });
   const [webSearchApiKeyInput, setWebSearchApiKeyInput] = useState('');
@@ -255,14 +261,24 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     setWorkspacePath(defaults?.workspace || '');
     setModelsConfig(normalizeModelsConfig(defaults?.models));
     const search = data.tools?.web?.search;
+    const resolvedEnabled = typeof search?.enabled === 'boolean'
+      ? search.enabled
+      : DEFAULT_WEB_SEARCH.enabled;
     const resolvedTavilyEnabled = typeof search?.tavilyEnabled === 'boolean'
       ? search.tavilyEnabled
       : typeof (search as { tavily_enabled?: boolean } | undefined)?.tavily_enabled === 'boolean'
         ? Boolean((search as { tavily_enabled?: boolean }).tavily_enabled)
         : DEFAULT_WEB_SEARCH.tavilyEnabled;
+    const resolvedLangSearchEnabled = typeof search?.langsearchEnabled === 'boolean'
+      ? search.langsearchEnabled
+      : typeof (search as { langsearch_enabled?: boolean } | undefined)?.langsearch_enabled === 'boolean'
+        ? Boolean((search as { langsearch_enabled?: boolean }).langsearch_enabled)
+        : DEFAULT_WEB_SEARCH.langsearchEnabled;
     setWebSearchSettings({
+      enabled: resolvedEnabled,
       provider: search?.provider || DEFAULT_WEB_SEARCH.provider,
       tavilyEnabled: resolvedTavilyEnabled,
+      langsearchEnabled: resolvedLangSearchEnabled,
       maxResults: search?.maxResults || DEFAULT_WEB_SEARCH.maxResults,
     });
     setHasAgentChanges(false);
@@ -360,7 +376,11 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
       const providers = options.force
         ? await webSearchProvidersCache.refresh()
         : await webSearchProvidersCache.get();
-      setWebSearchProviders(providers);
+      const mergedProviders = new Map(BUILTIN_WEB_SEARCH_PROVIDERS.map((provider) => [provider.id, provider]));
+      for (const provider of providers) {
+        mergedProviders.set(provider.id, provider);
+      }
+      setWebSearchProviders(Array.from(mergedProviders.values()));
     } catch (err) {
       console.error('Failed to fetch web search providers:', err);
     } finally {
@@ -387,7 +407,7 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
 
     void Promise.all([
       loadConfigState({ showLoading: !cachedConfigSnapshot }),
-      fetchProviders({ force: false }),
+      fetchProviders({ force: true }),
       refreshRemoteImageCacheStatus({ force: false }),
       runValidation({ silent: true, force: false }),
     ]);
@@ -434,13 +454,19 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
 
   const currentWebSearchConfig = useMemo(() => {
     const search = config?.tools?.web?.search;
+    const selectedProviderId = webSearchSettings.provider;
+    const providerApiKeyStatus = search?.providerApiKeyStatus || {};
+    const selectedProviderKeyState = providerApiKeyStatus[selectedProviderId];
+    const fallbackToLegacyKeyState = !selectedProviderKeyState && selectedProviderId === (search?.provider || DEFAULT_WEB_SEARCH.provider);
     return {
-      provider: webSearchSettings.provider,
+      enabled: webSearchSettings.enabled,
+      provider: selectedProviderId,
       tavilyEnabled: webSearchSettings.tavilyEnabled,
+      langsearchEnabled: webSearchSettings.langsearchEnabled,
       apiKey: webSearchApiKeyInput,
       apiKeyMode: webSearchApiKeyMode,
-      hasApiKey: Boolean(search?.hasApiKey),
-      apiKeyMasked: search?.apiKeyMasked || '',
+      hasApiKey: Boolean(selectedProviderKeyState?.hasApiKey || (fallbackToLegacyKeyState && search?.hasApiKey)),
+      apiKeyMasked: selectedProviderKeyState?.apiKeyMasked || (fallbackToLegacyKeyState ? search?.apiKeyMasked || '' : ''),
       maxResults: webSearchSettings.maxResults,
     };
   }, [config, webSearchApiKeyInput, webSearchApiKeyMode, webSearchSettings]);
@@ -451,10 +477,12 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
   );
 
   const updateWebSearchConfig = useCallback(
-    (patch: Partial<{ provider: string; tavilyEnabled: boolean; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>) => {
+    (patch: Partial<{ enabled: boolean; provider: string; tavilyEnabled: boolean; langsearchEnabled: boolean; apiKey: string; apiKeyMode: WebSearchApiKeyMode; maxResults: number }>) => {
       setWebSearchSettings((prev) => ({
+        enabled: patch.enabled ?? prev.enabled,
         provider: patch.provider ?? prev.provider,
         tavilyEnabled: patch.tavilyEnabled ?? prev.tavilyEnabled,
+        langsearchEnabled: patch.langsearchEnabled ?? prev.langsearchEnabled,
         maxResults: patch.maxResults ?? prev.maxResults,
       }));
       if (patch.apiKeyMode !== undefined) {
@@ -469,6 +497,10 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
           setWebSearchApiKeyMode('replace');
         }
       }
+      if (patch.provider !== undefined) {
+        setWebSearchApiKeyInput('');
+        setWebSearchApiKeyMode('keep');
+      }
     },
     []
   );
@@ -478,14 +510,24 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
       return;
     }
     const search = config.tools?.web?.search;
+    const persistedEnabled = typeof search?.enabled === 'boolean'
+      ? search.enabled
+      : DEFAULT_WEB_SEARCH.enabled;
     const persistedTavilyEnabled = typeof search?.tavilyEnabled === 'boolean'
       ? search.tavilyEnabled
       : typeof (search as { tavily_enabled?: boolean } | undefined)?.tavily_enabled === 'boolean'
         ? Boolean((search as { tavily_enabled?: boolean }).tavily_enabled)
         : DEFAULT_WEB_SEARCH.tavilyEnabled;
+    const persistedLangSearchEnabled = typeof search?.langsearchEnabled === 'boolean'
+      ? search.langsearchEnabled
+      : typeof (search as { langsearch_enabled?: boolean } | undefined)?.langsearch_enabled === 'boolean'
+        ? Boolean((search as { langsearch_enabled?: boolean }).langsearch_enabled)
+        : DEFAULT_WEB_SEARCH.langsearchEnabled;
     const hasChanges =
+      webSearchSettings.enabled !== persistedEnabled ||
       webSearchSettings.provider !== (search?.provider || DEFAULT_WEB_SEARCH.provider) ||
       webSearchSettings.tavilyEnabled !== persistedTavilyEnabled ||
+      webSearchSettings.langsearchEnabled !== persistedLangSearchEnabled ||
       webSearchSettings.maxResults !== (search?.maxResults || DEFAULT_WEB_SEARCH.maxResults) ||
       webSearchApiKeyMode === 'clear' ||
       (webSearchApiKeyMode === 'replace' && webSearchApiKeyInput.trim().length > 0);
@@ -496,14 +538,20 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
     if (!hasWebSearchChanges) {
       return false;
     }
+    if (!currentWebSearchConfig.enabled) {
+      return true;
+    }
     if (!selectedWebSearchProvider?.requires_api_key) {
+      return true;
+    }
+    if (currentWebSearchConfig.hasApiKey && webSearchApiKeyMode !== 'clear') {
       return true;
     }
     if (webSearchApiKeyMode === 'replace') {
       return webSearchApiKeyInput.trim().length > 0;
     }
-    return true;
-  }, [hasWebSearchChanges, selectedWebSearchProvider?.requires_api_key, webSearchApiKeyInput, webSearchApiKeyMode]);
+    return false;
+  }, [currentWebSearchConfig.hasApiKey, hasWebSearchChanges, selectedWebSearchProvider?.requires_api_key, webSearchApiKeyInput, webSearchApiKeyMode]);
 
   const handleSaveAgentSettings = useCallback(async () => {
     if (!validateAgentSettings()) {
@@ -553,8 +601,10 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
 
     try {
       await configService.updateWebSearchConfig({
+        enabled: currentWebSearchConfig.enabled,
         provider: currentWebSearchConfig.provider,
         tavilyEnabled: currentWebSearchConfig.tavilyEnabled,
+        langsearchEnabled: currentWebSearchConfig.langsearchEnabled,
         ...(webSearchApiKeyMode === 'replace' ? { apiKey: webSearchApiKeyInput.trim() } : {}),
         ...(webSearchApiKeyMode === 'clear' ? { apiKey: '' } : {}),
         maxResults: currentWebSearchConfig.maxResults,

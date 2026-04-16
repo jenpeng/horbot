@@ -60,9 +60,15 @@ const ConfigPage: React.FC = () => {
           validationSummary={state.validationSummary}
           hasPendingChanges={state.hasPendingChanges}
           dirtySections={state.dirtySections}
+          webSearchEnabled={state.currentWebSearchConfig.enabled}
           webSearchProvider={state.currentWebSearchConfig.provider}
           webSearchProviderName={state.selectedWebSearchProvider?.name || state.currentWebSearchConfig.provider}
-          webSearchTavilyEnabled={state.currentWebSearchConfig.tavilyEnabled}
+          webSearchProviderEnabled={
+            state.selectedWebSearchProvider?.enabled_config_key
+              ? state.currentWebSearchConfig[state.selectedWebSearchProvider.enabled_config_key]
+              : true
+          }
+          webSearchProviderToggleable={Boolean(state.selectedWebSearchProvider?.enabled_config_key)}
           webSearchRequiresApiKey={Boolean(state.selectedWebSearchProvider?.requires_api_key)}
           webSearchHasApiKey={state.currentWebSearchConfig.hasApiKey}
           webSearchMaxResults={state.currentWebSearchConfig.maxResults}

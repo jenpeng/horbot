@@ -103,6 +103,19 @@ def remove_team_references(config: Config, team_id: str) -> None:
 
 def normalize_config(config: Config) -> Config:
     """Normalize cross-references and duplicate list fields in-place."""
+    search_config = getattr(getattr(getattr(config, "tools", None), "web", None), "search", None)
+    if search_config is not None:
+        search_config.provider = str(getattr(search_config, "provider", "duckduckgo") or "duckduckgo").strip().lower() or "duckduckgo"
+        search_config.provider_api_keys = {
+            str(provider_id).strip().lower(): str(api_key)
+            for provider_id, api_key in (getattr(search_config, "provider_api_keys", {}) or {}).items()
+            if str(provider_id).strip() and isinstance(api_key, str)
+        }
+        legacy_api_key = str(getattr(search_config, "api_key", "") or "")
+        if legacy_api_key and not search_config.provider_api_keys:
+            search_config.provider_api_keys[search_config.provider] = legacy_api_key
+        search_config.api_key = search_config.provider_api_keys.get(search_config.provider, "")
+
     for agent in config.agents.instances.values():
         agent.capabilities = _unique_str_list(agent.capabilities)
         agent.tools = _unique_str_list(agent.tools)

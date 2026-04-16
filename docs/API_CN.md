@@ -90,17 +90,20 @@ PATCH /api/config/web-search
 Content-Type: application/json
 
 {
+  "enabled": true,
   "provider": "tavily",
   "tavilyEnabled": false,
+  "langsearchEnabled": true,
   "maxResults": 5
 }
 ```
 
 说明：
 
-- 可用于更新 Web 管理页中的联网搜索 Provider、`tavilyEnabled` 开关与最大结果数
-- 当 `tavilyEnabled=false` 时，即使当前 Provider 仍选中 Tavily，运行时也会回退到默认静默 HTTP 搜索；若继续失败，Agent 会建议改用浏览器 / CDP 路径
-- 如需替换密钥，可同时传 `apiKey`
+- 可用于更新 Web 管理页中的联网搜索总开关 `enabled`、Provider、`tavilyEnabled` / `langsearchEnabled` 等 Provider 开关与最大结果数
+- 当 `enabled=false` 时，即使当前 Provider 和 API Key 仍已配置，运行时也不会调用 web search 工具
+- 当当前 Provider 对应开关被关闭时，即使 Provider 仍保持该选项，运行时也会回退到默认静默 HTTP 搜索；若继续失败，Agent 会建议改用浏览器 / CDP 路径
+- 如需替换密钥，可同时传 `apiKey`；该密钥会按当前 Provider 分开保存，不再与其它搜索 Provider 共用
 
 ---
 
