@@ -498,11 +498,19 @@ export const useConfigurationState = (): UseConfigurationStateResult => {
         }
       }
       if (patch.provider !== undefined) {
+        const providerApiKeyStatus = config?.tools?.web?.search?.providerApiKeyStatus || {};
+        const nextProvider = patch.provider;
+        const nextProviderConfig = webSearchProviders.find((provider) => provider.id === nextProvider);
+        const nextProviderHasSavedKey = Boolean(providerApiKeyStatus[nextProvider]?.hasApiKey);
         setWebSearchApiKeyInput('');
-        setWebSearchApiKeyMode('keep');
+        setWebSearchApiKeyMode(
+          nextProviderConfig?.requires_api_key && !nextProviderHasSavedKey
+            ? 'replace'
+            : 'keep',
+        );
       }
     },
-    []
+    [config?.tools?.web?.search?.providerApiKeyStatus, webSearchProviders]
   );
 
   useEffect(() => {

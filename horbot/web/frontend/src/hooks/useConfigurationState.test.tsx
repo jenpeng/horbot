@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '../contexts/I18nContext';
@@ -128,5 +128,27 @@ describe('useConfigurationState', () => {
     expect(result.current.currentWebSearchConfig.provider).toBe('langsearch');
     expect(result.current.selectedWebSearchProvider?.id).toBe('langsearch');
     expect(result.current.webSearchProviders.some((provider) => provider.id === 'langsearch')).toBe(true);
+  });
+
+  it('switches into replace mode when selecting a provider that requires a new api key', async () => {
+    const { result } = renderHook(() => useConfigurationState(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await waitFor(() => {
+      expect(result.current.webSearchProviders.some((provider) => provider.id === 'brave')).toBe(true);
+    });
+
+    await act(async () => {
+      result.current.updateWebSearchConfig({ provider: 'brave' });
+    });
+
+    await waitFor(() => {
+      expect(result.current.currentWebSearchConfig.provider).toBe('brave');
+    });
+
+    expect(result.current.currentWebSearchConfig.apiKeyMode).toBe('replace');
   });
 });

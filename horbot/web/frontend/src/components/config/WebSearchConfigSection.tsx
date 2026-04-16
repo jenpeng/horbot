@@ -192,7 +192,7 @@ const WebSearchConfigSection: React.FC<WebSearchConfigSectionProps> = ({
                     : 'bg-surface-100 text-surface-700 hover:bg-surface-200'
                 }`}
               >
-                {t('config.webSearch.replaceKey')}
+                {currentWebSearchConfig.hasApiKey ? t('config.webSearch.replaceKey') : t('config.webSearch.setKey')}
               </button>
               {currentWebSearchConfig.hasApiKey && (
                 <button
