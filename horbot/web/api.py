@@ -1,11 +1,12 @@
 """API routes."""
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from typing import List, Dict, Any, AsyncGenerator, Optional, Callable
 from datetime import datetime, timedelta
 import asyncio
 import hashlib
+import html
 import json
 import uuid
 import os
@@ -3529,6 +3530,19 @@ class UploadResponse(BaseModel):
     extracted_text: Optional[str] = None  # Extracted text content from documents
 
 
+INLINE_PREVIEW_MIME_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+
+
+def _build_preview_url(file_id: str, mime_type: str, category: str) -> Optional[str]:
+    if category == "image" or mime_type in INLINE_PREVIEW_MIME_TYPES:
+        return f"/api/files/{file_id}/preview"
+    return None
+
+
 def _build_upload_response_for_path(
     stored_path: Path,
     *,
@@ -3546,7 +3560,7 @@ def _build_upload_response_for_path(
         size=stored_path.stat().st_size,
         category=category,
         url=f"/api/files/{file_id}",
-        preview_url=f"/api/files/{file_id}/preview" if category == "image" else None,
+        preview_url=_build_preview_url(file_id, mime_type, category),
         minimax_file_id=None,
         extracted_text=extracted_text,
     )
@@ -4048,6 +4062,280 @@ def _extract_document_content(file_path: Path, mime_type: str) -> Optional[str]:
     return None
 
 
+def _render_preview_shell(title: str, body_html: str) -> str:
+    safe_title = html.escape(title)
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{safe_title}</title>
+    <style>
+      :root {{
+        color-scheme: light;
+        --bg: #f8fafc;
+        --panel: #ffffff;
+        --panel-soft: #eef2ff;
+        --line: #dbe4f0;
+        --text: #0f172a;
+        --muted: #475569;
+        --accent: #2563eb;
+      }}
+      * {{ box-sizing: border-box; }}
+      body {{
+        margin: 0;
+        background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }}
+      .page {{
+        width: min(960px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 24px 0 40px;
+      }}
+      .hero {{
+        margin-bottom: 20px;
+        padding: 20px 24px;
+        border: 1px solid rgba(37, 99, 235, 0.14);
+        border-radius: 24px;
+        background: linear-gradient(135deg, rgba(37, 99, 235, 0.10), rgba(14, 165, 233, 0.06));
+      }}
+      .eyebrow {{
+        margin: 0 0 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }}
+      .title {{
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.2;
+      }}
+      .content {{
+        display: grid;
+        gap: 16px;
+      }}
+      .doc-paragraph, .doc-list-item {{
+        margin: 0;
+        padding: 0;
+        color: var(--text);
+        line-height: 1.75;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }}
+      .doc-heading {{
+        margin: 0;
+        color: #111827;
+        font-weight: 700;
+        line-height: 1.35;
+      }}
+      .doc-card, .slide-card, .table-card {{
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 18px 36px rgba(15, 23, 42, 0.06);
+      }}
+      .doc-card {{
+        padding: 24px;
+      }}
+      .slide-card {{
+        overflow: hidden;
+      }}
+      .slide-header, .table-header {{
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel-soft);
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }}
+      .slide-body, .table-body {{
+        padding: 18px;
+      }}
+      .slide-lines {{
+        display: grid;
+        gap: 10px;
+      }}
+      .table-scroll {{
+        overflow-x: auto;
+      }}
+      table {{
+        width: 100%;
+        border-collapse: collapse;
+      }}
+      th, td {{
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+        color: var(--text);
+        font-size: 14px;
+        line-height: 1.55;
+      }}
+      th {{
+        background: #f8fafc;
+        font-weight: 700;
+      }}
+      .text-fallback {{
+        margin: 0;
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.92);
+        color: var(--text);
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        font-size: 13px;
+        line-height: 1.7;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }}
+      .empty {{
+        padding: 28px;
+        border: 1px dashed var(--line);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.7);
+        color: var(--muted);
+        text-align: center;
+      }}
+      @media (max-width: 640px) {{
+        .page {{
+          width: min(100vw - 20px, 960px);
+          padding-top: 12px;
+        }}
+        .hero {{
+          padding: 16px 18px;
+          border-radius: 20px;
+        }}
+        .doc-card {{
+          padding: 18px;
+        }}
+      }}
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <p class="eyebrow">Inline preview</p>
+        <h1 class="title">{safe_title}</h1>
+      </section>
+      <section class="content">
+        {body_html}
+      </section>
+    </main>
+  </body>
+</html>
+"""
+
+
+def _render_text_fallback_preview(title: str, content: Optional[str]) -> str:
+    if not content or not content.strip():
+        body_html = '<div class="empty">No preview content is available for this file yet.</div>'
+    else:
+        body_html = f'<pre class="text-fallback">{html.escape(content.strip())}</pre>'
+    return _render_preview_shell(title, body_html)
+
+
+def _render_docx_preview_html(file_path: Path, title: str) -> str:
+    try:
+        from docx import Document
+
+        document = Document(file_path)
+        blocks: list[str] = []
+
+        for para in document.paragraphs:
+            text = (para.text or "").strip()
+            if not text:
+                continue
+            style_name = ((para.style.name if para.style else "") or "").lower()
+            if style_name.startswith("heading"):
+                level_match = re.search(r"(\d+)", style_name)
+                level = int(level_match.group(1)) if level_match else 2
+                level = max(1, min(level, 6))
+                blocks.append(f'<h{level} class="doc-heading">{html.escape(text)}</h{level}>')
+            else:
+                blocks.append(f'<p class="doc-paragraph">{html.escape(text)}</p>')
+
+        for table in document.tables:
+            rows_html: list[str] = []
+            for row in table.rows:
+                cells = [html.escape((cell.text or "").strip()) for cell in row.cells]
+                if any(cell for cell in cells):
+                    rows_html.append(
+                        "<tr>" + "".join(f"<td>{cell or '&nbsp;'}</td>" for cell in cells) + "</tr>"
+                    )
+            if rows_html:
+                blocks.append(
+                    '<section class="table-card">'
+                    '<div class="table-header">Table</div>'
+                    '<div class="table-body"><div class="table-scroll"><table>'
+                    + "".join(rows_html)
+                    + "</table></div></div></section>"
+                )
+
+        if not blocks:
+            return _render_text_fallback_preview(
+                title,
+                _extract_text_from_docx(file_path),
+            )
+
+        return _render_preview_shell(title, f'<article class="doc-card">{"".join(blocks)}</article>')
+    except Exception as e:
+        logger.error(f"DOCX preview render error: {e}")
+        return _render_text_fallback_preview(title, _extract_text_from_docx(file_path))
+
+
+def _render_pptx_preview_html(file_path: Path, title: str) -> str:
+    try:
+        import xml.etree.ElementTree as ET
+        from zipfile import ZipFile
+
+        slide_cards: list[str] = []
+        with ZipFile(file_path) as archive:
+            slide_paths = sorted(
+                (
+                    name
+                    for name in archive.namelist()
+                    if name.startswith("ppt/slides/slide") and name.endswith(".xml")
+                ),
+                key=_office_archive_sort_key,
+            )
+
+            for index, slide_path in enumerate(slide_paths, start=1):
+                root = ET.fromstring(archive.read(slide_path))
+                slide_texts = [
+                    node.text.strip()
+                    for node in root.iter()
+                    if node.tag.rsplit("}", 1)[-1] == "t" and node.text and node.text.strip()
+                ]
+                if not slide_texts:
+                    continue
+                lines_html = "".join(
+                    f'<p class="doc-list-item">{html.escape(line)}</p>'
+                    for line in slide_texts
+                )
+                slide_cards.append(
+                    '<section class="slide-card">'
+                    f'<div class="slide-header">Slide {index}</div>'
+                    f'<div class="slide-body"><div class="slide-lines">{lines_html}</div></div>'
+                    '</section>'
+                )
+
+        if not slide_cards:
+            return _render_text_fallback_preview(
+                title,
+                _extract_text_from_pptx(file_path),
+            )
+
+        return _render_preview_shell(title, "".join(slide_cards))
+    except Exception as e:
+        logger.error(f"PPTX preview render error: {e}")
+        return _render_text_fallback_preview(title, _extract_text_from_pptx(file_path))
+
+
 async def _upload_to_minimax(file_path: Path, api_key: str, base_url: str = "https://api.minimax.chat") -> Optional[str]:
     """Upload file to MiniMax file management API.
     
@@ -4142,7 +4430,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
             size=len(content),
             category=category,
             url=f"/api/files/{file_id}",
-            preview_url=f"/api/files/{file_id}/preview" if category == "image" else None,
+            preview_url=_build_preview_url(file_id, mime_type, category),
             minimax_file_id=minimax_file_id,
             extracted_text=extracted_text,
         )
@@ -4175,7 +4463,7 @@ async def get_file(file_id: str):
 
 @router.get("/files/{file_id}/preview")
 async def get_file_preview(file_id: str):
-    """Get file preview (for images)."""
+    """Get file preview for files that support embedded rendering."""
     upload_dir = _get_upload_dir()
     
     matching_files = list(upload_dir.glob(f"{file_id}.*"))
@@ -4184,14 +4472,21 @@ async def get_file_preview(file_id: str):
     
     file_path = matching_files[0]
     mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
-    
-    if not mime_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Preview only available for images")
-    
-    return FileResponse(
-        path=file_path,
-        media_type=mime_type
-    )
+
+    if mime_type.startswith("image/") or mime_type == "application/pdf":
+        return FileResponse(
+            path=file_path,
+            media_type=mime_type,
+            content_disposition_type="inline",
+        )
+
+    if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return HTMLResponse(_render_docx_preview_html(file_path, file_path.name))
+
+    if mime_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        return HTMLResponse(_render_pptx_preview_html(file_path, file_path.name))
+
+    raise HTTPException(status_code=400, detail="Preview only available for supported inline file types")
 
 
 @router.delete("/files/{file_id}")

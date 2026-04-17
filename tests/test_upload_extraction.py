@@ -6,7 +6,12 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from docx import Document
 from reportlab.pdfgen import canvas
 
-from horbot.web.api import _extract_document_content
+from horbot.web.api import (
+    _build_preview_url,
+    _extract_document_content,
+    _render_docx_preview_html,
+    _render_pptx_preview_html,
+)
 
 
 def create_simple_xlsx(path: Path, text: str) -> None:
@@ -166,6 +171,49 @@ class UploadExtractionTests(unittest.TestCase):
 
             self.assertIsNotNone(extracted)
             self.assertIn("PPTX extraction smoke line", extracted)
+
+    def test_docx_preview_html_contains_document_text(self):
+        with TemporaryDirectory() as tmpdir:
+            docx_path = Path(tmpdir) / "preview.docx"
+            document = Document()
+            document.add_heading("Preview Heading", level=1)
+            document.add_paragraph("Preview paragraph body")
+            document.save(docx_path)
+
+            rendered = _render_docx_preview_html(docx_path, "preview.docx")
+
+            self.assertIn("Preview Heading", rendered)
+            self.assertIn("Preview paragraph body", rendered)
+            self.assertIn("<html", rendered)
+
+    def test_pptx_preview_html_contains_slide_text(self):
+        with TemporaryDirectory() as tmpdir:
+            pptx_path = Path(tmpdir) / "preview.pptx"
+            create_simple_pptx(pptx_path, "Preview slide body")
+
+            rendered = _render_pptx_preview_html(pptx_path, "preview.pptx")
+
+            self.assertIn("Slide 1", rendered)
+            self.assertIn("Preview slide body", rendered)
+            self.assertIn("<html", rendered)
+
+    def test_build_preview_url_for_inline_office_documents(self):
+        self.assertEqual(
+            _build_preview_url(
+                "abc",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "document",
+            ),
+            "/api/files/abc/preview",
+        )
+        self.assertEqual(
+            _build_preview_url(
+                "xyz",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "document",
+            ),
+            "/api/files/xyz/preview",
+        )
 
 
 if __name__ == "__main__":

@@ -300,15 +300,44 @@ const getFilePreviewText = (file: NonNullable<Message['files']>[number], t: Tran
   return t('messageGroup.filePreview.default');
 };
 
-const getFilePreviewUrl = (file: AttachmentFile): string =>
-  file.localPreview || file.previewUrl || file.url || '';
-
 const isPdfFile = (file: AttachmentFile): boolean =>
   file.mimeType === 'application/pdf' || file.originalName.toLowerCase().endsWith('.pdf');
+
+const isInlineOfficePreviewFile = (file: AttachmentFile): boolean => {
+  const name = file.originalName.toLowerCase();
+  return name.endsWith('.docx') || name.endsWith('.pptx');
+};
 
 const isOfficeFile = (file: AttachmentFile): boolean => {
   const name = file.originalName.toLowerCase();
   return name.endsWith('.docx') || name.endsWith('.xlsx') || name.endsWith('.pptx');
+};
+
+const isLocalUploadedFileUrl = (value: string): boolean =>
+  /\/api\/files\/[^/?#]+$/i.test(value);
+
+const buildDerivedPreviewUrl = (value: string): string => {
+  if (!value || value.endsWith('/preview') || !isLocalUploadedFileUrl(value)) {
+    return value;
+  }
+  return `${value}/preview`;
+};
+
+const getFilePreviewUrl = (file: AttachmentFile): string => {
+  if (file.localPreview) {
+    return file.localPreview;
+  }
+  if (file.previewUrl) {
+    return file.previewUrl;
+  }
+  const rawUrl = file.url || '';
+  if (!rawUrl) {
+    return '';
+  }
+  if (isPdfFile(file) || isInlineOfficePreviewFile(file)) {
+    return buildDerivedPreviewUrl(rawUrl);
+  }
+  return rawUrl;
 };
 
 const isTextLikeFile = (file: AttachmentFile): boolean =>
@@ -322,7 +351,7 @@ const getFilePreviewModalSize = (file: AttachmentFile | null): 'lg' | 'full' => 
   if (!file) {
     return 'lg';
   }
-  return file.category === 'image' || isPdfFile(file) ? 'full' : 'lg';
+  return file.category === 'image' || isPdfFile(file) || isInlineOfficePreviewFile(file) ? 'full' : 'lg';
 };
 
 const renderFilePreviewContent = (file: AttachmentFile, t: TranslateFn): React.ReactNode => {
@@ -366,6 +395,16 @@ const renderFilePreviewContent = (file: AttachmentFile, t: TranslateFn): React.R
   }
 
   if (isPdfFile(file) && previewUrl) {
+    return (
+      <iframe
+        src={previewUrl}
+        title={file.originalName}
+        className="h-[72vh] w-full rounded-2xl border border-slate-200 bg-white"
+      />
+    );
+  }
+
+  if (isInlineOfficePreviewFile(file) && previewUrl) {
     return (
       <iframe
         src={previewUrl}

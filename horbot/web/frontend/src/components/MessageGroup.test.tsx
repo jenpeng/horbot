@@ -279,4 +279,86 @@ describe('MessageGroup', () => {
     expect(within(previewModal).getByText('2 / 3')).toBeInTheDocument();
     expect(thumbnails[1]).toHaveAttribute('aria-pressed', 'true');
   });
+
+  it('renders PDF attachments inside the preview modal instead of relying on a new tab', () => {
+    const { container } = renderWithProviders({
+      id: 'msg-7',
+      role: 'assistant',
+      content: '这是 PDF 预览。',
+      timestamp: new Date().toISOString(),
+      files: [
+        {
+          fileId: 'file-pdf',
+          filename: 'report.pdf',
+          originalName: 'report.pdf',
+          mimeType: 'application/pdf',
+          size: 245760,
+          category: 'document',
+          url: '/api/files/file-pdf',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByTestId('message-file-open-preview'));
+    const previewModal = screen.getByTestId('message-file-preview-modal');
+    const iframe = container.querySelector('iframe[src="/api/files/file-pdf/preview"]');
+
+    expect(previewModal).toBeInTheDocument();
+    expect(iframe).toBeInTheDocument();
+  });
+
+  it('renders Word attachments in the preview modal with the inline preview endpoint', () => {
+    const { container } = renderWithProviders({
+      id: 'msg-8',
+      role: 'assistant',
+      content: '这是 Word 预览。',
+      timestamp: new Date().toISOString(),
+      files: [
+        {
+          fileId: 'file-docx',
+          filename: 'proposal.docx',
+          originalName: 'proposal.docx',
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          size: 163840,
+          category: 'document',
+          url: '/api/files/file-docx',
+          extractedText: 'fallback text should not be the main preview path',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByTestId('message-file-open-preview'));
+    const previewModal = screen.getByTestId('message-file-preview-modal');
+    const iframe = container.querySelector('iframe[src="/api/files/file-docx/preview"]');
+
+    expect(previewModal).toBeInTheDocument();
+    expect(iframe).toBeInTheDocument();
+  });
+
+  it('renders PowerPoint attachments in the preview modal with the inline preview endpoint', () => {
+    const { container } = renderWithProviders({
+      id: 'msg-9',
+      role: 'assistant',
+      content: '这是 PowerPoint 预览。',
+      timestamp: new Date().toISOString(),
+      files: [
+        {
+          fileId: 'file-pptx',
+          filename: 'deck.pptx',
+          originalName: 'deck.pptx',
+          mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          size: 524288,
+          category: 'document',
+          url: '/api/files/file-pptx',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByTestId('message-file-open-preview'));
+    const previewModal = screen.getByTestId('message-file-preview-modal');
+    const iframe = container.querySelector('iframe[src="/api/files/file-pptx/preview"]');
+
+    expect(previewModal).toBeInTheDocument();
+    expect(iframe).toBeInTheDocument();
+  });
 });
