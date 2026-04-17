@@ -1349,7 +1349,7 @@ const SkillsPage: React.FC = () => {
                   <div className="space-y-2 text-xs text-primary-600">
                     <p><strong>browser:</strong> python3 -m horbot.mcp.browser.server</p>
                     <p><strong>excel:</strong> python3 -m horbot.mcp.excel.server</p>
-                    <p><strong>officecli:</strong> Use OfficeCLI's built-in MCP server and keep the server name as <code>officecli</code>, <code>office-word</code>, <code>office-excel</code>, or <code>office-powerpoint</code> for better tool routing.</p>
+                    <p><strong>officecli:</strong> <code>officecli mcp</code> (recommended server names: <code>officecli</code>, <code>office-word</code>, <code>office-excel</code>, <code>office-powerpoint</code>)</p>
                   </div>
                 </div>
               </div>
