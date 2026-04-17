@@ -73,6 +73,7 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 - Markdown rendering for assistant messages
 - Denser chat bubbles and tighter Markdown spacing to reduce blank space in long conversations
 - Inline preview for image, audio, PDF, Office, and text attachments
+- Office document operations via OfficeCLI MCP, including structure-aware create/edit/view/validate flows for `.docx`, `.xlsx`, and `.pptx`
 - Standalone remote image URLs in assistant history are promoted into normal image-card attachments when possible, instead of degrading to bare links
 - Multi-image preview modals now include a bottom thumbnail strip for faster visual switching
 - Drag-and-drop, paste upload, and retry flows
@@ -84,6 +85,7 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 
 - Multiple provider backends
 - MCP integration
+- Automatic OfficeCLI MCP wiring during local setup so agents can use Word, Excel, PowerPoint, and OpenXML-aware document tools without extra manual configuration
 - `browser`, `web_search`, and `web_fetch` as the standard browser/search toolset, with Playwright as the default browser runtime
 - External channels such as WeCom, Feishu, ShareCRM, Telegram, Discord, Slack, Matrix, Email, Mochat, and others
 - WeCom AI Bot support with reply-mode streaming, media upload, and inbound media download/decryption
