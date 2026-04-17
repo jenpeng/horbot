@@ -1,9 +1,14 @@
+import io
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 from zipfile import ZIP_DEFLATED, ZipFile
 
+import httpx
 from docx import Document
+from fastapi import FastAPI
 from reportlab.pdfgen import canvas
 
 from horbot.web.api import (
@@ -11,6 +16,7 @@ from horbot.web.api import (
     _extract_document_content,
     _render_docx_preview_html,
     _render_pptx_preview_html,
+    router as api_router,
 )
 
 
@@ -214,6 +220,44 @@ class UploadExtractionTests(unittest.TestCase):
             ),
             "/api/files/xyz/preview",
         )
+
+
+class UploadApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_upload_document_does_not_call_minimax_bridge(self):
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with TemporaryDirectory() as tmpdir:
+            upload_dir = Path(tmpdir)
+            docx_path = upload_dir / "sample.docx"
+            document = Document()
+            document.add_paragraph("Upload bridge removal smoke line")
+            document.save(docx_path)
+
+            with (
+                patch("horbot.web.api._get_upload_dir", return_value=upload_dir),
+                patch(
+                    "horbot.web.api.get_cached_config",
+                    return_value=SimpleNamespace(providers={"minimax": {"apiKey": "fake-key"}}),
+                ),
+            ):
+                async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                    response = await client.post(
+                        "/api/upload",
+                        files={
+                            "files": (
+                                "sample.docx",
+                                io.BytesIO(docx_path.read_bytes()),
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            )
+                        },
+                    )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(len(payload), 1)
+            self.assertIsNone(payload[0]["minimax_file_id"])
 
 
 if __name__ == "__main__":

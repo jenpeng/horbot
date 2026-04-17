@@ -4336,54 +4336,11 @@ def _render_pptx_preview_html(file_path: Path, title: str) -> str:
         return _render_text_fallback_preview(title, _extract_text_from_pptx(file_path))
 
 
-async def _upload_to_minimax(file_path: Path, api_key: str, base_url: str = "https://api.minimax.chat") -> Optional[str]:
-    """Upload file to MiniMax file management API.
-    
-    API Reference: https://platform.minimaxi.com/document/guides/chat-conversation
-    Endpoint: POST /v1/files/upload
-    """
-    import httpx
-    
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            with open(file_path, "rb") as f:
-                files = {"file": (file_path.name, f, "application/octet-stream")}
-                headers = {"Authorization": f"Bearer {api_key}"}
-                response = await client.post(
-                    f"{base_url}/v1/files/upload",
-                    files=files,
-                    headers=headers,
-                )
-            
-            if response.status_code == 200:
-                data = response.json()
-                file_id = data.get("file", {}).get("file_id")
-                if file_id:
-                    logger.info(f"Uploaded to MiniMax: {file_path.name} -> {file_id}")
-                    return file_id
-            else:
-                logger.warning(f"MiniMax upload failed: {response.status_code} - {response.text}")
-    except Exception as e:
-        logger.error(f"MiniMax upload error: {e}")
-    
-    return None
-
-
 @router.post("/upload", response_model=List[UploadResponse])
 async def upload_files(files: List[UploadFile] = File(...)):
     """Upload multiple files."""
     upload_dir = _get_upload_dir()
-    config = get_cached_config()
     results = []
-    
-    # Get MiniMax API key if available
-    minimax_api_key = None
-    minimax_base_url = "https://api.minimax.chat"
-    providers = config.providers or {}
-    if "minimax" in providers:
-        minimax_config = providers["minimax"] or {}
-        minimax_api_key = minimax_config.get("apiKey") or minimax_config.get("api_key")
-        minimax_base_url = minimax_config.get("baseUrl", "https://api.minimax.chat")
     
     for file in files:
         # Validate file size
@@ -4408,7 +4365,6 @@ async def upload_files(files: List[UploadFile] = File(...)):
         with open(file_path, "wb") as f:
             f.write(content)
         
-        # Upload to MiniMax for document files
         minimax_file_id = None
         extracted_text = None
         if category == "document":
@@ -4416,10 +4372,6 @@ async def upload_files(files: List[UploadFile] = File(...)):
             extracted_text = _extract_document_content(file_path, mime_type)
             if extracted_text:
                 logger.info(f"Extracted {len(extracted_text)} characters from {file.filename}")
-            
-            # Upload to MiniMax if API key available
-            if minimax_api_key:
-                minimax_file_id = await _upload_to_minimax(file_path, minimax_api_key, minimax_base_url)
         
         # Create response
         result = UploadResponse(

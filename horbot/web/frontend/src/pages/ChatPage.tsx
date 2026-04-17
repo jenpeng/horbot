@@ -2717,9 +2717,6 @@ const ChatPage: React.FC = () => {
     const trimmedContent = content.trim();
     const normalizedFiles = normalizeMessageFiles(files) || [];
     const uploadedFiles = serializeMessageFiles(normalizedFiles);
-    const fileIds = uploadedFiles
-      ?.map((file) => file.minimax_file_id)
-      .filter((value): value is string => typeof value === 'string' && value.length > 0);
     const retryRequest: RetryRequest = {
       conversationId: currentConversation.id,
       content: trimmedContent,
@@ -2783,7 +2780,6 @@ const ChatPage: React.FC = () => {
           message: trimmedContent,
           sessionKey,
           files: uploadedFiles,
-          fileIds,
           conversationId: currentConversation.id,
           conversationType: currentConversation.type,
           agentId: currentConversation.type === ConversationType.DM ? currentConversation.targetId : undefined,
