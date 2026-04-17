@@ -65,4 +65,7 @@ Current web runtime notes:
 - `browser` MCP now defaults to Playwright instead of a built-in `web-access` proxy
 - `./horbot.sh start` only starts the normal Horbot services: backend, frontend, and gateway
 - the agent now uses `browser`, `web_search`, and `web_fetch` as the standard web/search tools
+- `./horbot.sh install` now also bootstraps `OfficeCLI`, injects a default `officecli mcp` server into `.horbot/config.json`, and appends the detected OfficeCLI bin directory to `tools.exec.pathAppend`
+- `./horbot.sh install officecli` can be used to install or refresh only the OfficeCLI dependency and default MCP wiring
+- `./horbot.sh smoke officecli` validates direct `officecli` document operations for `.docx`, `.xlsx`, and `.pptx`
 - Configuration now exposes a remote-image cache status panel and manual clear action for chat image-card materialization

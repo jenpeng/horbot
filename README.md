@@ -105,6 +105,10 @@ cd horbot
 ./horbot.sh start
 ```
 
+`./horbot.sh install` now also installs `OfficeCLI`, writes a default `officecli mcp` server into `./.horbot/config.json`, and appends the detected OfficeCLI bin directory to `tools.exec.pathAppend` so the agent can use Office document tools immediately after setup.
+
+To validate the Office document toolchain end to end, run `./horbot.sh smoke officecli`. It directly checks `.docx`, `.xlsx`, and `.pptx` create/edit/view/validate flows with the locally installed `officecli`.
+
 Default local URLs:
 
 - Web UI: [http://127.0.0.1:3000](http://127.0.0.1:3000)
@@ -115,6 +119,8 @@ Common commands:
 ```bash
 ./horbot.sh status
 ./horbot.sh restart
+./horbot.sh install officecli
+./horbot.sh smoke officecli
 ./horbot.sh logs backend
 ./horbot.sh smoke browser-e2e
 ```

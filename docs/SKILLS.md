@@ -53,3 +53,18 @@ The active skill path is agent-scoped:
 - `.horbot/agents/<agent-id>/skills`
 
 Legacy `workspace/skills` assumptions no longer describe the current runtime.
+
+## Selected Built-In Skills
+
+### `officecli` - Office document operations
+
+Use this when OfficeCLI MCP is available and the task involves Word, Excel, PowerPoint, or OpenXML-aware document edits.
+
+Rules:
+
+- inspect document structure with `view` / `get` / `query` before mutating content
+- prefer high-level Office operations over raw XML or XPath
+- if the server exposes a single generic tool such as `mcp_officecli_officecli`, pass the concrete `command` argument directly
+- for `.xlsx`, use real OfficeCLI property names such as `font.color`, `font.size`, `fill`, and `alignment.horizontal`
+- for `.pptx`, run `validate` after structural edits and prefer recreating a deck at a fresh path if validation starts failing
+- if OfficeCLI is unavailable, do not claim native Office edits succeeded

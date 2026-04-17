@@ -177,6 +177,28 @@ pip install horbot-ai
 > 在 `./.horbot/config.json` 中设置您的 API 密钥。
 > 获取 API 密钥：[OpenRouter](https://openrouter.ai/keys)（全球）· [Brave Search](https://brave.com/search/api/)（可选，用于网页搜索）
 
+如果使用仓库自带的 `./horbot.sh install` 初始化项目，现在会额外自动完成三件事：
+
+- 安装 `OfficeCLI`
+- 在 `./.horbot/config.json` 中默认补上 `officecli` MCP server
+- 把检测到的 OfficeCLI 安装目录补到 `tools.exec.pathAppend`
+
+这样安装完成后，Agent 就能直接调用 Word / Excel / PowerPoint 相关 OfficeCLI MCP 工具。
+
+如果只想单独安装或升级 OfficeCLI，可以执行：
+
+```bash
+./horbot.sh install officecli
+```
+
+如果想验证这条能力链是否已经打通，可以执行：
+
+```bash
+./horbot.sh smoke officecli
+```
+
+这条烟测会直接校验 `.docx`、`.xlsx`、`.pptx` 的创建、写入、查看和校验流程。
+
 **1. 初始化**
 
 ```bash
@@ -573,6 +595,62 @@ horbot 支持 [MCP](https://modelcontextprotocol.io/) — 连接外部工具服�
 
 > [!TIP]
 > 如果你接入 [OfficeCLI](https://github.com/iOfficeAI/OfficeCLI) 的内置 MCP server，建议把 server 名称命名为 `officecli`、`office-word`、`office-excel` 或 `office-powerpoint`。horbot 会把这些名称识别为 Office 文件工具，并在用户提到 `docx` / `xlsx` / `pptx` / `Word` / `Excel` / `PowerPoint` / `OpenXML` 时更积极地把对应 MCP 工具暴露给 Agent。
+
+例如可以这样配置到 `config.json`：
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "officecli": {
+        "command": "officecli",
+        "args": ["mcp"],
+        "env": {},
+        "tool_timeout": 120
+      }
+    }
+  }
+}
+```
+
+如果你希望按文档类型做更明确的路由，也可以拆成多个服务名，但底层命令仍然都是 `officecli mcp`：
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "office-word": {
+        "command": "officecli",
+        "args": ["mcp"],
+        "env": {},
+        "tool_timeout": 120
+      },
+      "office-excel": {
+        "command": "officecli",
+        "args": ["mcp"],
+        "env": {},
+        "tool_timeout": 120
+      },
+      "office-powerpoint": {
+        "command": "officecli",
+        "args": ["mcp"],
+        "env": {},
+        "tool_timeout": 120
+      }
+    }
+  }
+}
+```
+
+前提是当前机器已经安装好 `officecli`，并且终端里执行 `officecli --version` 能成功。
+
+如果你想顺手检查本机上的 OfficeCLI 文档链路是否可用，可以运行：
+
+```bash
+./horbot.sh smoke officecli --json
+```
+
+成功时会返回 `docx`、`xlsx`、`pptx` 三类场景的通过结果。
 
 ### 安全
 

@@ -159,6 +159,9 @@ AI 自主改进能力，包括代码审查、能力评估、错误分析。
 **规则**：
 - 优先用 `view` / `get` / `query` 类工具先读结构，再做写入
 - 优先使用高层 Office 操作，只有必要时才退到 raw XML / XPath
+- 如果 MCP 只暴露一个通用工具，例如 `mcp_officecli_officecli`，直接传 `command=create|view|set|add|validate|batch` 等参数使用即可
+- 处理 `.xlsx` 样式或属性时，优先使用 OfficeCLI 的真实属性名，例如 `font.color`、`font.size`、`fill`、`alignment.horizontal`
+- 处理 `.pptx` 结构性改动后要执行 `validate`；如果反复编辑后校验失败，优先改用新的输出文件重建，而不是继续在坏文件上叠改
 - OfficeCLI 不可用时，不要伪造 Office 原生编辑结果
 
 ### weather - 天气查询

@@ -24,6 +24,7 @@ MAIN_WORKSPACE_DIR="$DATA_ROOT/agents/main/workspace"
 PID_DIR="$DATA_ROOT/runtime/pids"
 LOG_DIR="$DATA_ROOT/runtime/logs"
 BACKEND_FINGERPRINT_FILE="$DATA_ROOT/runtime/backend.codehash"
+OFFICECLI_INSTALL_URL="https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh"
 
 # Logo
 LOGO="🐎"
@@ -116,6 +117,144 @@ install_backend() {
     print_success "后端依赖安装完成"
 }
 
+detect_officecli_command() {
+    if command -v officecli >/dev/null 2>&1; then
+        command -v officecli
+        return 0
+    fi
+
+    if [ -x "$HOME/.local/bin/officecli" ]; then
+        echo "$HOME/.local/bin/officecli"
+        return 0
+    fi
+
+    echo "officecli"
+}
+
+detect_officecli_bin_dir() {
+    local officecli_cmd
+    officecli_cmd="$(detect_officecli_command)"
+    if [ "$officecli_cmd" = "officecli" ]; then
+        echo ""
+        return 0
+    fi
+    dirname "$officecli_cmd"
+}
+
+ensure_officecli_in_path() {
+    local officecli_bin_dir
+    officecli_bin_dir="$(detect_officecli_bin_dir)"
+    if [ -z "$officecli_bin_dir" ]; then
+        return 0
+    fi
+
+    case ":$PATH:" in
+        *":$officecli_bin_dir:"*) ;;
+        *)
+            export PATH="$officecli_bin_dir:$PATH"
+            print_info "已将 OfficeCLI 目录加入当前 PATH: $officecli_bin_dir"
+            ;;
+    esac
+}
+
+install_officecli() {
+    print_info "检查 OfficeCLI..."
+
+    local officecli_cmd
+    officecli_cmd="$(detect_officecli_command)"
+    if [ "$officecli_cmd" != "officecli" ] && [ -x "$officecli_cmd" ]; then
+        ensure_officecli_in_path
+        local current_version
+        current_version="$("$officecli_cmd" --version 2>/dev/null || true)"
+        if [ -n "$current_version" ]; then
+            print_success "OfficeCLI 已安装: $current_version"
+        else
+            print_success "OfficeCLI 已安装: $officecli_cmd"
+        fi
+        return 0
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        print_error "未找到 curl，无法安装 OfficeCLI"
+        return 1
+    fi
+
+    print_info "安装 OfficeCLI..."
+    local install_script
+    install_script="$(mktemp)"
+    curl -fsSL "$OFFICECLI_INSTALL_URL" -o "$install_script"
+    bash "$install_script"
+    rm -f "$install_script"
+
+    ensure_officecli_in_path
+    officecli_cmd="$(detect_officecli_command)"
+    if [ "$officecli_cmd" = "officecli" ] || [ ! -x "$officecli_cmd" ]; then
+        print_error "OfficeCLI 安装完成后仍未检测到可执行文件"
+        return 1
+    fi
+
+    local installed_version
+    installed_version="$("$officecli_cmd" --version 2>/dev/null || true)"
+    if [ -n "$installed_version" ]; then
+        print_success "OfficeCLI 安装完成: $installed_version"
+    else
+        print_success "OfficeCLI 安装完成: $officecli_cmd"
+    fi
+}
+
+ensure_officecli_defaults_in_config() {
+    local config_file="$1"
+    if [ ! -f "$config_file" ]; then
+        return 0
+    fi
+
+    local python_cmd="python3"
+    if [ -x "$VENV_DIR/bin/python" ]; then
+        python_cmd="$VENV_DIR/bin/python"
+    fi
+
+    local helper_output
+    helper_output="$(
+        cd "$PROJECT_ROOT"
+        "$python_cmd" - "$config_file" <<'PY'
+import importlib.util
+import sys
+from pathlib import Path
+
+helper_path = Path("horbot/config/officecli.py").resolve()
+spec = importlib.util.spec_from_file_location("horbot_config_officecli_helper", helper_path)
+if spec is None or spec.loader is None:
+    raise RuntimeError(f"Unable to load OfficeCLI helper from {helper_path}")
+module = importlib.util.module_from_spec(spec)
+sys.modules.setdefault(spec.name, module)
+spec.loader.exec_module(module)
+
+result = module.ensure_officecli_defaults_in_file(sys.argv[1])
+print(f"{int(result['changed'])}|{result['command']}|{result['bin_dir']}")
+PY
+    )"
+
+    local changed_flag officecli_cmd officecli_bin_dir
+    IFS='|' read -r changed_flag officecli_cmd officecli_bin_dir <<< "$helper_output"
+
+    if [ -n "$officecli_bin_dir" ]; then
+        case ":$PATH:" in
+            *":$officecli_bin_dir:"*) ;;
+            *) export PATH="$officecli_bin_dir:$PATH" ;;
+        esac
+    fi
+
+    if [ "$changed_flag" = "1" ]; then
+        print_success "已补齐 OfficeCLI MCP 默认配置"
+    else
+        print_info "OfficeCLI MCP 默认配置已存在，跳过补写"
+    fi
+
+    if [ -n "$officecli_cmd" ]; then
+        print_info "OfficeCLI MCP 命令: $officecli_cmd"
+    fi
+}
+
 # 安装前端依赖
 install_frontend() {
     print_info "安装前端依赖..."
@@ -142,6 +281,7 @@ install_frontend() {
 install_all() {
     install_backend
     install_frontend
+    install_officecli
     create_default_config
     print_success "所有依赖安装完成"
 }
@@ -152,14 +292,12 @@ create_default_config() {
     
     if [ -f "$config_file" ]; then
         print_info "配置文件已存在，跳过创建"
-        return 0
-    fi
-    
-    print_info "创建默认配置文件..."
-    
-    mkdir -p "$DATA_ROOT"
-    
-    cat > "$config_file" << 'EOF'
+    else
+        print_info "创建默认配置文件..."
+        
+        mkdir -p "$DATA_ROOT"
+        
+        cat > "$config_file" << 'EOF'
 {
   "agents": {
     "defaults": {
@@ -491,8 +629,11 @@ create_default_config() {
   }
 }
 EOF
-    
-    print_success "默认配置文件已创建: $config_file"
+        
+        print_success "默认配置文件已创建: $config_file"
+    fi
+
+    ensure_officecli_defaults_in_config "$config_file"
     
     # 创建 workspace 目录
     mkdir -p "$MAIN_WORKSPACE_DIR"
@@ -1748,6 +1889,24 @@ smoke_bound_channel_dispatch() {
     "$python_cmd" "$script" "$@"
 }
 
+smoke_officecli() {
+    ensure_dirs
+
+    local script="$PROJECT_ROOT/scripts/officecli_smoke.py"
+    if [ ! -f "$script" ]; then
+        print_error "OfficeCLI 烟测脚本不存在: $script"
+        return 1
+    fi
+
+    local python_cmd="python3"
+    if [ -x "$VENV_DIR/bin/python" ]; then
+        python_cmd="$VENV_DIR/bin/python"
+    fi
+
+    print_info "运行 OfficeCLI 文档烟雾测试..."
+    "$python_cmd" "$script" "$@"
+}
+
 smoke_dashboard() {
     ensure_dirs
 
@@ -1911,6 +2070,9 @@ smoke_test() {
         bound-channel-dispatch)
             smoke_bound_channel_dispatch "$@"
             ;;
+        officecli)
+            smoke_officecli "$@"
+            ;;
         browser-e2e)
             smoke_browser_e2e "$@"
             ;;
@@ -1990,6 +2152,7 @@ show_help() {
     echo "  install            安装所有依赖并创建默认配置"
     echo "  install backend    安装后端依赖"
     echo "  install frontend   安装前端依赖"
+    echo "  install officecli  安装或升级 OfficeCLI，并补齐默认 MCP 配置"
     echo ""
     echo "  config             创建默认配置文件"
     echo ""
@@ -2012,6 +2175,7 @@ show_help() {
     echo "  smoke mock-relay   运行本地 mock relay SSE 回归"
     echo "  smoke external-inbound-memory  运行外部入站 -> agent 执行 -> 来源记忆元数据回查烟雾测试"
     echo "  smoke bound-channel-dispatch  运行单聊 -> Agent 工具调用 -> 绑定外部渠道路由烟雾测试"
+    echo "  smoke officecli    运行 OfficeCLI 的 docx/xlsx/pptx 直接烟雾测试"
     echo "  smoke browser-e2e  运行真实浏览器端到端回归（Configuration + Agent 资产 + Dashboard + Skills + Performance + 失败重试 + 记忆引用 + 接力中断 + 附件上传 + 办公附件上传 + 图片/音频识别 + 粘贴上传 + 拖拽上传 + 附件重试 + 附件顺序 + 单聊 + 团队接力）"
     echo "  smoke config       运行 Configuration 页面烟雾测试"
     echo "  smoke agent-assets 运行多 Agent 页面资产管理烟雾测试"
@@ -2114,6 +2278,7 @@ main() {
                 all) install_all ;;
                 backend) install_backend ;;
                 frontend) install_frontend ;;
+                officecli) install_officecli; create_default_config ;;
                 *) print_error "未知参数: $2"; show_help; exit 1 ;;
             esac
             ;;
