@@ -5,6 +5,7 @@
   <p>
     <img src="https://img.shields.io/badge/python-%E2%89%A53.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+    <img src="https://visitor-badge.laobi.icu/badge?page_id=jenpeng.horbot&style=for-the-badge&color=00d4ff" alt="Views">
   </p>
   <p>
     <a href="./README.md">English</a> |
