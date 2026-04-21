@@ -77,6 +77,8 @@ const SkillsPage: React.FC = () => {
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [showPreview, setShowPreview] = useState(true);
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
+  const [expandedMissingDetails, setExpandedMissingDetails] = useState<Set<string>>(new Set());
+  const [hoveredMissingDetails, setHoveredMissingDetails] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [mcpEditor, setMcpEditor] = useState<MCPServerEditorState>({
     isOpen: false,
@@ -306,6 +308,18 @@ const SkillsPage: React.FC = () => {
       newSelected.add(skillName);
     }
     setSelectedSkills(newSelected);
+  };
+
+  const toggleMissingDetails = (skillName: string) => {
+    setExpandedMissingDetails((current) => {
+      const next = new Set(current);
+      if (next.has(skillName)) {
+        next.delete(skillName);
+      } else {
+        next.add(skillName);
+      }
+      return next;
+    });
   };
 
   const selectAllSkills = () => {
@@ -712,12 +726,26 @@ const SkillsPage: React.FC = () => {
                       <div className="flex items-center justify-between gap-3 pt-3 border-t border-surface-100">
                         <div className="flex items-center gap-2 flex-wrap">
                           {!skill.available && (
-                            <Badge variant="error" size="sm">
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1.5 rounded-md bg-accent-red/10 px-3 py-1.5 text-xs font-semibold leading-tight text-accent-red transition-colors hover:bg-accent-red/15"
+                              aria-expanded={expandedMissingDetails.has(skill.name)}
+                              aria-controls={`skill-missing-details-${skill.name}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleMissingDetails(skill.name);
+                              }}
+                              onMouseEnter={() => setHoveredMissingDetails(skill.name)}
+                              onMouseLeave={() => setHoveredMissingDetails((current) => (
+                                current === skill.name ? null : current
+                              ))}
+                              data-testid={`skill-missing-toggle-${skill.name}`}
+                            >
                               <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                               </svg>
                               {t('skills.badge.missing')}
-                            </Badge>
+                            </button>
                           )}
                           {getCompatibilityBadge(skill.compatibility, t) && (
                             <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getCompatibilityBadge(skill.compatibility, t)?.className}`}>
@@ -775,8 +803,16 @@ const SkillsPage: React.FC = () => {
                         )}
                       </div>
 
-                      {((skill.missing_requirements && skill.missing_requirements.length > 0) || (skill.install && skill.install.length > 0 && !skill.available)) && (
-                        <div className="mt-3 bg-semantic-error-light border border-semantic-error/20 rounded-lg p-3">
+                      {((skill.missing_requirements && skill.missing_requirements.length > 0) || (skill.install && skill.install.length > 0 && !skill.available)) &&
+                        (expandedMissingDetails.has(skill.name) || hoveredMissingDetails === skill.name) && (
+                        <div
+                          id={`skill-missing-details-${skill.name}`}
+                          className="mt-3 bg-semantic-error-light border border-semantic-error/20 rounded-lg p-3"
+                          onMouseEnter={() => setHoveredMissingDetails(skill.name)}
+                          onMouseLeave={() => setHoveredMissingDetails((current) => (
+                            current === skill.name ? null : current
+                          ))}
+                        >
                           <div className="space-y-2 text-xs text-semantic-error">
                             {skill.missing_requirements && skill.missing_requirements.length > 0 && (
                               <p className="flex items-start gap-2">

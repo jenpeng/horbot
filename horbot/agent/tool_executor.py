@@ -9,6 +9,7 @@ from loguru import logger
 from horbot.agent.tools.permission import PermissionLevel
 from horbot.agent.tools.registry import ToolRegistry
 from horbot.agent.context import ContextBuilder
+from horbot.utils.tool_arguments import normalize_tool_arguments
 
 
 class ToolExecutionResult:
@@ -52,6 +53,8 @@ class ToolExecutor:
         tools_to_execute = []
 
         for tool_idx, tool_call in enumerate(tool_calls):
+            normalized_arguments = normalize_tool_arguments(getattr(tool_call, "arguments", None))
+            tool_call.arguments = normalized_arguments
             args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
             logger.debug("tools_used before check: {}, iteration: {}", tools_used, iteration)

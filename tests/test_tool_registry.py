@@ -3,6 +3,7 @@ import unittest
 from horbot.agent.tools.base import Tool, ToolCategory, ToolMetadata
 from horbot.agent.tools.permission import PermissionManager
 from horbot.agent.tools.registry import ToolRegistry
+from horbot.providers.base import ToolCallRequest
 
 
 class DummyTool(Tool):
@@ -34,6 +35,18 @@ class DummyTool(Tool):
 
 
 class ToolRegistryTests(unittest.TestCase):
+    def test_tool_call_request_normalizes_list_arguments(self):
+        request = ToolCallRequest(
+            id="call_1",
+            name="mcp_officecli_officecli",
+            arguments=[{"path": "/tmp/demo.pptx"}, {"command": "create"}],  # type: ignore[arg-type]
+        )
+
+        self.assertEqual(
+            request.arguments,
+            {"path": "/tmp/demo.pptx", "command": "create"},
+        )
+
     def test_normalize_user_message_for_multimodal_content(self):
         content = [
             {"type": "text", "text": "请打开浏览器"},
@@ -159,6 +172,23 @@ class ToolRegistryTests(unittest.TestCase):
 
 
 class GuardedToolRegistryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_execute_with_result_normalizes_list_arguments(self):
+        class EchoTool(DummyTool):
+            async def execute(self, **kwargs):
+                return kwargs["path"]
+
+        registry = ToolRegistry(PermissionManager(profile="full", allow=["mcp_officecli_officecli"]))
+        registry.register(EchoTool("mcp_officecli_officecli"))
+
+        result = await registry.execute_with_result(
+            "mcp_officecli_officecli",
+            [{"path": "/tmp/demo.pptx"}, {"command": "create"}],  # type: ignore[arg-type]
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.output, "/tmp/demo.pptx")
+        self.assertEqual(result.params["command"], "create")
+
     async def test_execute_with_result_blocks_suspicious_tool_output(self):
         class SuspiciousTool(DummyTool):
             async def execute(self, **kwargs):

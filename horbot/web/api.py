@@ -87,6 +87,10 @@ _hot_reload_test_counter = 0
 _cron_service = None
 _session_manager = None
 _api_started_at = time.time()
+_INLINE_PREVIEW_HEADERS = {
+    "Cache-Control": "no-store, max-age=0",
+    "Pragma": "no-cache",
+}
 
 
 def _resolve_web_search_provider_api_key(search_config: Any, provider: str | None = None) -> str:
@@ -1286,6 +1290,7 @@ class AgentLoopPool:
             api_key=provider_config.api_key,
             api_base=provider_config.api_base,
             extra_headers=provider_config.extra_headers,
+            compatibility_profile=getattr(provider_config, "compatibility_profile", "auto"),
             default_model=agent_model,
             upload_dir=upload_dir,
         )
@@ -3908,11 +3913,133 @@ def _extract_text_from_docx(file_path: Path) -> Optional[str]:
                 text_parts.append(para.text)
         return "\n\n".join(text_parts) if text_parts else None
     except ImportError:
-        logger.warning("python-docx not installed, skipping DOCX text extraction")
-        return None
+        logger.info("python-docx not installed, using XML fallback for DOCX text extraction")
+        return _extract_text_from_docx_xml(file_path)
     except Exception as e:
         logger.error(f"DOCX text extraction error: {e}")
+        return _extract_text_from_docx_xml(file_path)
+
+
+def _docx_tag_name(value: str) -> str:
+    return value.rsplit("}", 1)[-1]
+
+
+def _docx_attribute_value(attrs: dict[str, str], suffix: str) -> str:
+    for key, value in attrs.items():
+        if key.rsplit("}", 1)[-1] == suffix:
+            return value
+    return ""
+
+
+def _docx_paragraph_text(node: Any) -> str:
+    fragments: list[str] = []
+    for child in node.iter():
+        tag = _docx_tag_name(getattr(child, "tag", ""))
+        if tag == "tab":
+            fragments.append("\t")
+            continue
+        if tag == "br":
+            fragments.append("\n")
+            continue
+        if tag != "t":
+            continue
+        text = child.text or ""
+        if text:
+            fragments.append(text)
+    return "".join(fragments).strip()
+
+
+def _docx_paragraph_style(node: Any) -> str:
+    for child in node:
+        if _docx_tag_name(getattr(child, "tag", "")) != "pPr":
+            continue
+        for prop in child:
+            if _docx_tag_name(getattr(prop, "tag", "")) == "pStyle":
+                return _docx_attribute_value(getattr(prop, "attrib", {}), "val").strip().lower()
+    return ""
+
+
+def _parse_docx_blocks(file_path: Path) -> list[dict[str, Any]]:
+    try:
+        import xml.etree.ElementTree as ET
+        from zipfile import ZipFile
+
+        with ZipFile(file_path) as archive:
+            if "word/document.xml" not in archive.namelist():
+                return []
+            root = ET.fromstring(archive.read("word/document.xml"))
+
+        body = next(
+            (node for node in root.iter() if _docx_tag_name(getattr(node, "tag", "")) == "body"),
+            None,
+        )
+        if body is None:
+            return []
+
+        blocks: list[dict[str, Any]] = []
+        for child in body:
+            tag = _docx_tag_name(getattr(child, "tag", ""))
+            if tag == "p":
+                text = _docx_paragraph_text(child)
+                if text:
+                    blocks.append({
+                        "type": "paragraph",
+                        "text": text,
+                        "style": _docx_paragraph_style(child),
+                    })
+                continue
+
+            if tag != "tbl":
+                continue
+
+            rows: list[list[str]] = []
+            for row in child:
+                if _docx_tag_name(getattr(row, "tag", "")) != "tr":
+                    continue
+                cells: list[str] = []
+                for cell in row:
+                    if _docx_tag_name(getattr(cell, "tag", "")) != "tc":
+                        continue
+                    cell_lines = [
+                        _docx_paragraph_text(paragraph)
+                        for paragraph in cell
+                        if _docx_tag_name(getattr(paragraph, "tag", "")) == "p"
+                    ]
+                    cell_text = "\n".join(line for line in cell_lines if line).strip()
+                    cells.append(cell_text)
+                if any(cell for cell in cells):
+                    rows.append(cells)
+            if rows:
+                blocks.append({"type": "table", "rows": rows})
+
+        return blocks
+    except Exception as e:
+        logger.error(f"DOCX XML parse error: {e}")
+        return []
+
+
+def _extract_text_from_docx_xml(file_path: Path) -> Optional[str]:
+    blocks = _parse_docx_blocks(file_path)
+    if not blocks:
         return None
+
+    text_parts: list[str] = []
+    for block in blocks:
+        if block.get("type") == "paragraph":
+            text = str(block.get("text") or "").strip()
+            if text:
+                text_parts.append(text)
+            continue
+
+        if block.get("type") != "table":
+            continue
+        rows = block.get("rows") or []
+        for row in rows:
+            values = [str(cell or "").strip() for cell in row]
+            if any(values):
+                text_parts.append("\t".join(values))
+
+    return "\n\n".join(text_parts) if text_parts else None
 
 
 def _office_archive_sort_key(name: str) -> tuple[int, str]:
@@ -4283,9 +4410,55 @@ def _render_docx_preview_html(file_path: Path, title: str) -> str:
             )
 
         return _render_preview_shell(title, f'<article class="doc-card">{"".join(blocks)}</article>')
+    except ImportError:
+        logger.info("python-docx not installed, using XML fallback for DOCX preview")
+        return _render_docx_preview_html_from_xml(file_path, title)
     except Exception as e:
         logger.error(f"DOCX preview render error: {e}")
-        return _render_text_fallback_preview(title, _extract_text_from_docx(file_path))
+        return _render_docx_preview_html_from_xml(file_path, title)
+
+
+def _render_docx_preview_html_from_xml(file_path: Path, title: str) -> str:
+    blocks = _parse_docx_blocks(file_path)
+    rendered_blocks: list[str] = []
+
+    for block in blocks:
+        if block.get("type") == "paragraph":
+            text = str(block.get("text") or "").strip()
+            if not text:
+                continue
+            style_name = str(block.get("style") or "").strip().lower()
+            if style_name.startswith("heading"):
+                level_match = re.search(r"(\d+)", style_name)
+                level = int(level_match.group(1)) if level_match else 2
+                level = max(1, min(level, 6))
+                rendered_blocks.append(f'<h{level} class="doc-heading">{html.escape(text)}</h{level}>')
+            else:
+                rendered_blocks.append(f'<p class="doc-paragraph">{html.escape(text)}</p>')
+            continue
+
+        if block.get("type") != "table":
+            continue
+        rows_html: list[str] = []
+        for row in block.get("rows") or []:
+            cells = [html.escape(str(cell or "").strip()) for cell in row]
+            if any(cell for cell in cells):
+                rows_html.append(
+                    "<tr>" + "".join(f"<td>{cell or '&nbsp;'}</td>" for cell in cells) + "</tr>"
+                )
+        if rows_html:
+            rendered_blocks.append(
+                '<section class="table-card">'
+                '<div class="table-header">Table</div>'
+                '<div class="table-body"><div class="table-scroll"><table>'
+                + "".join(rows_html)
+                + "</table></div></div></section>"
+            )
+
+    if not rendered_blocks:
+        return _render_text_fallback_preview(title, _extract_text_from_docx_xml(file_path))
+
+    return _render_preview_shell(title, f'<article class="doc-card">{"".join(rendered_blocks)}</article>')
 
 
 def _render_pptx_preview_html(file_path: Path, title: str) -> str:
@@ -4430,13 +4603,14 @@ async def get_file_preview(file_id: str):
             path=file_path,
             media_type=mime_type,
             content_disposition_type="inline",
+            headers=_INLINE_PREVIEW_HEADERS,
         )
 
     if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        return HTMLResponse(_render_docx_preview_html(file_path, file_path.name))
+        return HTMLResponse(_render_docx_preview_html(file_path, file_path.name), headers=_INLINE_PREVIEW_HEADERS)
 
     if mime_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-        return HTMLResponse(_render_pptx_preview_html(file_path, file_path.name))
+        return HTMLResponse(_render_pptx_preview_html(file_path, file_path.name), headers=_INLINE_PREVIEW_HEADERS)
 
     raise HTTPException(status_code=400, detail="Preview only available for supported inline file types")
 
@@ -7922,6 +8096,7 @@ async def get_provider_config(provider_name: str):
         "hasApiKey": bool(provider_config.api_key),
         "apiKeyMasked": mask_secret(provider_config.api_key),
         "apiBase": provider_config.api_base,
+        "compatibilityProfile": getattr(provider_config, "compatibility_profile", "auto"),
         "extraHeaders": {key: "********" for key in (provider_config.extra_headers or {}).keys()},
         "hasExtraHeaders": bool(provider_config.extra_headers),
     }
@@ -7942,6 +8117,7 @@ async def update_provider_config(provider_name: str, provider_data: Dict[str, An
         provider_config = ProviderConfig(
             api_key="" if clear_api_key else (existing_provider.api_key if api_key in (None, "") else api_key),
             api_base=provider_data.get("apiBase", existing_provider.api_base),
+            compatibility_profile=provider_data.get("compatibilityProfile", getattr(existing_provider, "compatibility_profile", "auto")),
             extra_headers=provider_data.get("extraHeaders", existing_provider.extra_headers),
         )
         
@@ -7988,6 +8164,7 @@ async def add_provider(provider_data: Dict[str, Any]):
         provider_config = ProviderConfig(
             api_key=provider_data.get("apiKey") or "",
             api_base=provider_data.get("apiBase"),
+            compatibility_profile=provider_data.get("compatibilityProfile") or "auto",
             extra_headers=provider_data.get("extraHeaders")
         )
         

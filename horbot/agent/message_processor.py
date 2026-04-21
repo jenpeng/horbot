@@ -310,13 +310,23 @@ class MessageProcessor:
             if plan_result is None and session.key in self.agent._active_plans:
                 return None
             if plan_result is not None:
-                return plan_result
-            logger.warning("Plan generation failed for task: {}", msg.content[:50])
-            return OutboundMessage(
-                channel=msg.channel, 
-                chat_id=msg.chat_id,
-                content="❌ 计划生成失败。请重试或简化您的请求。"
-            )
+                metadata = getattr(plan_result, "metadata", None) or {}
+                if metadata.get("_skip_planning_execute_direct"):
+                    logger.info(
+                        "Planning skipped for session {}, falling back to direct execution",
+                        session.key,
+                    )
+                    if on_plan_skipped:
+                        await on_plan_skipped()
+                else:
+                    return plan_result
+            elif plan_result is None:
+                logger.warning("Plan generation failed for task: {}", msg.content[:50])
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="❌ 计划生成失败。请重试或简化您的请求。"
+                )
         else:
             if on_plan_skipped:
                 await on_plan_skipped()

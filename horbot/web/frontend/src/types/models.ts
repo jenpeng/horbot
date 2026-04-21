@@ -369,6 +369,7 @@ export interface ProviderConfig {
   hasApiKey?: boolean;
   apiKeyMasked?: string;
   apiBase?: string;
+  compatibilityProfile?: string;
   extraHeaders?: Record<string, string>;
 }
 

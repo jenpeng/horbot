@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 class AgentLoop:
     WEB_INTERACTIVE_COMPACT_MAX_TOKENS = 30000
     MAX_AUTO_CONTINUE_ROUNDS = 2
+    MAX_OFFICECLI_RETRY_ROUNDS = 2
     MAX_WEB_ENFORCEMENT_ROUNDS = 2
     MAX_UNSUCCESSFUL_WEB_ATTEMPTS = 3
     AUTO_CONTINUE_PROMPT = (
@@ -263,6 +264,109 @@ class AgentLoop:
         if messages and messages[0].get("role") == "system":
             return [messages[0], system_message, *messages[1:]]
         return [system_message, *messages]
+
+    @staticmethod
+    def _collect_recent_tool_outputs(messages: list[dict[str, Any]], start_index: int) -> list[str]:
+        outputs: list[str] = []
+        for message in messages[max(start_index, 0):]:
+            if message.get("role") != "tool":
+                continue
+            content = str(message.get("content") or "").strip()
+            if content:
+                outputs.append(content)
+        return outputs
+
+    @staticmethod
+    def _collect_recent_officecli_commands(messages: list[dict[str, Any]], start_index: int) -> list[str]:
+        commands: list[str] = []
+        for message in messages[max(start_index, 0):]:
+            if message.get("role") != "assistant":
+                continue
+            for tool_call in message.get("tool_calls") or []:
+                if not isinstance(tool_call, dict):
+                    continue
+                function = tool_call.get("function")
+                if not isinstance(function, dict):
+                    continue
+                if function.get("name") != "mcp_officecli_officecli":
+                    continue
+                arguments = function.get("arguments")
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except Exception:
+                        continue
+                if not isinstance(arguments, dict):
+                    continue
+                command = str(arguments.get("command") or "").strip().lower()
+                if command:
+                    commands.append(command)
+        return commands
+
+    @staticmethod
+    def _extract_requested_slide_count(user_message: Any) -> int | None:
+        normalized = ToolRegistry._normalize_user_message_for_matching(user_message)
+        if not normalized:
+            return None
+        match = re.search(r"(\d+)\s*页", normalized)
+        if match:
+            return int(match.group(1))
+        match = re.search(r"(\d+)\s*(?:slides?|pages?)", normalized, flags=re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+        return None
+
+    @classmethod
+    def _is_ppt_creation_request(cls, user_message: Any) -> bool:
+        normalized = ToolRegistry._normalize_user_message_for_matching(user_message).lower()
+        if not normalized:
+            return False
+        has_ppt_hint = any(keyword in normalized for keyword in ("ppt", "pptx", "powerpoint", "幻灯片", "演示文稿"))
+        has_create_hint = any(keyword in normalized for keyword in ("创建", "生成", "制作", "做一个", "做一份", "create", "build", "save to", "保存到"))
+        return has_ppt_hint and has_create_hint
+
+    @staticmethod
+    def _looks_like_officecli_help(text: str | None) -> bool:
+        normalized = str(text or "")
+        return "## Strategy" in normalized and "# PPTX Reference" in normalized and "Use view" in normalized
+
+    @classmethod
+    def _build_officecli_retry_prompt(
+        cls,
+        user_message: Any,
+        messages: list[dict[str, Any]],
+        start_index: int,
+        clean: str,
+    ) -> str | None:
+        if not cls._is_ppt_creation_request(user_message):
+            return None
+
+        commands = cls._collect_recent_officecli_commands(messages, start_index)
+        if not commands:
+            return None
+
+        outputs = cls._collect_recent_tool_outputs(messages, start_index)
+        has_real_edit = any(command in {"add", "set", "batch", "validate"} for command in commands)
+
+        reason = ""
+        if any("0 slides" in output.lower() for output in outputs):
+            reason = "The target PPTX still has 0 slides."
+        elif cls._looks_like_officecli_help(clean) and not has_real_edit:
+            reason = "You are about to return OfficeCLI help/reference text instead of a finished presentation."
+
+        if not reason:
+            return None
+
+        requested_slide_count = cls._extract_requested_slide_count(user_message)
+        slide_target = f"{requested_slide_count} slides" if requested_slide_count else "the requested slides"
+        return (
+            f"The PowerPoint task is incomplete. {reason} "
+            f"Continue using `mcp_officecli_officecli` now instead of answering. "
+            f"The file must contain {slide_target} with actual titles/body text before you stop. "
+            "For PPTX creation, the minimum acceptable flow is create once, then add slide/textbox content for each requested page, "
+            "then view outline, then validate. Do not call help again unless the user explicitly asked for help. "
+            "Do not end with help/reference text."
+        )
 
     @staticmethod
     def _is_usable_tool_output(tool_name: str, content: str) -> bool:
@@ -476,6 +580,7 @@ class AgentLoop:
                             api_key=provider_config.api_key,
                             api_base=provider_config.api_base,
                             extra_headers=provider_config.extra_headers,
+                            compatibility_profile=getattr(provider_config, "compatibility_profile", "auto"),
                             default_model=planning_model,
                             upload_dir=upload_dir,
                         )
@@ -667,6 +772,7 @@ class AgentLoop:
                             api_key=provider_config.api_key,
                             api_base=provider_config.api_base,
                             extra_headers=provider_config.extra_headers,
+                            compatibility_profile=getattr(provider_config, "compatibility_profile", "auto"),
                             default_model=new_model,
                             upload_dir=upload_dir,
                         )
@@ -1092,7 +1198,18 @@ class AgentLoop:
     def _tool_hint(tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
         def _fmt(tc):
-            val = next(iter(tc.arguments.values()), None) if tc.arguments else None
+            arguments = getattr(tc, "arguments", None)
+            val = None
+            if isinstance(arguments, dict):
+                val = next(iter(arguments.values()), None) if arguments else None
+            elif isinstance(arguments, list) and arguments:
+                first = arguments[0]
+                if isinstance(first, dict):
+                    val = next(iter(first.values()), None) if first else None
+                else:
+                    val = first
+            elif arguments is not None:
+                val = arguments
             if not isinstance(val, str):
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
@@ -1331,6 +1448,7 @@ class AgentLoop:
         auto_continue_round = 0
         web_enforcement_round = 0
         unsuccessful_web_attempts = 0
+        officecli_retry_round = 0
         continued_prefix = ""
         
         self.tools.set_web_search_enabled(bool(web_search) and bool(self._get_web_search_config().get("enabled", True)))
@@ -1621,6 +1739,36 @@ class AgentLoop:
                 clean = self._strip_think(response.content) or ""
                 if not clean:
                     clean = self._fallback_from_recent_tool_result(messages)
+
+                officecli_retry_prompt = self._build_officecli_retry_prompt(
+                    user_message=user_message,
+                    messages=messages,
+                    start_index=max(current_request_start, 0),
+                    clean=clean,
+                )
+                if officecli_retry_prompt:
+                    officecli_retry_round += 1
+                    if officecli_retry_round > self.MAX_OFFICECLI_RETRY_ROUNDS:
+                        final_content = "PowerPoint 文件尚未按要求生成完成，当前流程在 OfficeCLI 编辑阶段未能自动补全。请稍后重试。"
+                        messages = self._strip_ephemeral_messages(messages)
+                        messages = self.context.add_assistant_message(messages, final_content)
+                        if on_progress:
+                            await on_progress(final_content)
+                        break
+                    if on_status:
+                        await on_status("检测到 PowerPoint 尚未完成，正在继续补全文档内容...")
+                    if clean:
+                        messages.append({
+                            "role": "assistant",
+                            "content": clean,
+                            "_ephemeral": True,
+                        })
+                    messages.append({
+                        "role": "user",
+                        "content": officecli_retry_prompt,
+                        "_ephemeral": True,
+                    })
+                    continue
 
                 web_requirement_satisfied = self._has_satisfied_web_requirement(
                     messages,
@@ -2128,15 +2276,25 @@ class AgentLoop:
                 # Plan was generated successfully, stop here and wait for confirmation
                 return None
             if plan_result is not None:
-                return plan_result
+                metadata = getattr(plan_result, "metadata", None) or {}
+                if metadata.get("_skip_planning_execute_direct"):
+                    logger.info(
+                        "Planning skipped for session {}, falling back to direct execution",
+                        session.key,
+                    )
+                    if on_plan_skipped:
+                        await on_plan_skipped()
+                else:
+                    return plan_result
             # If plan generation failed (returned None but no active plan), 
             # return an error message instead of continuing with normal execution
-            logger.warning("Plan generation failed for task: {}", msg.content[:50])
-            return OutboundMessage(
-                channel=msg.channel, 
-                chat_id=msg.chat_id,
-                content="❌ 计划生成失败。请重试或简化您的请求。"
-            )
+            if plan_result is None:
+                logger.warning("Plan generation failed for task: {}", msg.content[:50])
+                return OutboundMessage(
+                    channel=msg.channel, 
+                    chat_id=msg.chat_id,
+                    content="❌ 计划生成失败。请重试或简化您的请求。"
+                )
         else:
             # Notify frontend that planning was skipped
             if on_plan_skipped:
@@ -2557,6 +2715,7 @@ class AgentLoop:
         """
         from horbot.agent.planner.unified_generator import (
             UnifiedPlanGenerator,
+            build_tool_descriptions_from_definitions,
             get_default_tools,
         )
         from horbot.agent.planner import get_plan_storage, ExecutionPlan, SubTask
@@ -2564,7 +2723,11 @@ class AgentLoop:
         if on_plan_generating:
             await on_plan_generating()
         
-        tools = get_default_tools()
+        tools = build_tool_descriptions_from_definitions(
+            self.tools.get_definitions_smart(msg.content, include_web_search=True)
+        )
+        if not tools:
+            tools = get_default_tools()
         
         config = self._get_config()
         if config and hasattr(config, 'agents') and hasattr(config.agents, 'defaults'):
@@ -2599,7 +2762,8 @@ class AgentLoop:
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content="模型判断此任务不需要规划。请直接描述您的需求，我会帮您完成。",
+                content="",
+                metadata={"_skip_planning_execute_direct": True},
             )
         
         self._active_plans[session.key] = plan

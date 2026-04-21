@@ -9,14 +9,30 @@ from openai import AsyncOpenAI
 
 from horbot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from horbot.providers.diagnostics import diagnose_provider_error
+from horbot.providers.openai_compat import adapt_messages_for_compatibility, resolve_compatibility_profile
 
 
 class CustomProvider(LLMProvider):
 
-    def __init__(self, api_key: str = "no-key", api_base: str = "http://localhost:8000/v1", default_model: str = "default"):
+    def __init__(
+        self,
+        api_key: str = "no-key",
+        api_base: str = "http://localhost:8000/v1",
+        default_model: str = "default",
+        extra_headers: dict[str, str] | None = None,
+        compatibility_profile: str = "auto",
+        upload_dir: str | None = None,
+    ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
-        self._client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+        self.extra_headers = extra_headers or {}
+        self.compatibility_profile = resolve_compatibility_profile(compatibility_profile, api_base)
+        self.upload_dir = upload_dir
+        self._client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=api_base,
+            default_headers=self.extra_headers or None,
+        )
 
     @staticmethod
     def _extract_text(payload: Any) -> str:
@@ -147,9 +163,16 @@ class CustomProvider(LLMProvider):
         files: list[dict[str, Any]] | None = None,
         on_content_delta: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> LLMResponse:
+        prepared_messages = adapt_messages_for_compatibility(
+            self._sanitize_empty_content(messages),
+            files,
+            upload_dir=self.upload_dir,
+            profile=self.compatibility_profile,
+            api_base=self.api_base,
+        )
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
-            "messages": self._sanitize_empty_content(messages),
+            "messages": prepared_messages,
             "max_tokens": max(1, max_tokens),
             "temperature": temperature,
         }

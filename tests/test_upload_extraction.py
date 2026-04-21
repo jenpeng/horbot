@@ -1,4 +1,5 @@
 import io
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -152,6 +153,24 @@ class UploadExtractionTests(unittest.TestCase):
             self.assertIsNotNone(extracted)
             self.assertIn("DOCX extraction smoke line", extracted)
 
+    def test_extract_docx_text_without_python_docx_dependency(self):
+        with TemporaryDirectory() as tmpdir:
+            docx_path = Path(tmpdir) / "sample.docx"
+            document = Document()
+            document.add_heading("Fallback Heading", level=1)
+            document.add_paragraph("Fallback extraction line")
+            document.save(docx_path)
+
+            with patch.dict(sys.modules, {"docx": None}):
+                extracted = _extract_document_content(
+                    docx_path,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+
+            self.assertIsNotNone(extracted)
+            self.assertIn("Fallback Heading", extracted)
+            self.assertIn("Fallback extraction line", extracted)
+
     def test_extract_xlsx_text(self):
         with TemporaryDirectory() as tmpdir:
             xlsx_path = Path(tmpdir) / "sample.xlsx"
@@ -190,6 +209,21 @@ class UploadExtractionTests(unittest.TestCase):
 
             self.assertIn("Preview Heading", rendered)
             self.assertIn("Preview paragraph body", rendered)
+            self.assertIn("<html", rendered)
+
+    def test_docx_preview_html_without_python_docx_dependency(self):
+        with TemporaryDirectory() as tmpdir:
+            docx_path = Path(tmpdir) / "preview.docx"
+            document = Document()
+            document.add_heading("Fallback Preview Heading", level=1)
+            document.add_paragraph("Fallback Preview paragraph body")
+            document.save(docx_path)
+
+            with patch.dict(sys.modules, {"docx": None}):
+                rendered = _render_docx_preview_html(docx_path, "preview.docx")
+
+            self.assertIn("Fallback Preview Heading", rendered)
+            self.assertIn("Fallback Preview paragraph body", rendered)
             self.assertIn("<html", rendered)
 
     def test_pptx_preview_html_contains_slide_text(self):

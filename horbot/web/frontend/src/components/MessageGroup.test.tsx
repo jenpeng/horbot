@@ -301,7 +301,7 @@ describe('MessageGroup', () => {
 
     fireEvent.click(screen.getByTestId('message-file-open-preview'));
     const previewModal = screen.getByTestId('message-file-preview-modal');
-    const iframe = container.querySelector('iframe[src="/api/files/file-pdf/preview"]');
+    const iframe = container.querySelector('iframe[src^="/api/files/file-pdf/preview?v="]');
 
     expect(previewModal).toBeInTheDocument();
     expect(iframe).toBeInTheDocument();
@@ -329,7 +329,7 @@ describe('MessageGroup', () => {
 
     fireEvent.click(screen.getByTestId('message-file-open-preview'));
     const previewModal = screen.getByTestId('message-file-preview-modal');
-    const iframe = container.querySelector('iframe[src="/api/files/file-docx/preview"]');
+    const iframe = container.querySelector('iframe[src^="/api/files/file-docx/preview?v="]');
 
     expect(previewModal).toBeInTheDocument();
     expect(iframe).toBeInTheDocument();
@@ -356,7 +356,7 @@ describe('MessageGroup', () => {
 
     fireEvent.click(screen.getByTestId('message-file-open-preview'));
     const previewModal = screen.getByTestId('message-file-preview-modal');
-    const iframe = container.querySelector('iframe[src="/api/files/file-pptx/preview"]');
+    const iframe = container.querySelector('iframe[src^="/api/files/file-pptx/preview?v="]');
 
     expect(previewModal).toBeInTheDocument();
     expect(iframe).toBeInTheDocument();

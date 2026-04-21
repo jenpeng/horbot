@@ -3,7 +3,9 @@ import { useI18n } from '../contexts/I18nContext';
 import { configService } from '../services';
 import type { AddProviderData } from '../services/config';
 import type { ProvidersConfig } from '../types';
-import { Modal, Button, Input } from './ui';
+import { Modal, Button, Input, Select } from './ui';
+
+const DEFAULT_COMPATIBILITY_PROFILE = 'auto';
 
 interface ProviderManagerProps {
   providers?: ProvidersConfig;
@@ -16,7 +18,12 @@ const ProviderManager: React.FC<ProviderManagerProps> = ({
 }) => {
   const { t } = useI18n();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [newProvider, setNewProvider] = useState({ name: '', apiKey: '', apiBase: '' });
+  const [newProvider, setNewProvider] = useState({
+    name: '',
+    apiKey: '',
+    apiBase: '',
+    compatibilityProfile: DEFAULT_COMPATIBILITY_PROFILE,
+  });
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
@@ -48,11 +55,12 @@ const ProviderManager: React.FC<ProviderManagerProps> = ({
       const providerData: AddProviderData = {
         apiKey: newProvider.apiKey || undefined,
         apiBase: newProvider.apiBase || undefined,
+        compatibilityProfile: newProvider.compatibilityProfile || DEFAULT_COMPATIBILITY_PROFILE,
       };
       await configService.addProvider(newProvider.name.trim(), providerData);
 
       onProviderAdded();
-      setNewProvider({ name: '', apiKey: '', apiBase: '' });
+      setNewProvider({ name: '', apiKey: '', apiBase: '', compatibilityProfile: DEFAULT_COMPATIBILITY_PROFILE });
       setValidationErrors({});
       setIsDialogOpen(false);
     } catch (err: unknown) {
@@ -66,7 +74,7 @@ const ProviderManager: React.FC<ProviderManagerProps> = ({
 
   const handleClose = () => {
     setIsDialogOpen(false);
-    setNewProvider({ name: '', apiKey: '', apiBase: '' });
+    setNewProvider({ name: '', apiKey: '', apiBase: '', compatibilityProfile: DEFAULT_COMPATIBILITY_PROFILE });
     setError(null);
     setValidationErrors({});
   };
@@ -123,6 +131,21 @@ const ProviderManager: React.FC<ProviderManagerProps> = ({
             placeholder="https://api.example.com/v1"
             data-testid="provider-api-base-input"
           />
+
+          <Select
+            label={t('config.providers.compatibilityProfile')}
+            value={newProvider.compatibilityProfile}
+            onChange={(e) => setNewProvider({ ...newProvider, compatibilityProfile: e.target.value })}
+            options={[
+              { value: 'auto', label: t('config.providers.profile.auto') },
+              { value: 'openai', label: t('config.providers.profile.openai') },
+              { value: 'newapi', label: t('config.providers.profile.newapi') },
+            ]}
+            data-testid="provider-compatibility-profile-select"
+          />
+          <p className="text-sm text-surface-500">
+            {t('config.providers.compatibilityProfileHint')}
+          </p>
           <p className="text-sm text-surface-500">
             {t('config.providers.customHint')}
           </p>

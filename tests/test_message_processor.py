@@ -68,6 +68,7 @@ class MockAgentLoop:
         self.use_hierarchical_context = False
         self._planning_enabled = True
         self._build_bound_channel_runtime_hints = MagicMock(return_value=[])
+        self._run_planning_mode = AsyncMock(return_value=None)
 
         self.tools = MagicMock()
         self.tools.get.return_value = None
@@ -276,6 +277,31 @@ class TestMessageProcessor(unittest.IsolatedAsyncioTestCase):
         self.mock_agent._run_agent_loop.assert_awaited_once()
         self.assertEqual(self.mock_agent._run_agent_loop.await_args.kwargs["tool_mode"], "smart")
         self.assertIsNone(self.mock_agent._run_agent_loop.await_args.kwargs["max_tokens_override"])
+
+    async def test_process_message_falls_back_to_direct_execution_when_planning_is_skipped(self):
+        self.mock_agent._resolve_planning_mode = MagicMock(return_value=(True, False))
+        self.mock_agent._run_planning_mode = AsyncMock(
+            return_value=OutboundMessage(
+                channel="cli",
+                chat_id="chat_1",
+                content="",
+                metadata={"_skip_planning_execute_direct": True},
+            )
+        )
+
+        msg = InboundMessage(
+            channel="cli",
+            sender_id="user_1",
+            chat_id="chat_1",
+            content="请直接创建一个简单 PPT",
+        )
+
+        response = await self.processor.process_message(msg)
+
+        self.assertIsNotNone(response)
+        self.assertEqual(response.content, "Mock response")
+        self.mock_agent._run_planning_mode.assert_awaited_once()
+        self.mock_agent._run_agent_loop.assert_awaited_once()
 
 
 if __name__ == "__main__":

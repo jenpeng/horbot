@@ -340,6 +340,14 @@ const getFilePreviewUrl = (file: AttachmentFile): string => {
   return rawUrl;
 };
 
+const appendPreviewNonce = (value: string, nonce: number): string => {
+  if (!value || nonce <= 0) {
+    return value;
+  }
+  const separator = value.includes('?') ? '&' : '?';
+  return `${value}${separator}v=${nonce}`;
+};
+
 const isTextLikeFile = (file: AttachmentFile): boolean =>
   file.mimeType.startsWith('text/')
   || file.mimeType === 'application/json'
@@ -354,8 +362,13 @@ const getFilePreviewModalSize = (file: AttachmentFile | null): 'lg' | 'full' => 
   return file.category === 'image' || isPdfFile(file) || isInlineOfficePreviewFile(file) ? 'full' : 'lg';
 };
 
-const renderFilePreviewContent = (file: AttachmentFile, t: TranslateFn): React.ReactNode => {
+const renderFilePreviewContent = (
+  file: AttachmentFile,
+  t: TranslateFn,
+  previewNonce: number = 0,
+): React.ReactNode => {
   const previewUrl = getFilePreviewUrl(file);
+  const iframePreviewUrl = appendPreviewNonce(previewUrl, previewNonce);
   const extractedText = file.extractedText?.trim();
 
   if (file.category === 'image' && previewUrl) {
@@ -397,7 +410,8 @@ const renderFilePreviewContent = (file: AttachmentFile, t: TranslateFn): React.R
   if (isPdfFile(file) && previewUrl) {
     return (
       <iframe
-        src={previewUrl}
+        key={`${file.fileId}-preview-${previewNonce}`}
+        src={iframePreviewUrl}
         title={file.originalName}
         className="h-[72vh] w-full rounded-2xl border border-slate-200 bg-white"
       />
@@ -407,7 +421,8 @@ const renderFilePreviewContent = (file: AttachmentFile, t: TranslateFn): React.R
   if (isInlineOfficePreviewFile(file) && previewUrl) {
     return (
       <iframe
-        src={previewUrl}
+        key={`${file.fileId}-preview-${previewNonce}`}
+        src={iframePreviewUrl}
         title={file.originalName}
         className="h-[72vh] w-full rounded-2xl border border-slate-200 bg-white"
       />
@@ -432,7 +447,8 @@ const renderFilePreviewContent = (file: AttachmentFile, t: TranslateFn): React.R
   if (isTextLikeFile(file) && previewUrl) {
     return (
       <iframe
-        src={previewUrl}
+        key={`${file.fileId}-preview-${previewNonce}`}
+        src={iframePreviewUrl}
         title={file.originalName}
         className="h-[68vh] w-full rounded-2xl border border-slate-200 bg-white"
       />
@@ -462,6 +478,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
   const avatarColor = agentId ? getAvatarColor(agentId) : 'from-blue-500 to-cyan-500';
   const [inspectedSource, setInspectedSource] = useState<MemorySource | null>(null);
   const [previewedFile, setPreviewedFile] = useState<AttachmentFile | null>(null);
+  const [previewNonce, setPreviewNonce] = useState(0);
   const errorKindMeta = useMemo(() => getErrorKindMeta(t), [t]);
   const previewableImageFiles = useMemo(
     () => messages.flatMap((message) => (
@@ -508,6 +525,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
       toast.error(t('messageGroup.toast.previewUnavailable'));
       return;
     }
+    setPreviewNonce((value) => value + 1);
     setPreviewedFile(file);
   }, [t, toast]);
 
@@ -1433,7 +1451,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
               )}
             </div>
 
-            {renderFilePreviewContent(previewedFile, t)}
+            {renderFilePreviewContent(previewedFile, t, previewNonce)}
 
             {previewedImageIndex >= 0 && previewableImageFiles.length > 1 && (
               <div className="space-y-2" data-testid="message-file-preview-thumbnails">

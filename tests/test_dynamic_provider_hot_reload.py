@@ -127,10 +127,91 @@ class DynamicProviderHotReloadTests(unittest.IsolatedAsyncioTestCase):
             "mycc",
             api_key="sk-test",
             api_base="https://example.test/v1",
+            compatibility_profile="newapi",
             default_model="gpt-5.4",
         )
         self.assertIsInstance(provider, CustomProvider)
         self.assertEqual(provider.get_default_model(), "gpt-5.4")
+        self.assertEqual(provider.compatibility_profile, "openai_chat_files")
+
+    async def test_custom_provider_newapi_profile_attaches_document_file_parts(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            upload_root = Path(tempdir)
+            stored = upload_root / "report.docx"
+            stored.write_bytes(b"doc-bytes")
+            provider = CustomProvider(
+                api_key="sk-test",
+                api_base="https://example.test/v1",
+                default_model="gpt-5.4",
+                compatibility_profile="newapi",
+                upload_dir=str(upload_root),
+            )
+            captured: dict[str, object] = {}
+
+            async def fake_create(**kwargs):
+                captured.update(kwargs)
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            finish_reason="stop",
+                            message=SimpleNamespace(
+                                content="ok",
+                                output_text=None,
+                                tool_calls=None,
+                                reasoning_content=None,
+                                reasoning=None,
+                            ),
+                        )
+                    ],
+                    usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+                )
+
+            provider._client = SimpleNamespace(
+                chat=SimpleNamespace(
+                    completions=SimpleNamespace(create=fake_create),
+                )
+            )
+
+            await provider.chat(
+                messages=[{"role": "user", "content": "请阅读这个附件"}],
+                files=[
+                    {
+                        "category": "document",
+                        "filename": "report.docx",
+                        "original_name": "report.docx",
+                        "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    }
+                ],
+                model="gpt-5.4",
+            )
+
+            content = captured["messages"][0]["content"]
+            self.assertIsInstance(content, list)
+            self.assertEqual(content[0]["type"], "text")
+            self.assertEqual(content[1]["type"], "file")
+            self.assertEqual(content[1]["file"]["filename"], "report.docx")
+            self.assertTrue(content[1]["file"]["file_data"].startswith("data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,"))
+
+    async def test_provider_config_api_includes_compatibility_profile(self):
+        config = Config.model_validate(
+            {
+                "providers": {
+                    "mycc": {
+                        "apiKey": "sk-test",
+                        "apiBase": "https://example.test/v1",
+                        "compatibilityProfile": "newapi",
+                    }
+                }
+            }
+        )
+
+        transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 43123))
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            with patch("horbot.web.api.get_cached_config", return_value=config):
+                response = await client.get("/api/config/providers/mycc")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["compatibilityProfile"], "newapi")
 
     async def test_custom_provider_supports_stream_only_openai_compatible_endpoints(self):
         provider = CustomProvider(

@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
+from horbot.utils.tool_arguments import normalize_tool_arguments
+
 
 @dataclass
 class ToolCallRequest:
@@ -11,6 +13,9 @@ class ToolCallRequest:
     id: str
     name: str
     arguments: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        self.arguments = normalize_tool_arguments(self.arguments)
 
 
 @dataclass

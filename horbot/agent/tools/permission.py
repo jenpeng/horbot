@@ -6,6 +6,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+from horbot.utils.tool_arguments import normalize_tool_arguments
+
 
 class PermissionLevel(Enum):
     """Permission levels for tool access."""
@@ -229,19 +231,21 @@ class PermissionManager:
         level = self.check_permission(tool_name)
         reason = self._get_reason(tool_name, level)
         
+        normalized_params = normalize_tool_arguments(params)
+
         result = PermissionResult(
             level=level,
             reason=reason,
             tool_name=tool_name,
-            params=params or {},
+            params=normalized_params,
         )
         
-        if params and level != PermissionLevel.DENY:
-            path_result = self._check_path_permission(params)
+        if normalized_params and level != PermissionLevel.DENY:
+            path_result = self._check_path_permission(normalized_params)
             if path_result:
                 return path_result
             
-            sensitive_result = self._check_sensitive_operation(tool_name, params)
+            sensitive_result = self._check_sensitive_operation(tool_name, normalized_params)
             if sensitive_result:
                 return sensitive_result
         

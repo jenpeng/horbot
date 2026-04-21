@@ -127,5 +127,35 @@ class TestToolExecutor(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.should_break)
         self.assertEqual(result.final_content, "Message delivered")
 
+    async def test_execute_tool_calls_normalizes_list_arguments(self):
+        mock_registry = MagicMock()
+        mock_registry.check_permission.return_value = PermissionLevel.ALLOW
+        mock_registry.execute = AsyncMock(return_value="tool_result")
+
+        mock_context = MagicMock()
+        mock_context.add_tool_result.side_effect = lambda msgs, tid, name, res: msgs + [{"role": "tool", "content": res}]
+
+        executor = ToolExecutor(tools=mock_registry, context=mock_context)
+
+        tool_calls = [
+            MockToolCall(
+                id="call_1",
+                name="mcp_officecli_officecli",
+                arguments=[{"path": "/tmp/demo.pptx"}, {"command": "create"}],
+            ),
+        ]
+
+        await executor.execute_tool_calls(
+            tool_calls=tool_calls,
+            messages=[],
+            tools_used=[],
+            iteration=1,
+        )
+
+        mock_registry.execute.assert_awaited_once_with(
+            "mcp_officecli_officecli",
+            {"path": "/tmp/demo.pptx", "command": "create"},
+        )
+
 if __name__ == "__main__":
     unittest.main()

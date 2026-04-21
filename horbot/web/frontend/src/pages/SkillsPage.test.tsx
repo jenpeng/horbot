@@ -1,6 +1,8 @@
+import type { ReactElement } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SkillsPage from './SkillsPage';
+import { I18nProvider } from '../contexts/I18nContext';
 import skillsService from '../services/skills';
 import type { Skill } from '../types';
 
@@ -41,6 +43,29 @@ const skillFixture: Skill = {
   },
 };
 
+const missingSkillFixture: Skill = {
+  ...skillFixture,
+  name: 'github',
+  description: 'GitHub helper.',
+  available: false,
+  enabled: true,
+  missing_requirements: ['CLI: gh'],
+  install: [
+    {
+      kind: 'brew',
+      formula: 'gh',
+      label: 'Install GitHub CLI (brew)',
+    },
+  ],
+  compatibility: {
+    status: 'incompatible',
+    issues: ['Missing CLI dependency: gh'],
+    warnings: [],
+  },
+};
+
+const renderWithI18n = (ui: ReactElement) => render(<I18nProvider>{ui}</I18nProvider>);
+
 describe('SkillsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -56,9 +81,9 @@ describe('SkillsPage', () => {
       () => new Promise(() => {}),
     );
 
-    render(<SkillsPage />);
+    renderWithI18n(<SkillsPage />);
 
-    expect(screen.getByRole('status', { name: '页面加载中' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Page loading' })).toBeInTheDocument();
   });
 
   it('renders a page error state and retries the initial load', async () => {
@@ -69,11 +94,11 @@ describe('SkillsPage', () => {
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({});
 
-    render(<SkillsPage />);
+    renderWithI18n(<SkillsPage />);
 
-    expect(await screen.findByText('技能加载失败')).toBeInTheDocument();
+    expect(await screen.findByText('Failed to load skills')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
 
     await waitFor(() => {
       expect(screen.getByText('Skills & MCP')).toBeInTheDocument();
@@ -81,5 +106,32 @@ describe('SkillsPage', () => {
 
     expect(skillsService.getSkills).toHaveBeenCalledTimes(2);
     expect(skillsService.getMcpServers).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows missing requirement details on hover and toggles them on click', async () => {
+    vi.mocked(skillsService.getSkills).mockResolvedValue([missingSkillFixture]);
+
+    renderWithI18n(<SkillsPage />);
+
+    expect(await screen.findByTestId('skill-missing-toggle-github')).toBeInTheDocument();
+    expect(screen.queryByText('Install GitHub CLI (brew)')).not.toBeInTheDocument();
+
+    const missingToggle = screen.getByTestId('skill-missing-toggle-github');
+
+    fireEvent.mouseEnter(missingToggle);
+    expect(await screen.findByText('Install GitHub CLI (brew)')).toBeInTheDocument();
+
+    fireEvent.mouseLeave(missingToggle);
+    await waitFor(() => {
+      expect(screen.queryByText('Install GitHub CLI (brew)')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(missingToggle);
+    expect(await screen.findByText('Install GitHub CLI (brew)')).toBeInTheDocument();
+
+    fireEvent.click(missingToggle);
+    await waitFor(() => {
+      expect(screen.queryByText('Install GitHub CLI (brew)')).not.toBeInTheDocument();
+    });
   });
 });

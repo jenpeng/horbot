@@ -1252,7 +1252,7 @@ start_gateway() {
     new_pid="$(spawn_detached "$PROJECT_ROOT" "$LOG_DIR/gateway.log" "$gateway_cmd" gateway --port "$port")"
     echo "$new_pid" > "$pid_file"
 
-    if wait_for_port "$port" gateway "$pid_file" 15; then
+    if wait_for_port "$port" gateway "$pid_file" 45; then
         local actual_pid
         actual_pid="$(read_pid "$pid_file")"
         print_success "Gateway 服务已启动 (PID: $actual_pid)"
@@ -1260,7 +1260,7 @@ start_gateway() {
     else
         print_error "Gateway 服务启动失败"
         rm -f "$pid_file"
-        cat "$LOG_DIR/gateway.log"
+        tail -n 120 "$LOG_DIR/gateway.log"
         return 1
     fi
 }

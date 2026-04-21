@@ -467,6 +467,7 @@ def create_provider(
     api_key: str | None = None,
     api_base: str | None = None,
     extra_headers: dict[str, str] | None = None,
+    compatibility_profile: str | None = None,
     default_model: str | None = None,
     upload_dir: str | None = None,
 ) -> "LLMProvider":
@@ -498,6 +499,9 @@ def create_provider(
             api_key=api_key or "no-key",
             api_base=api_base or "http://localhost:8000/v1",
             default_model=default_model,
+            extra_headers=extra_headers,
+            compatibility_profile=compatibility_profile or "auto",
+            upload_dir=upload_dir,
         )
 
     spec = find_by_name(provider_name)
@@ -506,6 +510,9 @@ def create_provider(
             api_key=api_key or "no-key",
             api_base=api_base,
             default_model=default_model,
+            extra_headers=extra_headers,
+            compatibility_profile=compatibility_profile or "auto",
+            upload_dir=upload_dir,
         )
     
     # Default to LiteLLMProvider

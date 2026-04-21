@@ -125,6 +125,7 @@ const ProviderConfigSection: React.FC<ProviderConfigSectionProps> = ({
                   hasApiKey: settings?.hasApiKey,
                   apiKeyMasked: settings?.apiKeyMasked,
                   apiBase: settings?.apiBase,
+                  compatibilityProfile: settings?.compatibilityProfile,
                   extraHeaders: settings?.extraHeaders,
                 }}
                 isCustom={!NON_CUSTOM_PROVIDER_NAMES.includes(name)}

@@ -116,6 +116,74 @@ class ToolDescription:
         return "\n".join(lines)
 
 
+def _schema_properties_to_parameters(schema: dict[str, Any] | None) -> dict[str, Any]:
+    """Flatten JSON schema properties into planner-friendly parameter hints."""
+    if not isinstance(schema, dict):
+        return {}
+
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return {}
+
+    result: dict[str, Any] = {}
+    for name, prop in properties.items():
+        if not isinstance(prop, dict):
+            result[name] = "No description available."
+            continue
+        description = str(prop.get("description") or "").strip()
+        type_name = str(prop.get("type") or "any").strip()
+        result[name] = description or f"Type: {type_name}"
+    return result
+
+
+def _officecli_planner_description(tool_name: str, base_description: str) -> str:
+    """Add concrete OfficeCLI guidance so the planner stops hallucinating capability gaps."""
+    guidance = [
+        base_description.strip(),
+        "This is a real connected OfficeCLI MCP tool for Office/OpenXML files.",
+        "Use it for PowerPoint, Word, and Excel operations such as create, add, set, view, help, validate, and batch.",
+        "For PPTX, a robust flow is: create -> add slide -> add textbox -> add textbox -> view outline -> validate.",
+        "For direct add/set calls, props is usually a list of key=value strings.",
+        "For batch, each nested command must use a JSON object for props, not a string list.",
+    ]
+    if tool_name == "mcp_officecli_officecli":
+        guidance.append(
+            "When the server exposes only one generic OfficeCLI tool, set command=create|add|set|view|help|validate|batch and pass the target file path."
+        )
+    return " ".join(part for part in guidance if part)
+
+
+def build_tool_descriptions_from_definitions(definitions: list[dict[str, Any]] | None) -> list[ToolDescription]:
+    """Convert runtime tool schemas into planner descriptions."""
+    if not definitions:
+        return []
+
+    descriptions: list[ToolDescription] = []
+    for definition in definitions:
+        function = definition.get("function") if isinstance(definition, dict) else None
+        if not isinstance(function, dict):
+            continue
+
+        name = str(function.get("name") or "").strip()
+        if not name:
+            continue
+
+        raw_description = str(function.get("description") or name).strip()
+        if name.startswith("mcp_officecli"):
+            raw_description = _officecli_planner_description(name, raw_description)
+
+        parameters = _schema_properties_to_parameters(function.get("parameters"))
+        descriptions.append(
+            ToolDescription(
+                name=name,
+                description=raw_description,
+                parameters=parameters,
+            )
+        )
+
+    return descriptions
+
+
 class UnifiedPlanGenerator:
     """
     Unified plan generator using single prompt approach.

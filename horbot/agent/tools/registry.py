@@ -26,6 +26,7 @@ from horbot.agent.tools.permission import (
     PROTECTED_PATHS,
 )
 from horbot.security.runtime_guard import inspect_tool_result
+from horbot.utils.tool_arguments import normalize_tool_arguments
 
 
 @dataclass
@@ -639,6 +640,7 @@ class ToolRegistry:
         skip_guard: bool = False,
     ) -> ExecutionResult:
         """Internal execution logic with unified error handling."""
+        params = normalize_tool_arguments(params)
         started_at = time.perf_counter()
         permission_level = self._permission_manager.check_permission(name).value
         

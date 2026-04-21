@@ -6,6 +6,19 @@ import type { ProviderConfig } from '../types';
 
 type ProviderApiKeyMode = 'keep' | 'replace' | 'clear';
 
+const DEFAULT_COMPATIBILITY_PROFILE = 'auto';
+
+const normalizeCompatibilityProfile = (value?: string): string => {
+  const normalized = (value || DEFAULT_COMPATIBILITY_PROFILE).trim().toLowerCase().replace(/-/g, '_');
+  if (normalized === 'newapi' || normalized === 'openai_chat_files') {
+    return 'newapi';
+  }
+  if (normalized === 'openai' || normalized === 'default' || normalized === 'standard') {
+    return 'openai';
+  }
+  return DEFAULT_COMPATIBILITY_PROFILE;
+};
+
 interface ProviderCardProps {
   name: string;
   settings: ProviderConfig;
@@ -31,6 +44,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
     apiKey: '',
     apiKeyMode: (settings?.hasApiKey ? 'keep' : 'replace') as ProviderApiKeyMode,
     apiBase: settings?.apiBase || '',
+    compatibilityProfile: normalizeCompatibilityProfile(settings?.compatibilityProfile),
   });
 
   const isConfigured = !!(settings?.hasApiKey || settings?.apiKey);
@@ -40,6 +54,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
       apiKey: '',
       apiKeyMode: settings?.hasApiKey ? 'keep' : 'replace',
       apiBase: settings?.apiBase || '',
+      compatibilityProfile: normalizeCompatibilityProfile(settings?.compatibilityProfile),
     });
   }, [settings]);
 
@@ -47,7 +62,8 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
     const hasChanges = 
       localSettings.apiKeyMode === 'clear' ||
       (localSettings.apiKeyMode === 'replace' && localSettings.apiKey.trim() !== '') ||
-      localSettings.apiBase !== (settings?.apiBase || '');
+      localSettings.apiBase !== (settings?.apiBase || '') ||
+      localSettings.compatibilityProfile !== normalizeCompatibilityProfile(settings?.compatibilityProfile);
     setHasChanges(hasChanges);
   }, [localSettings, settings]);
 
@@ -65,6 +81,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
         apiKey: localSettings.apiKeyMode === 'replace' ? localSettings.apiKey.trim() : undefined,
         clearApiKey: localSettings.apiKeyMode === 'clear',
         apiBase: localSettings.apiBase,
+        compatibilityProfile: localSettings.compatibilityProfile,
       });
 
       setSuccess(true);
@@ -85,6 +102,7 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
       apiKey: '',
       apiKeyMode: settings?.hasApiKey ? 'keep' : 'replace',
       apiBase: settings?.apiBase || '',
+      compatibilityProfile: normalizeCompatibilityProfile(settings?.compatibilityProfile),
     });
     setError(null);
   };
@@ -240,6 +258,21 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
               placeholder={t('config.providers.apiBasePlaceholder')}
             />
             <p className="mt-2 text-sm text-surface-500">{t('config.providers.apiBaseHint')}</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1.5 text-surface-700">{t('config.providers.compatibilityProfile')}</label>
+            <select
+              data-testid="provider-card-compatibility-profile-select"
+              value={localSettings.compatibilityProfile}
+              onChange={(e) => setLocalSettings({ ...localSettings, compatibilityProfile: e.target.value })}
+              className="w-full bg-surface-50 border border-surface-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-all"
+            >
+              <option value="auto">{t('config.providers.profile.auto')}</option>
+              <option value="openai">{t('config.providers.profile.openai')}</option>
+              <option value="newapi">{t('config.providers.profile.newapi')}</option>
+            </select>
+            <p className="mt-2 text-sm text-surface-500">{t('config.providers.compatibilityProfileHint')}</p>
           </div>
 
           <div className="flex items-center justify-end space-x-2 pt-2">

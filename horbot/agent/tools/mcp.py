@@ -27,6 +27,25 @@ MCP_SERVER_CATEGORIES: dict[str, ToolCategory] = {
 }
 
 
+def _officecli_tool_description(server_name: str, original_name: str, base_description: str) -> str:
+    """Enrich OfficeCLI tool descriptions with concrete execution guidance."""
+    if server_name != "officecli" or original_name != "officecli":
+        return base_description
+
+    extra = (
+        " This is a real connected OfficeCLI MCP tool for Word/Excel/PowerPoint files."
+        " For PPTX creation tasks, do not stop after create, view, or help."
+        " A new file that still shows 0 slides is incomplete."
+        " Use command=create first, then command=add with type=slide/textbox and the target file until the requested slides and text content exist,"
+        " then use command=view mode=outline and command=validate before replying."
+        " For direct add/set calls, props is usually a list of key=value strings such as"
+        " [\"text=Quarterly Review\", \"x=1.0in\", \"y=1.2in\", \"size=28pt\"]."
+        " If you use command=batch, each nested command must use a JSON object for props instead of a string list."
+        " Do not return OfficeCLI help/reference text as the final answer when the user asked you to create or edit a document."
+    )
+    return f"{base_description}{extra}" if base_description else extra.strip()
+
+
 def resolve_stdio_command(command: str) -> str:
     """Resolve Python-like MCP commands to a usable interpreter in the current environment."""
     normalized = (command or "").strip()
@@ -50,7 +69,7 @@ class MCPToolWrapper(Tool):
         self._session = session
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"
-        self._description = tool_def.description or tool_def.name
+        self._description = _officecli_tool_description(server_name, tool_def.name, tool_def.description or tool_def.name)
         self._parameters = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._tool_timeout = tool_timeout
         self._category = category

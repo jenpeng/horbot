@@ -421,6 +421,7 @@ def _run_gateway(port: int, verbose: bool) -> None:
             api_key=getattr(provider_config, "api_key", None),
             api_base=getattr(provider_config, "api_base", None),
             extra_headers=getattr(provider_config, "extra_headers", None),
+            compatibility_profile=getattr(provider_config, "compatibility_profile", "auto"),
             default_model=model_name,
             upload_dir=upload_dir,
         )

@@ -512,6 +512,7 @@ class ProviderConfig(Base):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    compatibility_profile: str = "auto"  # OpenAI-compatible dialect/profile (e.g. auto, openai, newapi)
 
 
 class ProvidersConfig(Base):

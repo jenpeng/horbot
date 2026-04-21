@@ -4,6 +4,7 @@ import type { Config, ProviderConfig, ModelConfig, ModelsConfig, WebSearchProvid
 export interface AddProviderData {
   apiKey?: string;
   apiBase?: string;
+  compatibilityProfile?: string;
   extraHeaders?: Record<string, string>;
 }
 
@@ -11,6 +12,7 @@ export interface UpdateProviderData {
   apiKey?: string;
   clearApiKey?: boolean;
   apiBase?: string;
+  compatibilityProfile?: string;
   extraHeaders?: Record<string, string>;
 }
 
@@ -91,6 +93,7 @@ const configService = {
       name,
       apiKey: data.apiKey,
       apiBase: data.apiBase,
+      compatibilityProfile: data.compatibilityProfile,
       extraHeaders: data.extraHeaders,
     });
   },
@@ -100,6 +103,7 @@ const configService = {
       apiKey: data.apiKey,
       clearApiKey: data.clearApiKey,
       apiBase: data.apiBase,
+      compatibilityProfile: data.compatibilityProfile,
       extraHeaders: data.extraHeaders,
     });
   },

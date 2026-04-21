@@ -123,6 +123,7 @@ export interface ProviderCardProps extends BaseComponentProps {
   config: {
     apiKey?: string;
     apiBase?: string;
+    compatibilityProfile?: string;
     extraHeaders?: Record<string, string>;
   };
   isDefault?: boolean;
