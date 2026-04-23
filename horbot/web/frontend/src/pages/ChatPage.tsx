@@ -730,6 +730,40 @@ const buildMessageTurns = (messages: UIMessage[]): MessageTurn[] => {
   return turns;
 };
 
+const attachRetryPayloadsToHistoryMessages = (messages: UIMessage[]): UIMessage[] => {
+  const turns = buildMessageTurns(messages);
+  const retryPayloadByMessageId = new Map<string, NonNullable<UIMessage['retryPayload']>>();
+
+  turns.forEach((turn) => {
+    if (!turn.userMessage) {
+      return;
+    }
+
+    const retryPayload = {
+      content: turn.userMessage.content,
+      mentionedAgents: [] as string[],
+      files: turn.userMessage.files,
+    };
+
+    turn.assistantMessages.forEach((message) => {
+      if (message.isError && message.retryable) {
+        retryPayloadByMessageId.set(message.id, retryPayload);
+      }
+    });
+  });
+
+  return messages.map((message) => {
+    const retryPayload = retryPayloadByMessageId.get(message.id);
+    if (!retryPayload || message.retryPayload) {
+      return message;
+    }
+    return {
+      ...message,
+      retryPayload,
+    };
+  });
+};
+
 const parseRelayGroupKey = (value: string | null): PendingRelayJump | null => {
   if (!value) return null;
   const separatorIndex = value.lastIndexOf(':');
@@ -1510,8 +1544,8 @@ const ChatPage: React.FC = () => {
       tool_calls?: unknown[];
       execution_steps?: ExecutionStep[];
     }>,
-  ): UIMessage[] => (
-    rawMessages
+  ): UIMessage[] => {
+    const formattedMessages = rawMessages
       .filter((msg) => {
         if (msg.role === 'tool') return false;
         const hasToolCalls = msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
@@ -1551,8 +1585,10 @@ const ChatPage: React.FC = () => {
           errorKind: (providerError || normalizedError.isProviderError) ? 'provider' : undefined,
           retryable: providerError?.retryable ?? normalizedError.isProviderError,
         };
-      })
-  ), [directAgents, mergeLocalizedExecutionSteps, t]);
+      });
+
+    return attachRetryPayloadsToHistoryMessages(formattedMessages);
+  }, [directAgents, mergeLocalizedExecutionSteps, t]);
 
   const getConversationStreamRegistry = useCallback((conversationId: string) => {
     let registry = liveConversationStreamsRef.current.get(conversationId);

@@ -1,5 +1,5 @@
 import { type ReactElement } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatPage from './ChatPage';
 import { I18nProvider } from '../contexts/I18nContext';
@@ -527,6 +527,127 @@ describe('ChatPage', () => {
     expect(assistantMessage?.content).toContain('我先给你做一个清单。');
     expect(assistantMessage?.content).toContain('## 结果');
     expect(assistantMessage?.content).toContain('- A');
+  });
+
+  it('retries a provider error restored from history when the message retry action is clicked', async () => {
+    const conversationId = 'dm_agent-a';
+    const streamChatMock = vi.spyOn(chatService, 'streamChat').mockImplementation(async ({ onStateChange, onRequestStart, onChunk }) => {
+      onStateChange?.('connecting');
+      onRequestStart?.('req-retry-from-history');
+      onChunk({
+        event: 'request_start',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: 'turn-retry-history',
+        message_id: 'assistant-retry-history',
+      });
+      onChunk({
+        event: 'content',
+        agent_id: 'agent-a',
+        turn_id: 'turn-retry-history',
+        message_id: 'assistant-retry-history',
+        content: 'retry ok',
+      });
+      onChunk({
+        event: 'request_end',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: 'turn-retry-history',
+        message_id: 'assistant-retry-history',
+        content: 'retry ok',
+      });
+      onChunk({ event: 'done' });
+    });
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [externalAgent] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [team] }));
+      }
+      if (url === `/api/conversations/${conversationId}/messages`) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          conversation: {
+            id: conversationId,
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: [
+            {
+              id: 'history-user-retry',
+              role: 'user',
+              content: 'retry me',
+              timestamp: new Date().toISOString(),
+            },
+            {
+              id: 'history-assistant-retry',
+              role: 'assistant',
+              content: '模型服务当前负载较高，请稍后重试。',
+              timestamp: new Date().toISOString(),
+              metadata: {
+                agent_id: 'agent-a',
+                agent_name: 'Agent A',
+                turn_id: 'turn-retry-history',
+                request_id: 'req-history-failed',
+                _provider_error: {
+                  error_code: 'PROVIDER_RATE_LIMITED',
+                  error_kind: 'rate_limit',
+                  retryable: true,
+                },
+              },
+            },
+          ],
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
+    seedConversationStore({
+      id: conversationId,
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(messageGroupMock).toHaveBeenCalled();
+    });
+
+    const messageGroupCalls = messageGroupMock.mock.calls as Array<[unknown]>;
+    const matchedCall = messageGroupCalls.find(([props]) => {
+      const messages = (props as { messages?: Message[] }).messages || [];
+      return messages.some((message) => message.id === 'history-assistant-retry');
+    });
+
+    expect(matchedCall).toBeTruthy();
+    const props = matchedCall?.[0] as {
+      messages?: Message[];
+      onRetryMessage?: (message: Message) => void | Promise<void>;
+    };
+    const retryMessage = props.messages?.find((message) => message.id === 'history-assistant-retry');
+    expect(retryMessage?.retryPayload?.content).toBe('retry me');
+
+    await act(async () => {
+      await props.onRetryMessage?.(retryMessage as Message);
+    });
+
+    await waitFor(() => {
+      expect(streamChatMock).toHaveBeenCalled();
+    });
+    expect(streamChatMock.mock.calls.at(-1)?.[0]?.message).toBe('retry me');
   });
 
   it('surfaces the failed request id in the retry banner and turn badge', async () => {
