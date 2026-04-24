@@ -57,6 +57,21 @@ describe('MessageGroup', () => {
     expect(screen.getByText('504')).toBeInTheDocument();
   });
 
+  it('shows a direct processing bubble when a streaming assistant has status but no content', () => {
+    renderWithProviders({
+      id: 'msg-streaming-direct',
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      isStreaming: true,
+      statusMessage: 'Streaming',
+    });
+
+    expect(screen.getByTestId('message-streaming-status-bubble')).toBeInTheDocument();
+    expect(screen.getByText('Streaming')).toBeInTheDocument();
+    expect(screen.queryByText('Team relay')).not.toBeInTheDocument();
+  });
+
   it('detaches image attachments into a compact bubble when message also has text', () => {
     renderWithProviders({
       id: 'msg-2',

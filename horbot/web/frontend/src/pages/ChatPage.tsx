@@ -662,6 +662,59 @@ const formatRequestIdBadge = (requestId?: string): string => (
   requestId ? requestId.slice(0, 8) : ''
 );
 
+const shouldBootstrapRealtimeStreamEntry = (eventType: string): boolean => (
+  eventType === 'thinking'
+  || eventType === 'status'
+  || eventType === 'progress'
+  || eventType === 'content'
+  || eventType === 'tool_start'
+  || eventType === 'tool_result'
+  || eventType === 'step_start'
+  || eventType === 'step_complete'
+);
+
+const getRealtimeBootstrapStatusMessage = (
+  t: TranslateFn,
+  eventType: string,
+  eventData: Record<string, unknown>,
+): string => {
+  if (eventType === 'status' && typeof eventData.message === 'string' && eventData.message.trim()) {
+    return eventData.message;
+  }
+
+  if (eventType === 'thinking') {
+    return t('chat.thinking');
+  }
+
+  if (eventType === 'tool_start') {
+    const toolName = typeof eventData.tool_name === 'string' ? eventData.tool_name : '';
+    return toolName ? t('chat.toolRunningNamed', { name: toolName }) : t('chat.toolRunning');
+  }
+
+  if (eventType === 'tool_result') {
+    const toolName = typeof eventData.tool_name === 'string' ? eventData.tool_name : '';
+    return toolName ? t('chat.toolResultNamed', { name: toolName }) : t('chat.toolResult');
+  }
+
+  if (eventType === 'step_start' || eventType === 'step_complete') {
+    const stepType = typeof eventData.step_type === 'string' ? eventData.step_type : '';
+    if (stepType === 'thinking') {
+      return t('chat.thinking');
+    }
+    if (stepType === 'response') {
+      return t('chat.replying');
+    }
+    if (stepType === 'tool_call') {
+      return t('chat.toolRunning');
+    }
+    if (stepType === 'compression') {
+      return t('chat.compressingContext');
+    }
+  }
+
+  return t('chat.streamingInput');
+};
+
 const hasLegacyTimeBoundary = (
   currentTurn: MessageTurnAccumulator,
   message: UIMessage,
@@ -2133,6 +2186,7 @@ const ChatPage: React.FC = () => {
     const existingMessage = (messageId?: string) => (
       messageId ? getMessages(conversationId).find((message) => message.id === messageId) : undefined
     );
+    let resolvedStreamEntry = matchedStreamEntry;
 
     if (eventType === 'agent_start' || eventType === 'request_start') {
       if (!agentId) {
@@ -2258,7 +2312,37 @@ const ChatPage: React.FC = () => {
       return;
     }
 
-    if (!matchedStreamEntry) {
+    if (!resolvedStreamEntry && agentId && shouldBootstrapRealtimeStreamEntry(eventType)) {
+      const messageId = messageIdFromEvent || Math.random().toString(36).substring(2, 15);
+      resolvedStreamEntry = {
+        messageId,
+        content: '',
+        turnId,
+        agentId,
+        phase: 'active',
+        executionSteps: incomingExecutionSteps,
+      };
+      registry.set(streamKey, resolvedStreamEntry);
+      if (!existingMessage(messageId)) {
+        addMessage(conversationId, {
+          id: messageId,
+          role: 'assistant',
+          content: '',
+          turnId,
+          requestId: (eventData.request_id as string | undefined) || undefined,
+          agentId,
+          agentName,
+          isStreaming: true,
+          statusMessage: getRealtimeBootstrapStatusMessage(t, eventType, eventData),
+          executionSteps: incomingExecutionSteps,
+          metadata: { _relay_phase: 'active' },
+          timestamp: new Date().toISOString(),
+        });
+      }
+      addTypingAgent(conversationId, agentId);
+    }
+
+    if (!resolvedStreamEntry) {
       if (eventType === 'agent_done' && agentId) {
         const messageId = messageIdFromEvent || Math.random().toString(36).substring(2, 15);
         const normalizedError = normalizeAssistantErrorContent(t, eventData.content as string);
@@ -2307,8 +2391,8 @@ const ChatPage: React.FC = () => {
     }
 
     if (eventType === 'thinking') {
-      updateMessage(conversationId, matchedStreamEntry.messageId, {
-        executionSteps: matchedStreamEntry.executionSteps,
+      updateMessage(conversationId, resolvedStreamEntry.messageId, {
+        executionSteps: resolvedStreamEntry.executionSteps,
         isThinking: true,
         statusMessage: t('chat.thinking'),
       });
@@ -2316,7 +2400,7 @@ const ChatPage: React.FC = () => {
     }
 
     if (eventType === 'status') {
-      updateMessage(conversationId, matchedStreamEntry.messageId, {
+      updateMessage(conversationId, resolvedStreamEntry.messageId, {
         statusMessage: eventData.message as string,
       });
       return;
@@ -2327,20 +2411,20 @@ const ChatPage: React.FC = () => {
         return;
       }
       const isSyntheticProgress = Boolean(eventData.synthetic_progress);
-      matchedStreamEntry.content = (eventData.content as string) || '';
-      matchedStreamEntry.phase = 'active';
-      matchedStreamEntry.executionSteps = updateLatestRunningExecutionStep(
-        matchedStreamEntry.executionSteps,
+      resolvedStreamEntry.content = (eventData.content as string) || '';
+      resolvedStreamEntry.phase = 'active';
+      resolvedStreamEntry.executionSteps = updateLatestRunningExecutionStep(
+        resolvedStreamEntry.executionSteps,
         (step) => (step.type || '').toLowerCase().includes('thinking'),
         {
-          reasoning_content: matchedStreamEntry.content,
-          content: matchedStreamEntry.content,
+          reasoning_content: resolvedStreamEntry.content,
+          content: resolvedStreamEntry.content,
         },
       );
-      updateMessage(conversationId, matchedStreamEntry.messageId, {
-        content: matchedStreamEntry.content,
+      updateMessage(conversationId, resolvedStreamEntry.messageId, {
+        content: resolvedStreamEntry.content,
         isThinking: isSyntheticProgress,
-        executionSteps: matchedStreamEntry.executionSteps,
+        executionSteps: resolvedStreamEntry.executionSteps,
       });
       return;
     }
@@ -2351,16 +2435,16 @@ const ChatPage: React.FC = () => {
       if (toolName === 'message' && argumentsPayload) {
         openDispatchedWebConversation(argumentsPayload);
       }
-      matchedStreamEntry.executionSteps = updateLatestRunningExecutionStep(
-        matchedStreamEntry.executionSteps,
+      resolvedStreamEntry.executionSteps = updateLatestRunningExecutionStep(
+        resolvedStreamEntry.executionSteps,
         (step) => (step.type || '').toLowerCase().includes('tool'),
         {
           toolName,
           arguments: argumentsPayload,
         },
       );
-      updateMessage(conversationId, matchedStreamEntry.messageId, {
-        executionSteps: matchedStreamEntry.executionSteps,
+      updateMessage(conversationId, resolvedStreamEntry.messageId, {
+        executionSteps: resolvedStreamEntry.executionSteps,
         isThinking: false,
         statusMessage: toolName ? t('chat.toolRunningNamed', { name: toolName }) : t('chat.toolRunning'),
       });
@@ -2369,8 +2453,8 @@ const ChatPage: React.FC = () => {
 
     if (eventType === 'tool_result') {
       const toolName = eventData.tool_name as string | undefined;
-      matchedStreamEntry.executionSteps = updateLatestRunningExecutionStep(
-        matchedStreamEntry.executionSteps,
+      resolvedStreamEntry.executionSteps = updateLatestRunningExecutionStep(
+        resolvedStreamEntry.executionSteps,
         (step) => (step.type || '').toLowerCase().includes('tool'),
         {
           toolName,
@@ -2378,8 +2462,8 @@ const ChatPage: React.FC = () => {
           executionTime: eventData.execution_time,
         },
       );
-      updateMessage(conversationId, matchedStreamEntry.messageId, {
-        executionSteps: matchedStreamEntry.executionSteps,
+      updateMessage(conversationId, resolvedStreamEntry.messageId, {
+        executionSteps: resolvedStreamEntry.executionSteps,
         statusMessage: toolName ? t('chat.toolResultNamed', { name: toolName }) : t('chat.toolResult'),
       });
       return;
@@ -2399,15 +2483,15 @@ const ChatPage: React.FC = () => {
       } else if (stepType === 'compression') {
         statusText = t('chat.compressingContext');
       }
-      matchedStreamEntry.executionSteps = upsertLocalizedExecutionStep(matchedStreamEntry.executionSteps, {
+      resolvedStreamEntry.executionSteps = upsertLocalizedExecutionStep(resolvedStreamEntry.executionSteps, {
         id: stepId,
         type: stepType,
         title,
         status: 'running',
         timestamp: new Date().toISOString(),
       });
-      updateMessage(conversationId, matchedStreamEntry.messageId, {
-        executionSteps: matchedStreamEntry.executionSteps,
+      updateMessage(conversationId, resolvedStreamEntry.messageId, {
+        executionSteps: resolvedStreamEntry.executionSteps,
         isThinking: stepType === 'thinking',
         statusMessage: statusText,
       });
@@ -2419,14 +2503,14 @@ const ChatPage: React.FC = () => {
       const status = normalizeExecutionStepStatus(eventData.status as string | undefined);
       const details = eventData.details as Record<string, unknown> | undefined;
       const existingStep = stepId
-        ? matchedStreamEntry.executionSteps.find((step) => step.id === stepId)
+        ? resolvedStreamEntry.executionSteps.find((step) => step.id === stepId)
         : undefined;
       const mergedDetails = existingStep?.details
         ? { ...existingStep.details, ...(details || {}) }
         : details;
       const resolvedType = inferExecutionStepType(existingStep?.type, mergedDetails);
       const resolvedTitle = inferExecutionStepTitle(t, resolvedType, existingStep?.title, mergedDetails);
-      matchedStreamEntry.executionSteps = upsertLocalizedExecutionStep(matchedStreamEntry.executionSteps, {
+      resolvedStreamEntry.executionSteps = upsertLocalizedExecutionStep(resolvedStreamEntry.executionSteps, {
         id: stepId || Math.random().toString(36).substring(2, 15),
         type: resolvedType,
         title: resolvedTitle,
@@ -2449,12 +2533,12 @@ const ChatPage: React.FC = () => {
         ? mergedDetails.content
         : undefined;
       if (responseContent) {
-        matchedStreamEntry.content = responseContent;
+        resolvedStreamEntry.content = responseContent;
       }
 
-      updateMessage(conversationId, matchedStreamEntry.messageId, {
-        content: responseContent || matchedStreamEntry.content,
-        executionSteps: matchedStreamEntry.executionSteps,
+      updateMessage(conversationId, resolvedStreamEntry.messageId, {
+        content: responseContent || resolvedStreamEntry.content,
+        executionSteps: resolvedStreamEntry.executionSteps,
         isThinking,
         statusMessage,
       });
@@ -2462,28 +2546,28 @@ const ChatPage: React.FC = () => {
     }
 
     if (eventType === 'agent_done' || eventType === 'request_end') {
-      const currentMessage = existingMessage(matchedStreamEntry.messageId);
+      const currentMessage = existingMessage(resolvedStreamEntry.messageId);
       const normalizedError = normalizeAssistantErrorContent(
         t,
-        (eventData.content as string) || matchedStreamEntry.content,
+        (eventData.content as string) || resolvedStreamEntry.content,
       );
       const providerError = normalizeProviderErrorPayload(eventData.provider_error);
       const eventFiles = normalizeMessageFiles(eventData.files);
-      matchedStreamEntry.phase = 'done';
+      resolvedStreamEntry.phase = 'done';
       if (normalizedError.content) {
-        matchedStreamEntry.content = normalizedError.content;
+        resolvedStreamEntry.content = normalizedError.content;
       }
-      matchedStreamEntry.executionSteps = mergeLocalizedExecutionSteps(
-        matchedStreamEntry.executionSteps,
+      resolvedStreamEntry.executionSteps = mergeLocalizedExecutionSteps(
+        resolvedStreamEntry.executionSteps,
         incomingExecutionSteps,
       );
-      updateMessage(conversationId, matchedStreamEntry.messageId, {
-        content: matchedStreamEntry.content,
+      updateMessage(conversationId, resolvedStreamEntry.messageId, {
+        content: resolvedStreamEntry.content,
         isStreaming: false,
         isThinking: false,
         statusMessage: undefined,
         files: eventFiles ?? currentMessage?.files,
-        executionSteps: matchedStreamEntry.executionSteps,
+        executionSteps: resolvedStreamEntry.executionSteps,
         metadata: {
           ...(currentMessage?.metadata || {}),
           _relay_phase: 'done',
@@ -2499,8 +2583,8 @@ const ChatPage: React.FC = () => {
         errorKind: (Boolean(providerError) || normalizedError.isProviderError) ? 'provider' : undefined,
         retryable: providerError?.retryable ?? normalizedError.isProviderError,
       });
-      if (agentId || matchedStreamEntry.agentId) {
-        removeTypingAgent(conversationId, agentId || matchedStreamEntry.agentId);
+      if (agentId || resolvedStreamEntry.agentId) {
+        removeTypingAgent(conversationId, agentId || resolvedStreamEntry.agentId);
       }
       void loadConversationHistory(conversationId);
       return;
@@ -2519,53 +2603,53 @@ const ChatPage: React.FC = () => {
         t,
         (eventData.content as string) || (eventData.error as string) || t('chat.genericErrorRetry'),
       );
-      matchedStreamEntry.content = normalizedError.content || t('chat.genericErrorRetry');
-      matchedStreamEntry.phase = 'done';
-      matchedStreamEntry.executionSteps = finalizeRunningExecutionSteps(
-        matchedStreamEntry.executionSteps,
+      resolvedStreamEntry.content = normalizedError.content || t('chat.genericErrorRetry');
+      resolvedStreamEntry.phase = 'done';
+      resolvedStreamEntry.executionSteps = finalizeRunningExecutionSteps(
+        resolvedStreamEntry.executionSteps,
         'error',
-        { error: matchedStreamEntry.content },
+        { error: resolvedStreamEntry.content },
       );
-      updateMessage(conversationId, matchedStreamEntry.messageId, {
-        content: matchedStreamEntry.content,
+      updateMessage(conversationId, resolvedStreamEntry.messageId, {
+        content: resolvedStreamEntry.content,
         isStreaming: false,
         isThinking: false,
         statusMessage: undefined,
-        executionSteps: matchedStreamEntry.executionSteps,
+        executionSteps: resolvedStreamEntry.executionSteps,
         metadata: {
-          ...(existingMessage(matchedStreamEntry.messageId)?.metadata || {}),
+          ...(existingMessage(resolvedStreamEntry.messageId)?.metadata || {}),
           _relay_phase: 'done',
         },
         isError: true,
         errorKind: normalizedError.isProviderError ? 'provider' : 'stream',
         retryable: normalizedError.isProviderError,
       });
-      if (agentId || matchedStreamEntry.agentId) {
-        removeTypingAgent(conversationId, agentId || matchedStreamEntry.agentId);
+      if (agentId || resolvedStreamEntry.agentId) {
+        removeTypingAgent(conversationId, agentId || resolvedStreamEntry.agentId);
       }
       return;
     }
 
     if (eventType === 'stopped') {
-      matchedStreamEntry.phase = 'done';
-      matchedStreamEntry.executionSteps = finalizeRunningExecutionSteps(
-        matchedStreamEntry.executionSteps,
+      resolvedStreamEntry.phase = 'done';
+      resolvedStreamEntry.executionSteps = finalizeRunningExecutionSteps(
+        resolvedStreamEntry.executionSteps,
         'stopped',
         { stopped: true },
       );
-      updateMessage(conversationId, matchedStreamEntry.messageId, {
-        content: matchedStreamEntry.content || t('chat.stopped'),
+      updateMessage(conversationId, resolvedStreamEntry.messageId, {
+        content: resolvedStreamEntry.content || t('chat.stopped'),
         isStreaming: false,
         isThinking: false,
         statusMessage: undefined,
-        executionSteps: matchedStreamEntry.executionSteps,
+        executionSteps: resolvedStreamEntry.executionSteps,
         metadata: {
-          ...(existingMessage(matchedStreamEntry.messageId)?.metadata || {}),
+          ...(existingMessage(resolvedStreamEntry.messageId)?.metadata || {}),
           _relay_phase: 'done',
         },
       });
-      if (agentId || matchedStreamEntry.agentId) {
-        removeTypingAgent(conversationId, agentId || matchedStreamEntry.agentId);
+      if (agentId || resolvedStreamEntry.agentId) {
+        removeTypingAgent(conversationId, agentId || resolvedStreamEntry.agentId);
       }
     }
   }, [
@@ -2799,6 +2883,38 @@ const ChatPage: React.FC = () => {
       }
       return undefined;
     };
+
+    if (currentConversation.type === ConversationType.DM && currentConversation.targetId) {
+      const pendingAgentId = currentConversation.targetId;
+      const pendingMessageId = generateId();
+      const pendingKey = `pending:${pendingAgentId}:${pendingMessageId}`;
+      const pendingAgentName = directAgents.find((agent) => agent.id === pendingAgentId)?.name || currentConversation.name;
+
+      agentMessages.set(pendingKey, {
+        messageId: pendingMessageId,
+        content: '',
+        turnId: userMessage.id,
+        agentId: pendingAgentId,
+        phase: 'pending',
+        executionSteps: [],
+      });
+
+      addMessage(currentConversation.id, {
+        id: pendingMessageId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date().toISOString(),
+        turnId: userMessage.id,
+        agentId: pendingAgentId,
+        agentName: pendingAgentName,
+        isStreaming: true,
+        statusMessage: t('chat.streamingInput'),
+        executionSteps: [],
+        metadata: {
+          _relay_phase: 'pending',
+        },
+      });
+    }
 
     const localAbortController = new AbortController();
     const requestRef = { id: null as string | null };

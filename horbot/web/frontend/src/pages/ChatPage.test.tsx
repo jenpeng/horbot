@@ -64,6 +64,7 @@ const createJsonResponse = (data: unknown): Response => ({
 class MockWebSocket {
   static OPEN = 1;
   static CLOSED = 3;
+  static instances: MockWebSocket[] = [];
 
   readyState = MockWebSocket.OPEN;
   onopen: (() => void) | null = null;
@@ -77,9 +78,14 @@ class MockWebSocket {
   });
 
   constructor(_url: string) {
+    MockWebSocket.instances.push(this);
     setTimeout(() => {
       this.onopen?.();
     }, 0);
+  }
+
+  emitMessage(payload: Record<string, unknown>) {
+    this.onmessage?.({ data: JSON.stringify(payload) });
   }
 }
 
@@ -127,6 +133,7 @@ describe('ChatPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     messageGroupMock.mockClear();
+    MockWebSocket.instances = [];
     window.localStorage.clear();
     Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
       configurable: true,
@@ -648,6 +655,136 @@ describe('ChatPage', () => {
       expect(streamChatMock).toHaveBeenCalled();
     });
     expect(streamChatMock.mock.calls.at(-1)?.[0]?.message).toBe('retry me');
+  });
+
+  it('keeps execution steps visible when streaming steps arrive before request_start', async () => {
+    let resolveStream: (() => void) | null = null;
+    vi.spyOn(chatService, 'streamChat').mockImplementation(async ({ onStateChange, onChunk }) => {
+      onStateChange?.('connecting');
+      onChunk({
+        event: 'step_start',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: 'turn-step-first',
+        step_id: 'step-thinking-first',
+        step_type: 'thinking',
+        title: 'Thinking',
+      });
+      onChunk({
+        event: 'progress',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: 'turn-step-first',
+        content: 'analyzing',
+        synthetic_progress: true,
+      });
+
+      await new Promise<void>((resolve) => {
+        resolveStream = () => {
+          onChunk({
+            event: 'request_start',
+            agent_id: 'agent-a',
+            agent_name: 'Agent A',
+            turn_id: 'turn-step-first',
+            message_id: 'assistant-step-first',
+          });
+          onChunk({
+            event: 'request_end',
+            agent_id: 'agent-a',
+            agent_name: 'Agent A',
+            turn_id: 'turn-step-first',
+            message_id: 'assistant-step-first',
+            content: 'done',
+          });
+          onChunk({ event: 'done' });
+          resolve();
+        };
+      });
+    });
+
+    seedConversationStore({
+      id: 'dm_agent-a',
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-send-button')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-send-button'));
+
+    await waitFor(() => {
+      const conversationMessages = useConversationStore.getState().messages['dm_agent-a'] || [];
+      const streamingAssistant = conversationMessages.find((message) => (
+        message.role === 'assistant'
+        && message.agentId === 'agent-a'
+        && message.isStreaming
+      ));
+      expect(streamingAssistant?.executionSteps?.some((step) => step.id === 'step-thinking-first')).toBe(true);
+    });
+
+    resolveStream?.();
+  });
+
+  it('keeps execution steps visible when websocket steps arrive before agent_start', async () => {
+    seedConversationStore({
+      id: 'dm_agent-a',
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-message-input')).toBeInTheDocument();
+    });
+
+    const socket = MockWebSocket.instances[0];
+    expect(socket).toBeTruthy();
+
+    act(() => {
+      socket.emitMessage({
+        session_key: 'web:dm_agent-a',
+        event: 'step_start',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: 'turn-ws-step-first',
+        step_id: 'step-ws-thinking',
+        step_type: 'thinking',
+        title: 'Thinking',
+      });
+      socket.emitMessage({
+        session_key: 'web:dm_agent-a',
+        event: 'progress',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: 'turn-ws-step-first',
+        content: 'analyzing websocket work',
+        synthetic_progress: true,
+      });
+    });
+
+    await waitFor(() => {
+      const conversationMessages = useConversationStore.getState().messages['dm_agent-a'] || [];
+      const streamingAssistant = conversationMessages.find((message) => (
+        message.role === 'assistant'
+        && message.agentId === 'agent-a'
+        && message.isStreaming
+      ));
+      expect(streamingAssistant?.executionSteps?.some((step) => step.id === 'step-ws-thinking')).toBe(true);
+      expect(streamingAssistant?.content).toBe('analyzing websocket work');
+    });
   });
 
   it('surfaces the failed request id in the retry banner and turn badge', async () => {

@@ -875,6 +875,9 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
       : handoffMode === 'continue'
         ? 'border-sky-200 bg-sky-50/80 text-sky-800'
         : 'border-violet-200 bg-violet-50/80 text-violet-800';
+    const hasRelayStatusContext = Boolean(handoffFromName || handoffMode);
+    const shouldShowRelayStatusBlock = !isUser && !!message.statusMessage && !message.content && hasRelayStatusContext;
+    const shouldShowDirectStatusBubble = !isUser && !!message.statusMessage && !message.content && !hasRelayStatusContext;
     const compactStreamingTone = handoffFromName || handoffMode
       ? relayStatusTone
       : 'border-slate-200 bg-slate-50/90 text-slate-700';
@@ -912,7 +915,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
             </div>
           )}
 
-          {message.statusMessage && !message.content && (
+          {shouldShowRelayStatusBlock && (
             <div className={`w-fit max-w-full rounded-2xl border px-3 py-2 shadow-sm sm:max-w-[36rem] ${relayStatusTone}`}>
               <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium">
                 <span className="inline-flex items-center rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
@@ -972,7 +975,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                 : isErrorMessage
                   ? 'rounded-tl-md border border-red-200 bg-red-50 text-red-900'
                   : 'rounded-tl-md border border-slate-200 bg-white text-slate-800'
-            } ${message.statusMessage && !message.content ? 'hidden' : ''}`}
+            } ${shouldShowRelayStatusBlock ? 'hidden' : ''}`}
           >
             {isErrorMessage && (
               <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -995,7 +998,18 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
               </div>
             )}
 
-            {message.isStreaming ? (
+            {shouldShowDirectStatusBubble ? (
+              <div
+                className="flex items-center gap-2 whitespace-pre-wrap break-words leading-[1.55] text-slate-700"
+                data-testid="message-streaming-status-bubble"
+              >
+                <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                  {agentName || t('messageGroup.assistant')}
+                </span>
+                <span>{message.statusMessage}</span>
+                <span className="inline-block h-4 w-1.5 animate-pulse rounded-full bg-current" />
+              </div>
+            ) : message.isStreaming ? (
               <div className="flex items-center gap-1 whitespace-pre-wrap break-words leading-[1.55]">
                 <div className="min-w-0">
                   {inlineFiles && inlineFiles.length > 0 && (
