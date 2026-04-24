@@ -31,6 +31,7 @@ import type { ExecutionStep, MessageFile } from '../types/conversation';
 import { chatService, ChatStreamError } from '../services/chat';
 import type { StreamState, UploadedFile } from '../services/chat';
 import type { ConversationState } from '../stores/conversationStore';
+import { createAsyncResourceCache } from '../utils/asyncResourceCache';
 
 interface AgentInfo {
   id: string;
@@ -62,6 +63,12 @@ interface TeamInfo {
   name: string;
   members: string[];
   description?: string;
+}
+
+interface ChatDirectoryBundle {
+  agents: AgentInfo[];
+  externalAgents: AgentInfo[];
+  teams: TeamInfo[];
 }
 
 interface UIMessage {
@@ -202,6 +209,35 @@ type TranslateFn = (key: string, values?: Record<string, number | string>) => st
 
 const EMPTY_MESSAGES: UIMessage[] = [];
 const EMPTY_TYPING_AGENTS: string[] = [];
+
+const chatDirectoryCache = createAsyncResourceCache(
+  async (): Promise<ChatDirectoryBundle> => {
+    const [agentsResponse, externalAgentsResponse, teamsResponse] = await Promise.all([
+      fetch('/api/agents'),
+      fetch('/api/external-agents'),
+      fetch('/api/teams'),
+    ]);
+
+    const [agentsData, externalAgentsData, teamsData] = await Promise.all([
+      agentsResponse.json(),
+      externalAgentsResponse.json(),
+      teamsResponse.json(),
+    ]);
+
+    return {
+      agents: agentsData.agents || [],
+      externalAgents: (externalAgentsData.external_agents || []).map((agent: AgentInfo) => ({
+        ...agent,
+        external: true,
+      })),
+      teams: teamsData.teams || [],
+    };
+  },
+  {
+    ttlMs: 20_000,
+    keyFn: () => 'chat-directory',
+  },
+);
 
 const getCapabilityIcon = (capabilityId: string) => {
   switch (capabilityId) {
@@ -1555,7 +1591,7 @@ const ChatPage: React.FC = () => {
         if (msg.content && msg.content.startsWith('Message sent to ')) return false;
         return true;
       })
-      .map((msg) => {
+      .map<UIMessage>((msg) => {
         const agentId = msg.metadata?.agent_id;
         let agentName = msg.metadata?.agent_name;
         if (!agentName || agentName === t('chat.assistantFallback')) {
@@ -1582,7 +1618,7 @@ const ChatPage: React.FC = () => {
           executionSteps: mergeLocalizedExecutionSteps([], msg.execution_steps),
           metadata: msg.metadata,
           isError: Boolean(providerError) || normalizedError.isProviderError,
-          errorKind: (providerError || normalizedError.isProviderError) ? 'provider' : undefined,
+          errorKind: (providerError || normalizedError.isProviderError) ? ('provider' as const) : undefined,
           retryable: providerError?.retryable ?? normalizedError.isProviderError,
         };
       });
@@ -1747,31 +1783,26 @@ const ChatPage: React.FC = () => {
     setIsNearBottom(true);
   }, [currentConversationId]);
 
+  const applyDirectoryBundle = useCallback((directory: ChatDirectoryBundle) => {
+    setAgents(directory.agents);
+    setExternalAgents(directory.externalAgents);
+    setTeams(directory.teams);
+  }, []);
+
+  const loadDirectoryBundle = useCallback(async (options: { force?: boolean } = {}) => {
+    const directory = options.force
+      ? await chatDirectoryCache.refresh()
+      : await chatDirectoryCache.get();
+    applyDirectoryBundle(directory);
+  }, [applyDirectoryBundle]);
+
   const refreshAgents = useCallback(async () => {
     try {
-      const [agentsResponse, externalAgentsResponse] = await Promise.all([
-        fetch('/api/agents'),
-        fetch('/api/external-agents'),
-      ]);
-      const [payload, externalPayload] = await Promise.all([
-        agentsResponse.json(),
-        externalAgentsResponse.json(),
-      ]);
-      if (payload.agents) {
-        setAgents(payload.agents);
-      }
-      if (externalPayload.external_agents) {
-        setExternalAgents(
-          externalPayload.external_agents.map((agent: AgentInfo) => ({
-            ...agent,
-            external: true,
-          })),
-        );
-      }
+      await loadDirectoryBundle({ force: true });
     } catch (error) {
       console.error('Failed to refresh agents:', error);
     }
-  }, []);
+  }, [loadDirectoryBundle]);
   
   useEffect(() => {
     if (isNearBottom) {
@@ -1782,38 +1813,14 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     const initialize = async () => {
       try {
-        const [agentsResponse, externalAgentsResponse, teamsResponse] = await Promise.all([
-          fetch('/api/agents'),
-          fetch('/api/external-agents'),
-          fetch('/api/teams'),
-        ]);
-        const [agentsData, externalAgentsData, teamsData] = await Promise.all([
-          agentsResponse.json(),
-          externalAgentsResponse.json(),
-          teamsResponse.json(),
-        ]);
-
-        if (agentsData.agents) {
-          setAgents(agentsData.agents);
-        }
-        if (externalAgentsData.external_agents) {
-          setExternalAgents(
-            externalAgentsData.external_agents.map((agent: AgentInfo) => ({
-              ...agent,
-              external: true,
-            })),
-          );
-        }
-        if (teamsData.teams) {
-          setTeams(teamsData.teams);
-        }
+        await loadDirectoryBundle();
       } catch (error) {
         console.error('Failed to initialize:', error);
       }
     };
 
     void initialize();
-  }, []);
+  }, [loadDirectoryBundle]);
 
   useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {

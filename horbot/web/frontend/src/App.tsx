@@ -53,6 +53,31 @@ const PRIMARY_ROUTE_PRELOAD_ORDER = [
   '/skills',
 ];
 
+const ROUTE_PRELOAD_BUDGET = 2;
+type BrowserNetworkInformation = {
+  effectiveType?: string;
+  saveData?: boolean;
+};
+
+const canPreloadRoutes = (): boolean => {
+  if (!import.meta.env.PROD || typeof window === 'undefined') {
+    return false;
+  }
+
+  const connection = (navigator as Navigator & {
+    connection?: BrowserNetworkInformation;
+  }).connection;
+  if (!connection) {
+    return true;
+  }
+
+  if (connection.saveData) {
+    return false;
+  }
+
+  return !['slow-2g', '2g', '3g'].includes(connection.effectiveType || '');
+};
+
 const scheduleIdle = (callback: () => void): (() => void) => {
   if (typeof window.requestIdleCallback === 'function') {
     const idleId = window.requestIdleCallback(callback, { timeout: 1500 });
@@ -67,8 +92,14 @@ function App() {
   const { t } = useI18n();
 
   useEffect(() => {
+    if (!canPreloadRoutes()) {
+      return undefined;
+    }
+
     const currentPath = window.location.pathname || '/';
-    const preloadQueue = PRIMARY_ROUTE_PRELOAD_ORDER.filter((path) => path !== currentPath);
+    const preloadQueue = PRIMARY_ROUTE_PRELOAD_ORDER
+      .filter((path) => path !== currentPath)
+      .slice(0, ROUTE_PRELOAD_BUDGET);
     const cancel = scheduleIdle(() => {
       void preloadRoutesSequentially(preloadQueue);
     });

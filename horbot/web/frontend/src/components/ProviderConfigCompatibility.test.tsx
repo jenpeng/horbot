@@ -4,6 +4,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { I18nProvider } from '../contexts/I18nContext';
 import ProviderCard from './ProviderCard';
 import ProviderManager from './ProviderManager';
+import type { ProvidersConfig } from '../types';
 
 const { updateProvider, addProvider } = vi.hoisted(() => ({
   updateProvider: vi.fn(),
@@ -63,7 +64,7 @@ describe('Provider compatibility profile controls', () => {
 
     renderWithI18n(
       <ProviderManager
-        providers={{}}
+        providers={{} as ProvidersConfig}
         onProviderAdded={onProviderAdded}
       />,
     );
