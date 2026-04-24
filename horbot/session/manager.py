@@ -1,5 +1,6 @@
 """Session management for conversation history."""
 
+import copy
 import json
 import uuid
 from pathlib import Path
@@ -143,21 +144,9 @@ class Session:
                 sliced = sliced[i:]
                 break
 
-        out: list[dict[str, Any]] = []
-        for m in sliced:
-            entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
-            
-            if m.get("role") == "assistant":
-                metadata = m.get("metadata", {})
-                agent_name = metadata.get("agent_name")
-                if agent_name and entry["content"]:
-                    entry["content"] = f'<message from="{agent_name}">\n{entry["content"]}\n</message>'
-            
-            for k in ("tool_calls", "tool_call_id", "name"):
-                if k in m:
-                    entry[k] = m[k]
-            out.append(entry)
-        return out
+        # Preserve original metadata so downstream history filtering can decide
+        # which assistant turns belong in the current prompt.
+        return [copy.deepcopy(message) for message in sliced]
     
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""

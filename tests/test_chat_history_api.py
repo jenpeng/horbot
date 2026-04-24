@@ -2,7 +2,8 @@ import unittest
 from tempfile import TemporaryDirectory
 from pathlib import Path
 
-from horbot.session.manager import SessionManager
+from horbot.agent.conversation import format_history_for_agent
+from horbot.session.manager import Session, SessionManager
 from horbot.web.api import (
     _load_merged_session_messages,
     _merge_history_messages,
@@ -12,6 +13,49 @@ from horbot.web.api import (
 
 
 class ChatHistoryApiTests(unittest.TestCase):
+    def test_session_history_keeps_metadata_for_agent_filtering(self):
+        session = Session(key="web:dm_alpha")
+        session.messages = [
+            {
+                "id": "user-1",
+                "role": "user",
+                "content": "你好",
+                "timestamp": "2026-04-24T10:00:00",
+            },
+            {
+                "id": "assistant-alpha",
+                "role": "assistant",
+                "content": "这是 Alpha 的上一条回复",
+                "timestamp": "2026-04-24T10:00:01",
+                "metadata": {
+                    "agent_id": "alpha",
+                    "agent_name": "Alpha",
+                },
+            },
+            {
+                "id": "assistant-beta",
+                "role": "assistant",
+                "content": "这是 Beta 的历史回复，不应该出现在 Alpha 的 DM 上下文里",
+                "timestamp": "2026-04-24T10:00:02",
+                "metadata": {
+                    "agent_id": "beta",
+                    "agent_name": "Beta",
+                },
+            },
+        ]
+
+        history = format_history_for_agent(
+            session.get_history(),
+            target_agent_id="alpha",
+            target_agent_name="Alpha",
+            is_group_chat=False,
+        )
+
+        self.assertEqual(
+            [message["content"] for message in history],
+            ["你好", "这是 Alpha 的上一条回复"],
+        )
+
     def test_clean_message_content_unwraps_message_wrapper_with_to_attribute(self):
         content = '<message from="小项 🐎" to="袭人">\n你好呀\n</message>'
 
