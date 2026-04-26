@@ -6,6 +6,7 @@ import os
 HORBOT_ROOT_DIRNAME = ".horbot"
 HORBOT_ROOT_ENV = "HORBOT_ROOT"
 HORBOT_CONFIG_ENV = "HORBOT_CONFIG_PATH"
+AGENT_METADATA_DIRNAME = ".horbot-agent"
 
 
 def _search_upward_for_dir(dirname: str) -> Path | None:
@@ -158,21 +159,21 @@ def get_main_agent_workspace_dir() -> Path:
 
 def get_main_agent_memory_dir() -> Path:
     """Get the main agent memory directory."""
-    path = get_main_agent_dir() / "memory"
+    path = get_main_agent_workspace_dir() / AGENT_METADATA_DIRNAME / "memory"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def get_main_agent_sessions_dir() -> Path:
     """Get the main agent sessions directory."""
-    path = get_main_agent_dir() / "sessions"
+    path = get_main_agent_workspace_dir() / AGENT_METADATA_DIRNAME / "sessions"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def get_main_agent_skills_dir() -> Path:
     """Get the main agent skills directory."""
-    path = get_main_agent_dir() / "skills"
+    path = get_main_agent_workspace_dir() / AGENT_METADATA_DIRNAME / "skills"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -184,9 +185,7 @@ def get_workspace_dir() -> Path:
 
 def get_skills_dir() -> Path:
     """Get the workspace skills directory."""
-    path = get_workspace_dir() / "skills"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return get_main_agent_skills_dir()
 
 
 def get_scripts_dir() -> Path:
@@ -256,21 +255,21 @@ def get_agent_workspace_dir(agent_id: str) -> Path:
 
 def get_agent_memory_dir(agent_id: str) -> Path:
     """Get an agent memory directory."""
-    path = get_agent_dir(agent_id) / "memory"
+    path = get_agent_workspace_dir(agent_id) / AGENT_METADATA_DIRNAME / "memory"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def get_agent_sessions_dir(agent_id: str) -> Path:
     """Get an agent sessions directory."""
-    path = get_agent_dir(agent_id) / "sessions"
+    path = get_agent_workspace_dir(agent_id) / AGENT_METADATA_DIRNAME / "sessions"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def get_agent_skills_dir(agent_id: str) -> Path:
     """Get an agent skills directory."""
-    path = get_agent_dir(agent_id) / "skills"
+    path = get_agent_workspace_dir(agent_id) / AGENT_METADATA_DIRNAME / "skills"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

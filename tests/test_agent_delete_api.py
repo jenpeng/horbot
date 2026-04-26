@@ -109,7 +109,7 @@ class AgentDeleteApiTests(unittest.IsolatedAsyncioTestCase):
                 (workspace / "USER.md").write_text("# User Profile\n", encoding="utf-8")
                 user_file = workspace / "notes.txt"
                 user_file.write_text("keep me\n", encoding="utf-8")
-                self.assertTrue(str(memory_dir).startswith(str(horbot_root / "agents" / "writer")))
+                self.assertEqual(memory_dir, workspace / ".horbot-agent" / "memory")
 
                 transport = httpx.ASGITransport(app=app, client=("127.0.0.1", 43123))
                 async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:

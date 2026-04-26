@@ -103,8 +103,12 @@ async def run_skills_smoke(url: str = DEFAULT_URL, headless: bool = True) -> dic
                     pass
 
             preview_panel = page.get_by_text("Preview", exact=True).locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]")
-            await preview_panel.get_by_text("My Skill", exact=False).last.wait_for(timeout=30000)
-            await preview_panel.get_by_text("Description of what this skill does.", exact=True).wait_for(timeout=30000)
+            editor_content = await page.locator("textarea").first.input_value()
+            editor_preview_snippet = extract_preview_snippet(
+                editor_content,
+                fallback="My Skill",
+            )
+            await preview_panel.get_by_text(editor_preview_snippet, exact=False).last.wait_for(timeout=30000)
             result["editor_preview_visible"] = True
 
         except PlaywrightTimeoutError as exc:

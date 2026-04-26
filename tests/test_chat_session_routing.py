@@ -17,19 +17,30 @@ class ChatSessionRoutingTests(unittest.IsolatedAsyncioTestCase):
             workspace_a = Path(tmpdir) / "workspace-a"
             workspace_b = Path(tmpdir) / "workspace-b"
 
-            config_a = SimpleNamespace(workspace_path=str(workspace_a))
-            config_b = SimpleNamespace(workspace_path=str(workspace_b))
+            config_a = SimpleNamespace(
+                workspace_path=str(workspace_a),
+                agents=SimpleNamespace(instances={"main": object()}),
+            )
+            config_b = SimpleNamespace(
+                workspace_path=str(workspace_b),
+                agents=SimpleNamespace(instances={"main": object()}),
+            )
 
             with (
                 patch("horbot.web.api._session_manager", None),
                 patch("horbot.web.api.get_cached_config", side_effect=[config_a, config_b]),
+                patch("horbot.workspace.manager.get_workspace_manager") as get_workspace_manager_mock,
             ):
+                get_workspace_manager_mock.return_value.get_agent_workspace.side_effect = [
+                    SimpleNamespace(sessions_path=str(workspace_a / ".horbot-agent" / "sessions")),
+                    SimpleNamespace(sessions_path=str(workspace_b / ".horbot-agent" / "sessions")),
+                ]
                 manager_a = get_session_manager()
                 manager_b = get_session_manager()
 
             self.assertNotEqual(manager_a.sessions_dir, manager_b.sessions_dir)
-            self.assertEqual(manager_a.sessions_dir, workspace_a / "sessions")
-            self.assertEqual(manager_b.sessions_dir, workspace_b / "sessions")
+            self.assertEqual(manager_a.sessions_dir, workspace_a / ".horbot-agent" / "sessions")
+            self.assertEqual(manager_b.sessions_dir, workspace_b / ".horbot-agent" / "sessions")
 
     async def test_delete_dm_session_uses_agent_workspace_manager(self):
         with tempfile.TemporaryDirectory() as tmpdir:

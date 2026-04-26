@@ -203,6 +203,7 @@ def _create_workspace_templates(workspace: Path):
     from importlib.resources import files as pkg_files
     import locale
     import os
+    from horbot.workspace.manager import AGENT_METADATA_DIRNAME
     
     templates_dir = pkg_files("horbot") / "templates"
     
@@ -234,21 +235,22 @@ def _create_workspace_templates(workspace: Path):
             dest.write_text(item.read_text(encoding="utf-8"), encoding="utf-8")
             console.print(f"  [dim]Created {item.name}[/dim]")
 
-    memory_dir = workspace / "memory"
-    memory_dir.mkdir(exist_ok=True)
+    metadata_root = workspace / AGENT_METADATA_DIRNAME
+    memory_dir = metadata_root / "memory"
+    memory_dir.mkdir(parents=True, exist_ok=True)
 
     memory_template = templates_dir / "memory" / "MEMORY.md"
     memory_file = memory_dir / "MEMORY.md"
     if not memory_file.exists():
         memory_file.write_text(memory_template.read_text(encoding="utf-8"), encoding="utf-8")
-        console.print("  [dim]Created memory/MEMORY.md[/dim]")
+        console.print(f"  [dim]Created {AGENT_METADATA_DIRNAME}/memory/MEMORY.md[/dim]")
 
     history_file = memory_dir / "HISTORY.md"
     if not history_file.exists():
         history_file.write_text("", encoding="utf-8")
         console.print("  [dim]Created memory/HISTORY.md[/dim]")
 
-    (workspace / "skills").mkdir(exist_ok=True)
+    (metadata_root / "skills").mkdir(parents=True, exist_ok=True)
 
 
 def _make_provider(config: Config):

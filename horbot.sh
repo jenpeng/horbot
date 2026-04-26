@@ -50,6 +50,39 @@ print_warning() {
     echo -e "${YELLOW}⚠${NC} $1"
 }
 
+detect_npm_command() {
+    if command -v npm >/dev/null 2>&1; then
+        command -v npm
+        return 0
+    fi
+
+    if [ -x "/opt/homebrew/bin/npm" ]; then
+        echo "/opt/homebrew/bin/npm"
+        return 0
+    fi
+
+    if [ -x "/usr/local/bin/npm" ]; then
+        echo "/usr/local/bin/npm"
+        return 0
+    fi
+
+    return 1
+}
+
+ensure_path_prefix() {
+    local dir="$1"
+    if [ -z "$dir" ]; then
+        return 0
+    fi
+
+    case ":$PATH:" in
+        *":$dir:"*) ;;
+        *)
+            export PATH="$dir:$PATH"
+            ;;
+    esac
+}
+
 display_data_root_rel() {
     echo ".horbot"
 }
@@ -260,9 +293,12 @@ install_frontend() {
     print_info "安装前端依赖..."
     
     cd "$FRONTEND_DIR"
-    
-    if command -v npm &> /dev/null; then
-        npm install
+
+    local npm_cmd
+    npm_cmd="$(detect_npm_command || true)"
+
+    if [ -n "$npm_cmd" ]; then
+        "$npm_cmd" install
     elif command -v yarn &> /dev/null; then
         yarn install
     elif command -v pnpm &> /dev/null; then
@@ -1206,9 +1242,19 @@ start_frontend() {
         cd "$PROJECT_ROOT"
         return 1
     fi
+
+    local npm_cmd
+    npm_cmd="$(detect_npm_command || true)"
+    if [ -z "$npm_cmd" ]; then
+        print_error "未找到 npm，可执行路径不在当前环境中"
+        cd "$PROJECT_ROOT"
+        return 1
+    fi
+
+    ensure_path_prefix "$(dirname "$npm_cmd")"
     
     local new_pid
-    new_pid="$(spawn_detached "$FRONTEND_DIR" "$LOG_DIR/frontend.log" npm run dev -- --host 127.0.0.1)"
+    new_pid="$(spawn_detached "$FRONTEND_DIR" "$LOG_DIR/frontend.log" "$npm_cmd" run dev -- --host 127.0.0.1)"
     echo "$new_pid" > "$pid_file"
     
     cd "$PROJECT_ROOT"

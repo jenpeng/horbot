@@ -10,6 +10,11 @@ Horbot uses:
 - built-in skills from `horbot/skills`
 - user or auto-generated skills from the current agent skill directory
 
+The Skills page also separates these into:
+
+- `System`: built-in skills maintained with the project
+- `Custom`: workspace-local skills, including manual and auto-generated entries
+
 ## Package Formats
 
 Supported imports:
@@ -39,20 +44,31 @@ Imported skills are checked against the current environment for:
 
 Horbot can quietly review completed tool-backed work and create or update reusable skills when the workflow is repeatable.
 
+Auto-generated skills now prefer a family layout instead of one folder per tiny variation:
+
+- `SKILL.md` stays lean and describes the shared trigger cues
+- detailed techniques live under `references/*.md`
+- related auto-skills can be merged into one broader family such as `auto-officecli-ppt`
+
 The current loop is:
 
 1. task completes
 2. background review checks reusability
-3. reusable workflow becomes a skill
+3. reusable workflow becomes a skill family or updates an existing family
 4. reflection and history memory are updated
+
+The Web UI also exposes:
+
+- `Consolidate Generated`: manually merge related `auto-*` skills into broader families
+- `Promote to Builtin`: turn a custom workspace skill into a built-in system skill
 
 ## Storage
 
 The active skill path is agent-scoped:
 
-- `.horbot/agents/<agent-id>/skills`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`
 
-Legacy `workspace/skills` assumptions no longer describe the current runtime.
+Legacy `.horbot/agents/<agent-id>/skills` and `workspace/skills` assumptions no longer describe the current runtime.
 
 ## Selected Built-In Skills
 

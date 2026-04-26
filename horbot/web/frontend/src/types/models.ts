@@ -317,6 +317,9 @@ export interface ExecutionStep {
 export interface Skill {
   name: string;
   source: 'builtin' | 'user';
+  source_group?: 'system' | 'custom';
+  source_origin_kind?: 'builtin' | 'agent' | 'manual';
+  source_origin_agent_id?: string | null;
   path: string;
   description: string;
   available: boolean;

@@ -66,7 +66,7 @@ class SkillLoader:
     This reduces initial context usage while keeping skills accessible.
     
     Example:
-        loader = SkillLoader(skills_dir=Path(".horbot/agents/main/workspace/skills"))
+        loader = SkillLoader(skills_dir=Path(".horbot/agents/main/workspace/.horbot-agent/skills"))
         
         # Get lightweight summary for initial context
         summary = loader.build_skills_summary()
@@ -86,7 +86,7 @@ class SkillLoader:
         """Initialize skill loader.
         
         Args:
-            skills_dir: Directory for user-defined skills (defaults to workspace/skills/)
+            skills_dir: Directory for user-defined skills (defaults to workspace/.horbot-agent/skills/)
             builtin_skills_dir: Directory for built-in skills (defaults to horbot/skills/)
             cache_loaded: Whether to cache loaded skills
         """

@@ -33,6 +33,24 @@ interface ToggleSkillResponse {
   enabled: boolean;
 }
 
+interface PromoteSkillResponse {
+  name: string;
+  path: string;
+  source: 'builtin';
+  message: string;
+}
+
+interface ConsolidateGeneratedSkillsResponse {
+  family_count_before: number;
+  family_count_after: number;
+  merged_skill_count: number;
+  updated_families: Array<{
+    skill_name: string;
+    merged_skills: string[];
+  }>;
+  message: string;
+}
+
 
 export const skillsService = {
   getSkills: async (): Promise<Skill[]> => {
@@ -62,6 +80,11 @@ export const skillsService = {
     return response.data.enabled;
   },
 
+  promoteSkill: async (name: string): Promise<PromoteSkillResponse> => {
+    const response = await api.post<PromoteSkillResponse>(`/api/skills/${name}/promote`);
+    return response.data;
+  },
+
   importSkill: async (file: File, replaceExisting = false): Promise<SkillImportResult> => {
     const formData = new FormData();
     formData.append('file', file);
@@ -71,6 +94,11 @@ export const skillsService = {
         'Content-Type': 'multipart/form-data',
       },
     });
+    return response.data;
+  },
+
+  consolidateGeneratedSkills: async (): Promise<ConsolidateGeneratedSkillsResponse> => {
+    const response = await api.post<ConsolidateGeneratedSkillsResponse>('/api/skills/consolidate-generated');
     return response.data;
   },
 

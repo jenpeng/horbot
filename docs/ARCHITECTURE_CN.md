@@ -28,6 +28,7 @@ horbot 采用模块化设计，核心组件包括：
 - 浏览器 MCP 默认走 Playwright，不再依赖 `horbot.sh` 托管的内置 `web-access` 服务
 - 聊天历史层会尽量把 assistant 正文中的独立远程图片链接提升为 `files` 附件，并将可缓存的远程图片落盘到 `.horbot/data/uploads`，这样前端在刷新历史后仍能保持统一图片卡片与预览体验
 - Configuration 页面新增“远程图片缓存”状态区块，直接读取后端缓存统计，并支持手动清理自动落盘的远程图片缓存
+- Skills 页面当前支持系统技能/自定义技能分组展示、自动技能手动整理，以及把自定义技能转为系统技能
 
 ### 架构概览图
 
@@ -227,6 +228,20 @@ horbot/
 ### 1. Agent 模块 (`horbot/agent/`)
 
 Agent 是 horbot 的核心，负责与 LLM 交互和工具执行。
+
+### Agent 运行时目录约定
+
+当前 Agent 运行时采用“workspace + metadata root”模型：
+
+- `workspace/` 放 `SOUL.md`、`USER.md`、以及用户可见的工作文件
+- `workspace/.horbot-agent/` 放 Horbot 管理的运行时元数据
+- `workspace/.horbot-agent/memory/` 放分层记忆与执行记录
+- `workspace/.horbot-agent/sessions/` 放当前 Agent 的会话历史
+- `workspace/.horbot-agent/skills/` 放当前 Agent 的自定义技能与自动沉淀技能
+
+`workspace/` 下还可能存在 `.audit`、`.checkpoints`、`.state` 等运行目录，它们属于有效运行资产，不是冗余副本。
+
+旧的 `.horbot/agents/<agent-id>/{memory,sessions,skills}` 和 `workspace/{memory,skills}` 现在只作为兼容迁移来源，运行时会向前合并，但不会再继续作为 canonical 写入路径。
 
 #### 模块依赖关系
 

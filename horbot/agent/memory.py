@@ -183,7 +183,7 @@ class MemoryStore:
     Uses the unified paths module for directory locations.
     
     Supports Agent-level memory isolation:
-    - Each agent has its own memory directory under agents/{agent_id}/memory/
+    - Each agent has its own memory directory under agents/{agent_id}/workspace/.horbot-agent/memory/
     - Team shared memory under teams/{team_id}/shared_memory/
     - Default memory for main agent under context/memories/
     """
@@ -241,18 +241,22 @@ class MemoryStore:
         team_ids: list[str] | None = None,
     ):
         from horbot.config.loader import get_cached_config
-        from horbot.utils.paths import get_agent_memory_dir, get_team_shared_memory_dir
+        from horbot.utils.paths import get_team_shared_memory_dir
+        from horbot.workspace.manager import get_workspace_manager
         
         self.agent_id = agent_id
         self.team_ids = team_ids or []
         self._access_control = MemoryAccessControl(agent_id, team_ids)
-        
+        workspace_manager = get_workspace_manager()
+
         if agent_id:
-            self.memory_dir = get_agent_memory_dir(agent_id)
+            agent_ws = workspace_manager.get_agent_workspace(agent_id)
+            self.memory_dir = Path(agent_ws.memory_path)
             logger.debug("MemoryStore initialized for agent: {}", agent_id)
         else:
             default_agent_id = next(iter(get_cached_config().agents.instances.keys()), "default")
-            self.memory_dir = get_agent_memory_dir(default_agent_id)
+            agent_ws = workspace_manager.get_agent_workspace(default_agent_id)
+            self.memory_dir = Path(agent_ws.memory_path)
         
         self.memory_file = self.memory_dir / "L2" / "MEMORY.md"
         self.history_file = self.memory_dir / "L1" / "HISTORY.md"

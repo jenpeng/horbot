@@ -7,11 +7,10 @@ import json
 from dataclasses import dataclass
 
 from horbot.utils.paths import (
-    get_agent_memory_dir,
     get_team_shared_memory_dir,
-    get_memory_dir
 )
 from horbot.team.shared_memory import SharedMemoryManager
+from horbot.workspace.manager import get_workspace_manager
 
 
 @dataclass
@@ -53,12 +52,16 @@ class UnifiedMemoryManager:
     
     def get_context(self) -> MemoryContext:
         return self._context
-    
+
+    def _get_agent_memory_dir(self, agent_id: str) -> Path:
+        agent_ws = get_workspace_manager().get_agent_workspace(agent_id)
+        return Path(agent_ws.memory_path)
+
     def get_agent_memory_path(self, filename: str = "MEMORY.md") -> Optional[Path]:
         """Get path to agent's memory file."""
         if not self._context.agent_id:
             return None
-        return get_agent_memory_dir(self._context.agent_id) / filename
+        return self._get_agent_memory_dir(self._context.agent_id) / filename
     
     def read_agent_memory(self) -> str:
         """Read agent's private memory."""
@@ -180,7 +183,7 @@ class UnifiedMemoryManager:
         if not self._context.agent_id:
             return
         
-        archive_dir = get_agent_memory_dir(self._context.agent_id) / "archives"
+        archive_dir = self._get_agent_memory_dir(self._context.agent_id) / "archives"
         archive_dir.mkdir(exist_ok=True)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

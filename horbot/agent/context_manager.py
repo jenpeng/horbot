@@ -58,14 +58,19 @@ class HierarchicalContextManager:
         self.team_ids = team_ids or []
         
         from horbot.config.loader import get_cached_config
-        from horbot.utils.paths import get_agent_memory_dir, get_team_shared_memory_dir
-        
+        from horbot.utils.paths import get_team_shared_memory_dir
+        from horbot.workspace.manager import get_workspace_manager
+
+        workspace_manager = get_workspace_manager()
+
         if agent_id:
-            self.context_dir = get_agent_memory_dir(agent_id)
+            agent_ws = workspace_manager.get_agent_workspace(agent_id)
+            self.context_dir = Path(agent_ws.memory_path)
             logger.debug("HierarchicalContextManager initialized for agent: {}", agent_id)
         else:
             default_agent_id = next(iter(get_cached_config().agents.instances.keys()), "default")
-            self.context_dir = get_agent_memory_dir(default_agent_id)
+            agent_ws = workspace_manager.get_agent_workspace(default_agent_id)
+            self.context_dir = Path(agent_ws.memory_path)
         
         self._team_context_dirs: dict[str, Path] = {}
         for team_id in self.team_ids:

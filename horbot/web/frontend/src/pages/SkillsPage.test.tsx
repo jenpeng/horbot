@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SkillsPage from './SkillsPage';
 import { I18nProvider } from '../contexts/I18nContext';
 import skillsService from '../services/skills';
-import type { Skill } from '../types';
+import type { Skill, SkillDetail } from '../types';
 
 vi.mock('../services/skills', () => ({
   default: {
@@ -15,6 +15,8 @@ vi.mock('../services/skills', () => ({
     deleteSkill: vi.fn(),
     toggleSkill: vi.fn(),
     importSkill: vi.fn(),
+    promoteSkill: vi.fn(),
+    consolidateGeneratedSkills: vi.fn(),
     getMcpServers: vi.fn(),
     addMcpServer: vi.fn(),
     updateMcpServer: vi.fn(),
@@ -25,8 +27,35 @@ vi.mock('../services/skills', () => ({
 const skillFixture: Skill = {
   name: 'research-helper',
   source: 'user',
+  source_group: 'custom',
+  source_origin_kind: 'manual',
+  source_origin_agent_id: null,
   path: '/tmp/research-helper',
   description: 'Helps with research.',
+  available: true,
+  enabled: true,
+  always: false,
+  requires: {},
+  schema: 'skill',
+  schema_version: 1,
+  source_schema: 'skill',
+  source_schema_version: 1,
+  normalized_from_legacy: false,
+  compatibility: {
+    status: 'compatible',
+    issues: [],
+    warnings: [],
+  },
+};
+
+const builtinSkillFixture: Skill = {
+  name: 'excel-xlsx',
+  source: 'builtin',
+  source_group: 'system',
+  source_origin_kind: 'builtin',
+  source_origin_agent_id: null,
+  path: '/builtin/excel-xlsx/SKILL.md',
+  description: 'Spreadsheet helper.',
   available: true,
   enabled: true,
   always: false,
@@ -64,12 +93,19 @@ const missingSkillFixture: Skill = {
   },
 };
 
+const skillDetailFixture: SkillDetail = {
+  ...skillFixture,
+  content: '# Research Helper',
+  metadata: {},
+};
+
 const renderWithI18n = (ui: ReactElement) => render(<I18nProvider>{ui}</I18nProvider>);
 
 describe('SkillsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(skillsService.getSkills).mockResolvedValue([skillFixture]);
+    vi.mocked(skillsService.getSkills).mockResolvedValue([skillFixture, builtinSkillFixture]);
+    vi.mocked(skillsService.getSkill).mockResolvedValue(skillDetailFixture);
     vi.mocked(skillsService.getMcpServers).mockResolvedValue({});
   });
 
@@ -133,5 +169,85 @@ describe('SkillsPage', () => {
     await waitFor(() => {
       expect(screen.queryByText('Install GitHub CLI (brew)')).not.toBeInTheDocument();
     });
+  });
+
+  it('groups system and custom skills and shows custom origin badges', async () => {
+    renderWithI18n(<SkillsPage />);
+
+    expect(await screen.findByText('System Skills (1)')).toBeInTheDocument();
+    expect(screen.getByText('Custom Skills (1)')).toBeInTheDocument();
+    expect(screen.getByText('System')).toBeInTheDocument();
+    expect(screen.getByText('Manual')).toBeInTheDocument();
+  });
+
+  it('manually consolidates generated skills and refreshes the list', async () => {
+    vi.mocked(skillsService.consolidateGeneratedSkills).mockResolvedValue({
+      family_count_before: 3,
+      family_count_after: 2,
+      merged_skill_count: 1,
+      updated_families: [
+        {
+          skill_name: 'auto-shell-retry-checklist',
+          merged_skills: ['auto-shell-timeout-diagnosis'],
+        },
+      ],
+      message: 'Consolidated 1 generated skills across 1 skill families.',
+    });
+
+    renderWithI18n(<SkillsPage />);
+
+    expect(await screen.findByText('Skills & MCP')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Consolidate Generated' }));
+
+    await waitFor(() => {
+      expect(skillsService.consolidateGeneratedSkills).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(skillsService.getSkills).toHaveBeenCalledTimes(2);
+      expect(skillsService.getMcpServers).toHaveBeenCalledTimes(2);
+    });
+
+    expect(
+      await screen.findByText('Consolidated 1 generated skills into 1 skill families'),
+    ).toBeInTheDocument();
+  });
+
+  it('promotes a custom skill to builtin and refreshes the list', async () => {
+    vi.mocked(skillsService.promoteSkill).mockResolvedValue({
+      name: 'research-helper',
+      path: '/builtin/research-helper/SKILL.md',
+      source: 'builtin',
+      message: 'Skill promoted',
+    });
+
+    renderWithI18n(<SkillsPage />);
+
+    expect(await screen.findByText('research-helper')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Promote to Builtin' }));
+
+    await waitFor(() => {
+      expect(skillsService.promoteSkill).toHaveBeenCalledWith('research-helper');
+    });
+
+    await waitFor(() => {
+      expect(skillsService.getSkills).toHaveBeenCalledTimes(2);
+      expect(skillsService.getMcpServers).toHaveBeenCalledTimes(2);
+    });
+
+    expect(await screen.findByText('Skill "research-helper" promoted to builtin')).toBeInTheDocument();
+  });
+
+  it('shows the skill path in the detail modal', async () => {
+    renderWithI18n(<SkillsPage />);
+
+    expect(await screen.findByText('research-helper')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('research-helper'));
+
+    expect(await screen.findByText('Path')).toBeInTheDocument();
+    expect(screen.getByText('/tmp/research-helper')).toBeInTheDocument();
   });
 });

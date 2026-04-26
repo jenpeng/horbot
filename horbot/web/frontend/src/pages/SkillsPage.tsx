@@ -135,6 +135,242 @@ const SkillsPage: React.FC = () => {
     );
   }, [skills, searchQuery]);
 
+  const systemSkills = useMemo(
+    () => filteredSkills.filter((skill) => (skill.source_group ?? (skill.source === 'builtin' ? 'system' : 'custom')) === 'system'),
+    [filteredSkills],
+  );
+  const customSkills = useMemo(
+    () => filteredSkills.filter((skill) => (skill.source_group ?? (skill.source === 'builtin' ? 'system' : 'custom')) === 'custom'),
+    [filteredSkills],
+  );
+
+  const getSkillOriginLabel = (skill: Skill) => {
+    if (skill.source === 'builtin' || skill.source_origin_kind === 'builtin') {
+      return t('skills.badge.system');
+    }
+    if (skill.source_origin_kind === 'agent' && skill.source_origin_agent_id) {
+      return t('skills.badge.agentSource', { agentId: skill.source_origin_agent_id });
+    }
+    return t('skills.badge.manual');
+  };
+
+  const renderSkillCards = (skillsToRender: Skill[]) => (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {skillsToRender.map((skill) => (
+        <Card
+          key={skill.name}
+          padding="none"
+          hover={!skill.available || !skill.enabled ? false : true}
+          className={`group relative overflow-hidden transition-all duration-300 ${
+            !skill.available || !skill.enabled
+              ? 'opacity-75'
+              : 'hover:shadow-card-hover hover:-translate-y-0.5'
+          } ${selectedSkills.has(skill.name) ? 'ring-2 ring-primary-500' : ''}`}
+        >
+          <div className={`absolute inset-0 bg-gradient-to-br ${
+            skill.enabled && skill.available
+              ? 'from-primary-500/5 via-transparent to-accent-purple/5'
+              : 'from-surface-100 via-transparent to-surface-100'
+          } opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
+
+          <div className="p-5 relative z-10">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="flex items-start gap-3 flex-1 min-w-0">
+                <input
+                  type="checkbox"
+                  checked={selectedSkills.has(skill.name)}
+                  onChange={() => toggleSkillSelection(skill.name)}
+                  className="mt-1 w-4 h-4 rounded border-surface-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h3
+                      className="font-semibold text-surface-900 truncate cursor-pointer hover:text-primary-600 transition-colors"
+                      onClick={() => fetchSkillDetail(skill.name)}
+                    >
+                      {skill.name}
+                    </h3>
+                  </div>
+                  <p
+                    className="text-sm text-surface-600 line-clamp-2 cursor-pointer hover:text-surface-900 transition-colors"
+                    onClick={() => fetchSkillDetail(skill.name)}
+                  >
+                    {skill.description}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={(e) => { e.stopPropagation(); handleToggle(skill.name, skill.enabled); }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-all duration-300 flex-shrink-0 ${
+                  skill.enabled
+                    ? 'bg-gradient-to-r from-accent-emerald to-accent-teal shadow-lg shadow-accent-emerald/20'
+                    : 'bg-surface-300 hover:bg-surface-400'
+                }`}
+                title={skill.enabled ? t('skills.action.disable') : t('skills.action.enable')}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition-all duration-300 ${
+                    skill.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-surface-100">
+              <div className="flex items-center gap-2 flex-wrap">
+                {!skill.available && (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-md bg-accent-red/10 px-3 py-1.5 text-xs font-semibold leading-tight text-accent-red transition-colors hover:bg-accent-red/15"
+                    aria-expanded={expandedMissingDetails.has(skill.name)}
+                    aria-controls={`skill-missing-details-${skill.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleMissingDetails(skill.name);
+                    }}
+                    onMouseEnter={() => setHoveredMissingDetails(skill.name)}
+                    onMouseLeave={() => setHoveredMissingDetails((current) => (
+                      current === skill.name ? null : current
+                    ))}
+                    data-testid={`skill-missing-toggle-${skill.name}`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    {t('skills.badge.missing')}
+                  </button>
+                )}
+                {getCompatibilityBadge(skill.compatibility, t) && (
+                  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getCompatibilityBadge(skill.compatibility, t)?.className}`}>
+                    {getCompatibilityBadge(skill.compatibility, t)?.label}
+                  </span>
+                )}
+                {skill.always && (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-accent-purple/10 text-accent-purple">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    {t('skills.badge.always')}
+                  </span>
+                )}
+                {skill.normalized_from_legacy && (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-accent-amber/15 text-accent-amber">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {skill.source_schema}
+                  </span>
+                )}
+                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                  skill.source === 'builtin'
+                    ? 'bg-accent-indigo/10 text-accent-indigo'
+                    : 'bg-primary-100 text-primary-700'
+                }`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                  {skill.source === 'builtin' ? t('skills.badge.system') : t('skills.badge.custom')}
+                </span>
+                {skill.source !== 'builtin' && (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-surface-100 text-surface-700">
+                    {getSkillOriginLabel(skill)}
+                  </span>
+                )}
+              </div>
+              {skill.source === 'user' && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); void handlePromoteSkill(skill.name); }}
+                    className="inline-flex items-center rounded-md border border-accent-indigo/25 bg-accent-indigo/10 px-3 py-1.5 text-xs font-semibold text-accent-indigo transition-colors hover:bg-accent-indigo/15"
+                    title={t('skills.action.promoteBuiltin')}
+                  >
+                    {t('skills.action.promoteBuiltin')}
+                  </button>
+                  <div className="flex gap-1 opacity-70 transition-opacity group-hover:opacity-100">
+                    <IconButton
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => { e.stopPropagation(); openEditEditor(skill); }}
+                      className="text-surface-500 hover:text-primary-600 hover:bg-primary-50"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </IconButton>
+                    <IconButton
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => { e.stopPropagation(); setDeleteConfirm(skill.name); }}
+                      className="text-surface-500 hover:text-semantic-error hover:bg-semantic-error-light"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </IconButton>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {((skill.missing_requirements && skill.missing_requirements.length > 0) || (skill.install && skill.install.length > 0 && !skill.available)) &&
+              (expandedMissingDetails.has(skill.name) || hoveredMissingDetails === skill.name) && (
+              <div
+                id={`skill-missing-details-${skill.name}`}
+                className="mt-3 bg-semantic-error-light border border-semantic-error/20 rounded-lg p-3"
+                onMouseEnter={() => setHoveredMissingDetails(skill.name)}
+                onMouseLeave={() => setHoveredMissingDetails((current) => (
+                  current === skill.name ? null : current
+                ))}
+              >
+                <div className="space-y-2 text-xs text-semantic-error">
+                  {skill.missing_requirements && skill.missing_requirements.length > 0 && (
+                    <p className="flex items-start gap-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span><strong>{t('skills.missingRequirements')}</strong> {skill.missing_requirements.join(', ')}</span>
+                    </p>
+                  )}
+                  {skill.install && skill.install.length > 0 && !skill.available && (
+                    <div className="pl-6 space-y-2">
+                      {skill.install.map((option, index) => {
+                        const command = formatInstallCommand(option);
+                        return (
+                          <div key={`${option.id || option.kind || 'install'}-${index}`} className="space-y-1">
+                            <p className="font-medium text-semantic-error">
+                              {option.label || t('skills.installDependency')}
+                            </p>
+                            {command && (
+                              <code className="block rounded bg-white/80 px-2 py-1 font-mono text-[11px] text-surface-700 break-all">
+                                {command}
+                              </code>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {skill.compatibility && (skill.compatibility.issues.length > 0 || skill.compatibility.warnings.length > 0) && (
+              <div className="mt-3 rounded-lg border border-surface-200 bg-surface-50 p-3 text-xs text-surface-700 space-y-2">
+                {skill.compatibility.issues.length > 0 && (
+                  <p><strong>{t('skills.compatibilityIssues')}</strong> {skill.compatibility.issues.join('; ')}</p>
+                )}
+                {skill.compatibility.warnings.length > 0 && (
+                  <p><strong>{t('skills.compatibilityWarnings')}</strong> {skill.compatibility.warnings.join('; ')}</p>
+                )}
+              </div>
+            )}
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+
   const fetchSkillDetail = async (skillName: string) => {
     try {
       const data = await skillsService.getSkill(skillName);
@@ -244,6 +480,23 @@ const SkillsPage: React.FC = () => {
     }
   };
 
+  const handlePromoteSkill = async (skillName: string) => {
+    setSaving(true);
+    try {
+      await skillsService.promoteSkill(skillName);
+      showNotification('success', t('skills.notification.promotedBuiltin', { name: skillName }));
+      await fetchData();
+    } catch (err: any) {
+      const message =
+        err.message ||
+        err.response?.data?.detail ||
+        t('skills.notification.promoteBuiltinFailed');
+      showNotification('error', message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleImportClick = () => {
     importInputRef.current?.click();
   };
@@ -268,6 +521,31 @@ const SkillsPage: React.FC = () => {
       await fetchData();
     } catch (err: any) {
       const message = err.message || err.response?.data?.detail || t('skills.notification.importFailed');
+      showNotification('error', message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleConsolidateGeneratedSkills = async () => {
+    setSaving(true);
+    try {
+      const result = await skillsService.consolidateGeneratedSkills();
+      showNotification(
+        'success',
+        result.merged_skill_count > 0
+          ? t('skills.notification.consolidatedGenerated', {
+              merged: result.merged_skill_count,
+              families: result.updated_families.length,
+            })
+          : t('skills.notification.noGeneratedConsolidationNeeded'),
+      );
+      await fetchData();
+    } catch (err: any) {
+      const message =
+        err.message ||
+        err.response?.data?.detail ||
+        t('skills.notification.consolidateGeneratedFailed');
       showNotification('error', message);
     } finally {
       setSaving(false);
@@ -535,6 +813,19 @@ const SkillsPage: React.FC = () => {
                     {t('skills.importSkill')}
                   </Button>
                   <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => { void handleConsolidateGeneratedSkills(); }}
+                    disabled={saving}
+                    leftIcon={
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h8m-8 5h16m-16 5h10" />
+                      </svg>
+                    }
+                  >
+                    {t('skills.consolidateGenerated')}
+                  </Button>
+                  <Button
                     variant="primary"
                     size="sm"
                     onClick={openCreateEditor}
@@ -654,209 +945,29 @@ const SkillsPage: React.FC = () => {
                 </Button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {filteredSkills.map((skill) => (
-                  <Card
-                    key={skill.name}
-                    padding="none"
-                    hover={!skill.available || !skill.enabled ? false : true}
-                    className={`group relative overflow-hidden transition-all duration-300 ${
-                      !skill.available || !skill.enabled 
-                        ? 'opacity-75' 
-                        : 'hover:shadow-card-hover hover:-translate-y-0.5'
-                    } ${selectedSkills.has(skill.name) ? 'ring-2 ring-primary-500' : ''}`}
-                  >
-                    <div className={`absolute inset-0 bg-gradient-to-br ${
-                      skill.enabled && skill.available
-                        ? 'from-primary-500/5 via-transparent to-accent-purple/5' 
-                        : 'from-surface-100 via-transparent to-surface-100'
-                    } opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
-                    
-                    <div className="p-5 relative z-10">
-                      <div className="flex items-start justify-between gap-3 mb-3">
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          <input
-                            type="checkbox"
-                            checked={selectedSkills.has(skill.name)}
-                            onChange={() => toggleSkillSelection(skill.name)}
-                            className="mt-1 w-4 h-4 rounded border-surface-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <h3 
-                                className="font-semibold text-surface-900 truncate cursor-pointer hover:text-primary-600 transition-colors"
-                                onClick={() => fetchSkillDetail(skill.name)}
-                              >
-                                {skill.name}
-                              </h3>
-                              {skill.source === 'builtin' && (
-                                <div className="flex-shrink-0 w-5 h-5 rounded-full bg-gradient-to-br from-primary-500 to-accent-indigo flex items-center justify-center">
-                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                  </svg>
-                                </div>
-                              )}
-                            </div>
-                            <p 
-                              className="text-sm text-surface-600 line-clamp-2 cursor-pointer hover:text-surface-900 transition-colors"
-                              onClick={() => fetchSkillDetail(skill.name)}
-                            >
-                              {skill.description}
-                            </p>
-                          </div>
-                        </div>
-                        
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleToggle(skill.name, skill.enabled); }}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-all duration-300 flex-shrink-0 ${
-                            skill.enabled 
-                              ? 'bg-gradient-to-r from-accent-emerald to-accent-teal shadow-lg shadow-accent-emerald/20' 
-                              : 'bg-surface-300 hover:bg-surface-400'
-                          }`}
-                          title={skill.enabled ? t('skills.action.disable') : t('skills.action.enable')}
-                        >
-                          <span
-                            className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition-all duration-300 ${
-                              skill.enabled ? 'translate-x-5' : 'translate-x-0.5'
-                            }`}
-                          />
-                        </button>
+              <div className="space-y-8">
+                {systemSkills.length > 0 && (
+                  <section className="space-y-4">
+                    <div className="flex items-end justify-between gap-4">
+                      <div>
+                        <h3 className="text-lg font-semibold text-surface-900">{t('skills.section.system', { count: systemSkills.length })}</h3>
+                        <p className="text-sm text-surface-600">{t('skills.section.systemSubtitle')}</p>
                       </div>
-
-                      <div className="flex items-center justify-between gap-3 pt-3 border-t border-surface-100">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {!skill.available && (
-                            <button
-                              type="button"
-                              className="inline-flex items-center gap-1.5 rounded-md bg-accent-red/10 px-3 py-1.5 text-xs font-semibold leading-tight text-accent-red transition-colors hover:bg-accent-red/15"
-                              aria-expanded={expandedMissingDetails.has(skill.name)}
-                              aria-controls={`skill-missing-details-${skill.name}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleMissingDetails(skill.name);
-                              }}
-                              onMouseEnter={() => setHoveredMissingDetails(skill.name)}
-                              onMouseLeave={() => setHoveredMissingDetails((current) => (
-                                current === skill.name ? null : current
-                              ))}
-                              data-testid={`skill-missing-toggle-${skill.name}`}
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                              </svg>
-                              {t('skills.badge.missing')}
-                            </button>
-                          )}
-                          {getCompatibilityBadge(skill.compatibility, t) && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getCompatibilityBadge(skill.compatibility, t)?.className}`}>
-                              {getCompatibilityBadge(skill.compatibility, t)?.label}
-                            </span>
-                          )}
-                          {skill.always && (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-accent-purple/10 text-accent-purple">
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                              </svg>
-                              {t('skills.badge.always')}
-                            </span>
-                          )}
-                          {skill.normalized_from_legacy && (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-accent-amber/15 text-accent-amber">
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                              {skill.source_schema}
-                            </span>
-                          )}
-                          {skill.source === 'user' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-primary-100 text-primary-700">
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                              </svg>
-                              {t('skills.badge.custom')}
-                            </span>
-                          )}
-                        </div>
-                        {skill.source === 'user' && (
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <IconButton
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => { e.stopPropagation(); openEditEditor(skill); }}
-                              className="text-surface-500 hover:text-primary-600 hover:bg-primary-50"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                            </IconButton>
-                            <IconButton
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => { e.stopPropagation(); setDeleteConfirm(skill.name); }}
-                              className="text-surface-500 hover:text-semantic-error hover:bg-semantic-error-light"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </IconButton>
-                          </div>
-                        )}
-                      </div>
-
-                      {((skill.missing_requirements && skill.missing_requirements.length > 0) || (skill.install && skill.install.length > 0 && !skill.available)) &&
-                        (expandedMissingDetails.has(skill.name) || hoveredMissingDetails === skill.name) && (
-                        <div
-                          id={`skill-missing-details-${skill.name}`}
-                          className="mt-3 bg-semantic-error-light border border-semantic-error/20 rounded-lg p-3"
-                          onMouseEnter={() => setHoveredMissingDetails(skill.name)}
-                          onMouseLeave={() => setHoveredMissingDetails((current) => (
-                            current === skill.name ? null : current
-                          ))}
-                        >
-                          <div className="space-y-2 text-xs text-semantic-error">
-                            {skill.missing_requirements && skill.missing_requirements.length > 0 && (
-                              <p className="flex items-start gap-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                <span><strong>{t('skills.missingRequirements')}</strong> {skill.missing_requirements.join(', ')}</span>
-                              </p>
-                            )}
-                            {skill.install && skill.install.length > 0 && !skill.available && (
-                              <div className="pl-6 space-y-2">
-                                {skill.install.map((option, index) => {
-                                  const command = formatInstallCommand(option);
-                                  return (
-                                    <div key={`${option.id || option.kind || 'install'}-${index}`} className="space-y-1">
-                                      <p className="font-medium text-semantic-error">
-                                        {option.label || t('skills.installDependency')}
-                                      </p>
-                                      {command && (
-                                        <code className="block rounded bg-white/80 px-2 py-1 font-mono text-[11px] text-surface-700 break-all">
-                                          {command}
-                                        </code>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {skill.compatibility && (skill.compatibility.issues.length > 0 || skill.compatibility.warnings.length > 0) && (
-                        <div className="mt-3 rounded-lg border border-surface-200 bg-surface-50 p-3 text-xs text-surface-700 space-y-2">
-                          {skill.compatibility.issues.length > 0 && (
-                            <p><strong>{t('skills.compatibilityIssues')}</strong> {skill.compatibility.issues.join('; ')}</p>
-                          )}
-                          {skill.compatibility.warnings.length > 0 && (
-                            <p><strong>{t('skills.compatibilityWarnings')}</strong> {skill.compatibility.warnings.join('; ')}</p>
-                          )}
-                        </div>
-                      )}
                     </div>
-                  </Card>
-                ))}
+                    {renderSkillCards(systemSkills)}
+                  </section>
+                )}
+                {customSkills.length > 0 && (
+                  <section className="space-y-4">
+                    <div className="flex items-end justify-between gap-4">
+                      <div>
+                        <h3 className="text-lg font-semibold text-surface-900">{t('skills.section.custom', { count: customSkills.length })}</h3>
+                        <p className="text-sm text-surface-600">{t('skills.section.customSubtitle')}</p>
+                      </div>
+                    </div>
+                    {renderSkillCards(customSkills)}
+                  </section>
+                )}
               </div>
             )}
           </div>
@@ -965,8 +1076,8 @@ const SkillsPage: React.FC = () => {
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in" onClick={() => setSelectedSkill(null)}>
             <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-hidden shadow-2xl animate-scale-in" onClick={(e) => e.stopPropagation()}>
               <div className="p-6 border-b border-surface-200 bg-gradient-to-r from-surface-50 to-white">
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-4">
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-accent-indigo flex items-center justify-center">
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -1010,21 +1121,46 @@ const SkillsPage: React.FC = () => {
                         )}
                       </div>
                     </div>
+                    <div className="flex items-center gap-2">
+                      {selectedSkill.source === 'user' && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => { void handlePromoteSkill(selectedSkill.name); }}
+                        >
+                          {t('skills.action.promoteBuiltin')}
+                        </Button>
+                      )}
+                      <IconButton
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedSkill(null)}
+                        className="text-surface-400 hover:text-surface-600"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </IconButton>
+                    </div>
                   </div>
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSelectedSkill(null)}
-                    className="text-surface-400 hover:text-surface-600"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </IconButton>
                 </div>
               </div>
 
               <div className="p-6 overflow-y-auto max-h-[calc(85vh-120px)]">
+                <div className="mb-6">
+                  <h4 className="text-sm font-semibold text-surface-700 mb-3 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7h18M3 12h18M3 17h18" />
+                    </svg>
+                    {t('skills.detail.path')}
+                  </h4>
+                  <div className="bg-surface-50 rounded-xl p-4 border border-surface-200">
+                    <code className="block font-mono text-xs text-surface-700 break-all">
+                      {selectedSkill.path}
+                    </code>
+                  </div>
+                </div>
+
                 {Object.keys(selectedSkill.metadata).length > 0 && (
                   <div className="mb-6">
                     <h4 className="text-sm font-semibold text-surface-700 mb-3 flex items-center gap-2">

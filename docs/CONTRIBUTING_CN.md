@@ -185,6 +185,21 @@ await watcher.start()
 
 ## 技能开发流程
 
+### 当前运行时目录约定
+
+开发时请以以下 Agent 运行时目录为准：
+
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/memory`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/sessions`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`
+
+不要再新增或依赖以下旧路径假设：
+
+- `.horbot/context`
+- `.horbot/memory`
+- `.horbot/agents/<agent-id>/{memory,sessions,skills}`
+- `workspace/skills`
+
 ### 创建新技能
 
 1. **创建技能目录**：
@@ -228,6 +243,15 @@ requires:
 # 重启服务或刷新技能列表
 curl -X GET http://localhost:8000/api/skills
 ```
+
+### 自动技能结构约定
+
+如果改动涉及自动沉淀技能，请保持当前结构约定：
+
+- 优先把同类技巧沉淀到一个更宽的技能家族
+- `SKILL.md` 负责写清楚触发条件、用法和如何查阅资料
+- 具体技巧、排障步骤、案例化说明放到 `references/*.md`
+- 不要为同一类细小变体持续新增大量平铺的 `auto-*` 目录
 
 ### 技能最佳实践
 

@@ -103,6 +103,13 @@ def remove_team_references(config: Config, team_id: str) -> None:
 
 def normalize_config(config: Config) -> Config:
     """Normalize cross-references and duplicate list fields in-place."""
+    gateway = getattr(config, "gateway", None)
+    if gateway is not None:
+        gateway.host = str(getattr(gateway, "host", "") or "127.0.0.1").strip() or "127.0.0.1"
+        gateway.admin_token = str(getattr(gateway, "admin_token", "") or "")
+        if gateway.host == "0.0.0.0" and not gateway.admin_token and not bool(getattr(gateway, "allow_remote_without_token", False)):
+            gateway.host = "127.0.0.1"
+
     search_config = getattr(getattr(getattr(config, "tools", None), "web", None), "search", None)
     if search_config is not None:
         search_config.provider = str(getattr(search_config, "provider", "duckduckgo") or "duckduckgo").strip().lower() or "duckduckgo"

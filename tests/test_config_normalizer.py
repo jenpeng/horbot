@@ -79,6 +79,25 @@ class ConfigNormalizerTests(unittest.TestCase):
         self.assertEqual(config.tools.web.search.provider_api_keys["tavily"], "tv-secret")
         self.assertEqual(config.tools.web.search.api_key, "")
 
+    def test_normalize_config_localizes_legacy_gateway_host_without_remote_access(self):
+        config = Config()
+        config.gateway.host = "0.0.0.0"
+        config.gateway.admin_token = ""
+        config.gateway.allow_remote_without_token = False
+
+        normalize_config(config)
+
+        self.assertEqual(config.gateway.host, "127.0.0.1")
+
+    def test_normalize_config_keeps_remote_gateway_host_when_remote_access_is_enabled(self):
+        config = Config()
+        config.gateway.host = "0.0.0.0"
+        config.gateway.admin_token = "secret-token"
+
+        normalize_config(config)
+
+        self.assertEqual(config.gateway.host, "0.0.0.0")
+
     def test_authoritative_sync_helpers_replace_old_memberships(self):
         config = Config()
         config.agents.instances = {
@@ -122,6 +141,41 @@ class ConfigNormalizerTests(unittest.TestCase):
             self.assertTrue((root / "custom-agent-ws" / ".horbot-agent" / "memory").exists())
             self.assertEqual(Path(team_ws.workspace_path).resolve(), (root / "custom-team-ws").resolve())
             self.assertTrue((root / "custom-team-ws" / ".horbot-team" / "shared_memory").exists())
+
+    def test_workspace_manager_merges_legacy_agent_storage_into_metadata_root(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            horbot_root = root / ".horbot"
+            workspace_root = horbot_root / "agents" / "main" / "workspace"
+            legacy_memory = horbot_root / "agents" / "main" / "memory"
+            legacy_sessions = workspace_root / "sessions"
+            legacy_skills = workspace_root / "skills" / "legacy-skill"
+
+            legacy_memory.mkdir(parents=True, exist_ok=True)
+            legacy_sessions.mkdir(parents=True, exist_ok=True)
+            legacy_skills.mkdir(parents=True, exist_ok=True)
+
+            (legacy_memory / "facts.json").write_text("{}", encoding="utf-8")
+            (legacy_sessions / "web_dm_main.jsonl").write_text("", encoding="utf-8")
+            (legacy_skills / "SKILL.md").write_text("# Legacy Skill\n", encoding="utf-8")
+
+            config = Config()
+            config.agents.instances = {
+                "main": AgentConfig(id="main", name="Main", is_main=True, workspace=".horbot/agents/main/workspace"),
+            }
+
+            import horbot.config.loader as loader
+
+            loader._cached_config = normalize_config(config)
+            manager = WorkspaceManager.get_instance()
+
+            with patch.dict(os.environ, {"HORBOT_ROOT": str(horbot_root)}, clear=False), patch.object(Config, "_find_project_root", return_value=root):
+                main_ws = manager.get_agent_workspace("main")
+
+            metadata_root = Path(main_ws.workspace_path) / ".horbot-agent"
+            self.assertTrue((metadata_root / "memory" / "facts.json").exists())
+            self.assertTrue((metadata_root / "sessions" / "web_dm_main.jsonl").exists())
+            self.assertTrue((metadata_root / "skills" / "legacy-skill" / "SKILL.md").exists())
 
     def test_main_agent_overrides_do_not_mutate_global_defaults(self):
         config = Config()
@@ -208,8 +262,71 @@ class ConfigNormalizerTests(unittest.TestCase):
             )
             self.assertEqual(
                 Path(main_ws.memory_path).resolve(),
-                (root / ".horbot" / "agents" / "captain" / "memory").resolve(),
+                (root / ".horbot" / "agents" / "captain" / "workspace" / ".horbot-agent" / "memory").resolve(),
             )
+
+    def test_workspace_manager_uses_canonical_metadata_dir_for_default_agent_workspace(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            config = Config()
+            config.agents.instances = {
+                "writer": AgentConfig(id="writer", name="Writer"),
+            }
+
+            import horbot.config.loader as loader
+
+            loader._cached_config = normalize_config(config)
+            with patch.dict(os.environ, {"HORBOT_ROOT": str(root / ".horbot")}, clear=False):
+                manager = WorkspaceManager.get_instance()
+                writer_ws = manager.get_agent_workspace("writer")
+
+            workspace_path = root / ".horbot" / "agents" / "writer" / "workspace"
+            metadata_root = workspace_path / ".horbot-agent"
+            self.assertEqual(Path(writer_ws.workspace_path).resolve(), workspace_path.resolve())
+            self.assertEqual(Path(writer_ws.memory_path).resolve(), (metadata_root / "memory").resolve())
+            self.assertEqual(Path(writer_ws.sessions_path).resolve(), (metadata_root / "sessions").resolve())
+            self.assertEqual(Path(writer_ws.skills_path).resolve(), (metadata_root / "skills").resolve())
+            self.assertTrue((metadata_root / "memory").exists())
+            self.assertTrue((metadata_root / "sessions").exists())
+            self.assertTrue((metadata_root / "skills").exists())
+            self.assertFalse((root / ".horbot" / "agents" / "writer" / "memory").exists())
+            self.assertFalse((root / ".horbot" / "agents" / "writer" / "sessions").exists())
+            self.assertFalse((root / ".horbot" / "agents" / "writer" / "skills").exists())
+
+    def test_workspace_manager_merges_default_agent_legacy_storage_into_metadata_root(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            horbot_root = root / ".horbot"
+            agent_root = horbot_root / "agents" / "writer"
+            workspace_root = agent_root / "workspace"
+            legacy_memory = workspace_root / "memory"
+            legacy_sessions = agent_root / "sessions"
+            legacy_skills = workspace_root / "skills" / "legacy-skill"
+
+            legacy_memory.mkdir(parents=True, exist_ok=True)
+            legacy_sessions.mkdir(parents=True, exist_ok=True)
+            legacy_skills.mkdir(parents=True, exist_ok=True)
+
+            (legacy_memory / "MEMORY.md").write_text("# legacy memory\n", encoding="utf-8")
+            (legacy_sessions / "web_dm_writer.jsonl").write_text("", encoding="utf-8")
+            (legacy_skills / "SKILL.md").write_text("# Legacy Skill\n", encoding="utf-8")
+
+            config = Config()
+            config.agents.instances = {
+                "writer": AgentConfig(id="writer", name="Writer"),
+            }
+
+            import horbot.config.loader as loader
+
+            loader._cached_config = normalize_config(config)
+            with patch.dict(os.environ, {"HORBOT_ROOT": str(horbot_root)}, clear=False):
+                manager = WorkspaceManager.get_instance()
+                writer_ws = manager.get_agent_workspace("writer")
+
+            metadata_root = Path(writer_ws.workspace_path) / ".horbot-agent"
+            self.assertTrue((metadata_root / "memory" / "MEMORY.md").exists())
+            self.assertTrue((metadata_root / "sessions" / "web_dm_writer.jsonl").exists())
+            self.assertTrue((metadata_root / "skills" / "legacy-skill" / "SKILL.md").exists())
 
     def test_workspace_manager_resolves_relative_horbot_override_from_project_root(self):
         with tempfile.TemporaryDirectory() as tempdir:

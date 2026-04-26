@@ -4,6 +4,11 @@
 
 horbot 的技能系统允许扩展 AI 的能力。每个技能是一个包含 `SKILL.md` 文件的目录，通过 Markdown 格式定义技能的行为和指令。
 
+当前 Skills 页面会把技能分成两类：
+
+- `系统技能`：项目内置的 built-in skills
+- `自定义技能`：当前 Agent 工作区下的手动技能和自动沉淀技能
+
 ## 技能格式
 
 ### 目录结构
@@ -45,6 +50,23 @@ Horbot 支持导入两种技能包：
 6. 运行环境兼容性分析
 
 校验失败时，skill 不会被导入工作区。
+
+## 自动沉淀与技能家族
+
+Horbot 可以在工具驱动任务完成后，后台判断这次工作是否具有复用价值，并自动沉淀成技能。
+
+当前自动技能优先采用“技能家族 + references 技巧库”的结构：
+
+- `SKILL.md` 保持精简，主要负责说明触发条件和使用方式
+- 具体技巧、排障手法、案例化步骤放到 `references/*.md`
+- 同类 `auto-*` 技能会尽量合并到更宽的技能家族，而不是每个小变体单独保留一个目录
+
+例如，一个 `auto-officecli-ppt` 家族下可以包含多份 `references/officecli-ppt-*.md` 技巧笔记。
+
+Skills 页面当前还提供两个手动入口：
+
+- `整理自动技能`：把相关的自动技能手动收敛整理为技能家族
+- `转为系统技能`：把当前工作区下的自定义技能转成项目内置系统技能
 
 ### SKILL.md 格式
 
@@ -254,6 +276,18 @@ SkillHub / ClawHub 解决的是“发现和下载 skill”，但不能天然保�
 - 是否仍在使用 legacy metadata
 
 如果后续要做更强的“下载前兼容性判定”，需要 skill registry 提供更完整的 manifest，例如 provider、model capability、项目类型和工具组约束。
+
+## 存储路径
+
+当前 Agent 运行时技能目录位于：
+
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`
+
+其中：
+
+- 手动创建或导入的自定义技能写入当前 Agent 的上述目录
+- 自动沉淀技能也写入同一目录，只是通常以 `auto-*` 形式命名
+- 旧的 `.horbot/agents/<agent-id>/skills` 和 `workspace/skills` 只作为兼容迁移来源，不应再作为新的运行时写入位置
 
 ### 技能最佳实践
 

@@ -8,7 +8,8 @@ from dataclasses import dataclass, field, asdict
 import shutil
 import re
 
-from horbot.utils.paths import get_team_shared_memory_dir, get_agent_memory_dir
+from horbot.utils.paths import get_team_shared_memory_dir
+from horbot.workspace.manager import get_workspace_manager
 
 
 @dataclass
@@ -182,7 +183,8 @@ class SharedMemoryManager:
         
         Returns a dict with the synced content types and their paths.
         """
-        agent_memory_dir = get_agent_memory_dir(agent_id)
+        agent_ws = get_workspace_manager().get_agent_workspace(agent_id)
+        agent_memory_dir = Path(agent_ws.memory_path)
         synced = {}
         
         team_memory_link = agent_memory_dir / f"team_{self._team_id}"

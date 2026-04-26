@@ -31,7 +31,7 @@ Useful commands:
 - `Configuration`: providers, permissions, and global defaults
 - `Teams`: agents, teams, workspaces, `SOUL.md`, `USER.md`, and bootstrap summaries
 - `Chat`: direct chat, team relay chat, attachments, history, and interruptions
-- `Skills`: create, edit, import, and inspect compatibility
+- `Skills`: create, edit, import, inspect compatibility, consolidate auto-generated skills, and promote custom skills to built-in
 - `Channels`: endpoint configuration, missing-field diagnostics, and connectivity tests
 - `Dashboard`: high-level operational overview
 - `Status`: runtime diagnostics
@@ -101,6 +101,16 @@ After creation, you can refine the agent through chat or by editing workspace fi
 
 The Skills page accepts both `.skill` and `.zip` packages.
 
+Current organization in the page:
+
+- `System`: project built-ins
+- `Custom`: skills from the current agent workspace, including manual and auto-generated skills
+
+Custom skills also show whether they came from:
+
+- a manual workspace-local skill
+- automatic agent-generated distillation
+
 Before import, Horbot validates:
 
 - package structure and safe paths
@@ -110,6 +120,20 @@ Before import, Horbot validates:
 - environment compatibility and missing requirements
 
 Imported skills are written to the current agent skill directory, and compatibility results are shown immediately in the UI.
+
+The current agent runtime skill directory is:
+
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`
+
+Auto-generated skills now prefer a family layout:
+
+- a lean `SKILL.md` for trigger cues and routing
+- one or more detailed technique notes under `references/*.md`
+
+The Skills page also includes two manual management actions:
+
+- `Consolidate Generated`: merge related `auto-*` skills into broader families
+- `Promote to Builtin`: move a custom workspace skill into the built-in system skill set
 
 ## Team Relay Behavior
 

@@ -119,6 +119,34 @@
 - Assistant 消息泡和 Markdown 排版更紧凑，长回复不会再留出过多空白
 - 团队接力等待态会直接显示交棒来源、目标以及“继续讨论 / 返回总结”的状态
 
+## Skills 页面当前可做什么
+
+Skills 页面现在不只是查看和导入技能，还支持以下操作：
+
+- 区分 `系统技能` 与 `自定义技能`
+- 查看某个自定义技能是 `手动添加` 还是 `Agent 自动沉淀`
+- 创建、编辑、启用/禁用、删除自定义技能
+- 导入 `.skill` / `.zip` 并立即查看兼容性结果
+- 手动点击 `整理自动技能`，把相关的 `auto-*` 技能收敛成更宽的技能家族
+- 手动点击 `转为系统技能`，把当前工作区中的自定义技能转成项目内置系统技能
+
+当前自动沉淀技能优先采用“技能家族 + references 技巧库”的结构：
+
+- `SKILL.md` 负责写清楚这个技能家族的触发条件、适用场景和如何查阅资料
+- 具体技巧、排障步骤、案例化方法放到 `references/*.md`
+
+当前 Agent 的运行时技能目录位于：
+
+```bash
+.horbot/agents/<agent-id>/workspace/.horbot-agent/skills
+```
+
+补充说明：
+
+- 手动创建/导入的自定义技能写入当前 Agent 的上述目录
+- 自动沉淀技能也写入同一目录，只是通常以 `auto-*` 开头命名
+- 旧的 `.horbot/agents/<agent-id>/skills` 与 `workspace/skills` 只作为兼容迁移来源，不应再作为新的写入位置
+
 ## 1.1.1 团队接力当前的运行方式
 
 当前团队接力仍然是“有序串行”而不是并行乱序：
@@ -385,7 +413,7 @@ localStorage.setItem('horbotAdminToken', 'replace-with-a-long-random-token')
 如果某个 Agent 历史曾同时写入旧路径和新路径，页面现在会自动合并读取：
 
 - 旧路径：`workspace/sessions`
-- 新路径：`.horbot/agents/<agent-id>/sessions`
+- 新路径：`.horbot/agents/<agent-id>/workspace/.horbot-agent/sessions`
 
 如果你刷新后仍发现历史缺失，建议先执行：
 

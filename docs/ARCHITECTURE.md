@@ -56,11 +56,13 @@ Horbot keeps the runtime intentionally small:
 ### Persistence Layer
 
 - `.horbot/agents/<agent-id>/workspace`
-- `.horbot/agents/<agent-id>/memory`
-- `.horbot/agents/<agent-id>/sessions`
-- `.horbot/agents/<agent-id>/skills`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/memory`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/sessions`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`
 - `.horbot/data/*` for uploads, plans, sessions, and cron data
 - remote image cards can also be materialized into `.horbot/data/uploads` so later history loads still render as normal file attachments
+
+The workspace root may also contain runtime-owned directories such as `.audit`, `.checkpoints`, and `.state`. These are active runtime artifacts, not duplicate legacy storage.
 
 ## Memory Model
 
@@ -83,6 +85,12 @@ Horbot supports two skill paths:
 
 Completed tool-backed work can be reviewed in the background and, when reusable, distilled into agent skills and reflection memory.
 
+Auto-generated skills now prefer a family-oriented structure:
+
+- one `SKILL.md` per family for shared trigger cues
+- detailed techniques under `references/*.md`
+- related `auto-*` skills can be consolidated into a broader family instead of multiplying near-duplicates
+
 This loop is aligned with the current agent-scoped memory layout rather than legacy global memory folders.
 
 ## Web Surface
@@ -96,6 +104,6 @@ The Web UI currently covers:
 - richer attachment preview UX, including inline previews and a bottom thumbnail strip for multi-image preview modals
 - assistant history normalization that upgrades standalone remote image URLs into image-card attachments when possible
 - a Configuration-page remote-image cache panel with runtime stats and a manual clear action
-- skills import/edit/compatibility
+- skills import/edit/compatibility, custom-vs-system grouping, generated-skill consolidation, and promote-to-builtin actions
 - channels and runtime status, including WeCom endpoint testing
 - dashboard and token usage

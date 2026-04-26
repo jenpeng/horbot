@@ -60,12 +60,12 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 - Create multiple agents with independent `provider`, `model`, permission profile, workspace, memory, and skills
 - Build teams with ordered members, responsibilities, and lead assignment
 - Support direct chat and team relay conversations in the same UI
-- Let agents silently review completed work and distill reusable workflows into skills
+- Let agents silently review completed work and distill reusable workflows into skill families with reference notes
 
 ### Workspace And Memory
 
 - Maintain per-agent `SOUL.md` and `USER.md`
-- Persist agent-scoped memory under `.horbot/agents/<agent-id>/memory`
+- Persist agent-scoped runtime metadata under `.horbot/agents/<agent-id>/workspace/.horbot-agent/`
 - Separate long-term memory, recent history, and reflection notes
 - Keep team shared memory separate from private agent memory
 
@@ -94,6 +94,7 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 ### Operational Tooling
 
 - Web admin UI for configuration, agents, teams, status, skills, channels, tasks, and token usage
+- Skills UI support for custom vs system grouping, auto-skill consolidation, and promoting custom skills into built-in system skills
 - Configuration now exposes remote-image cache stats and a manual clear action for runtime-generated image-card cache files
 - Built-in UI locale switcher for English, Simplified Chinese, and Thai, with the selection persisted in browser storage
 - Smoke scripts for browser, chat, configuration, and agent asset flows
@@ -162,10 +163,16 @@ The current runtime model is agent-scoped:
 .horbot/
 ├── agents/
 │   └── <agent-id>/
-│       ├── workspace/
-│       ├── memory/
-│       ├── sessions/
-│       └── skills/
+│       └── workspace/
+│           ├── SOUL.md
+│           ├── USER.md
+│           ├── .audit/
+│           ├── .checkpoints/
+│           ├── .state/
+│           └── .horbot-agent/
+│               ├── memory/
+│               ├── sessions/
+│               └── skills/
 ├── teams/
 │   └── <team-id>/
 │       ├── workspace/
@@ -182,6 +189,8 @@ The current runtime model is agent-scoped:
 ```
 
 Legacy `.horbot/context` and `.horbot/memory` directories are no longer part of the active memory model and can be removed from existing local environments.
+
+Legacy agent paths such as `.horbot/agents/<agent-id>/{memory,sessions,skills}` and `workspace/{memory,skills}` are treated as migration inputs only. Current builds merge forward from those paths but do not recreate them.
 
 ## License
 

@@ -382,7 +382,7 @@ GET /api/chat/history?session_key=default
 
 说明：
 
-- 当某个 Agent 的会话历史同时存在于旧 `workspace/sessions` 与当前 `.horbot/agents/<agent-id>/sessions` 路径时，接口会自动合并、去重并按时间排序返回
+- 当某个 Agent 的会话历史同时存在于旧 `workspace/sessions` 与当前 `.horbot/agents/<agent-id>/workspace/.horbot-agent/sessions` 路径时，接口会自动合并、去重并按时间排序返回
 - 返回结果中的附件与执行过程字段会尽量保留较完整的一份
 
 **响应示例**:
@@ -1111,6 +1111,9 @@ GET /api/skills
 - `missing_requirements`: 缺失的 CLI / ENV 依赖列表
 - `install`: 可选安装建议
 - `compatibility`: 兼容性报告
+- `source_group`: `system` 或 `custom`
+- `source_origin_kind`: `builtin`、`manual`、`agent`
+- `source_origin_agent_id`: 当 skill 来自自动沉淀时，对应生成它的 Agent ID
 
 `compatibility` 结构示例：
 
@@ -1215,6 +1218,59 @@ curl -X POST http://localhost:8000/api/skills/import \
     "issues": ["Missing CLI dependency: demo-cli"],
     "warnings": []
   }
+}
+```
+
+### 手动整理自动技能
+
+```http
+POST /api/skills/consolidate-generated
+```
+
+说明：
+
+- 手动把相关的 `auto-*` 技能合并成更宽的技能家族
+- 合并后保留一个精简 `SKILL.md`，并把具体技巧整理到 `references/*.md`
+
+成功响应示例：
+
+```json
+{
+  "family_count_before": 3,
+  "family_count_after": 1,
+  "merged_skill_count": 3,
+  "updated_families": [
+    {
+      "skill_name": "auto-officecli-ppt",
+      "merged_skills": [
+        "auto-officecli-ppt-highlight-xml-debug",
+        "auto-officecli-ppt-text-overflow-debug"
+      ]
+    }
+  ],
+  "message": "Consolidated 3 generated skills across 1 skill families."
+}
+```
+
+### 转为系统技能
+
+```http
+POST /api/skills/{skill_name}/promote
+```
+
+说明：
+
+- 把当前工作区中的自定义 skill 提升为项目内置系统技能
+- 内置后会从当前 Agent 工作区移出，写入项目 `horbot/skills/`
+
+成功响应示例：
+
+```json
+{
+  "name": "demo-skill",
+  "path": "/abs/path/horbot/skills/demo-skill/SKILL.md",
+  "source": "builtin",
+  "message": "Skill 'demo-skill' promoted to builtin successfully"
 }
 ```
 

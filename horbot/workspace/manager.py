@@ -113,19 +113,24 @@ class WorkspaceManager:
         workspace_override = self._get_agent_workspace_override(agent_id)
         if workspace_override:
             workspace_path = self._resolve_override_path(workspace_override)
-            metadata_root = workspace_path / AGENT_METADATA_DIRNAME
-            memory_path = metadata_root / "memory"
-            sessions_path = metadata_root / "sessions"
-            skills_path = metadata_root / "skills"
         else:
             agent_root = self.get_agents_root() / agent_id
             workspace_path = agent_root / "workspace"
-            memory_path = agent_root / "memory"
-            sessions_path = agent_root / "sessions"
-            skills_path = agent_root / "skills"
+        metadata_root = workspace_path / AGENT_METADATA_DIRNAME
+        memory_path = metadata_root / "memory"
+        sessions_path = metadata_root / "sessions"
+        skills_path = metadata_root / "skills"
 
         for path in [workspace_path, memory_path, sessions_path, skills_path]:
             path.mkdir(parents=True, exist_ok=True)
+
+        self._merge_legacy_agent_storage(
+            agent_id=agent_id,
+            workspace_path=workspace_path,
+            memory_path=memory_path,
+            sessions_path=sessions_path,
+            skills_path=skills_path,
+        )
 
         self._ensure_agent_soul(workspace_path, agent_id, personality)
 
@@ -135,6 +140,56 @@ class WorkspaceManager:
             sessions_path=str(sessions_path),
             skills_path=str(skills_path),
         )
+
+    def _merge_legacy_agent_storage(
+        self,
+        *,
+        agent_id: str,
+        workspace_path: Path,
+        memory_path: Path,
+        sessions_path: Path,
+        skills_path: Path,
+    ) -> None:
+        """Merge legacy agent-managed directories into the canonical metadata root.
+
+        Older builds stored different data types in several locations:
+        - `.horbot/agents/<id>/{memory,sessions,skills}`
+        - `<workspace>/{memory,sessions,skills}`
+
+        When an agent uses a workspace override, the canonical storage now lives
+        under `<workspace>/.horbot-agent/`. We merge missing files forward so the
+        runtime stops creating new duplicates while preserving historical data.
+        """
+        agent_root = self.get_agents_root() / agent_id
+        legacy_pairs = [
+            (agent_root / "memory", memory_path),
+            (agent_root / "sessions", sessions_path),
+            (agent_root / "skills", skills_path),
+            (workspace_path / "memory", memory_path),
+            (workspace_path / "sessions", sessions_path),
+            (workspace_path / "skills", skills_path),
+        ]
+
+        for source, target in legacy_pairs:
+            if source.resolve() == target.resolve():
+                continue
+            self._merge_directory_contents(source, target)
+
+    def _merge_directory_contents(self, source: Path, target: Path) -> None:
+        """Copy missing legacy files into the canonical directory without overwriting."""
+        if not source.exists() or not source.is_dir():
+            return
+
+        for item in source.iterdir():
+            destination = target / item.name
+            if item.is_dir():
+                destination.mkdir(parents=True, exist_ok=True)
+                self._merge_directory_contents(item, destination)
+                continue
+            if destination.exists():
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, destination)
 
     def _ensure_agent_soul(self, workspace_path: Path, agent_id: str, personality: str = "") -> None:
         """Ensure the agent has a SOUL.md file."""

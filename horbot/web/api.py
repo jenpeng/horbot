@@ -2009,10 +2009,14 @@ def get_session_manager():
     """Get session manager instance."""
     global _session_manager
     config = get_cached_config()
-    expected_sessions_dir = SessionManager(workspace=Path(config.workspace_path)).sessions_dir
+    default_agent_id = next(iter(config.agents.instances.keys()), "default")
+    from horbot.workspace.manager import get_workspace_manager
+
+    workspace_manager = get_workspace_manager()
+    expected_sessions_dir = Path(workspace_manager.get_agent_workspace(default_agent_id).sessions_path)
 
     if _session_manager is None or Path(_session_manager.sessions_dir) != Path(expected_sessions_dir):
-        _session_manager = SessionManager(workspace=Path(config.workspace_path))
+        _session_manager = SessionManager(workspace=expected_sessions_dir)
     return _session_manager
 
 
@@ -2364,6 +2368,49 @@ def _resolve_skill_dir_for_request(agent_id: Optional[str] = None) -> tuple[Opti
     if agent is not None:
         return agent, workspace_path, agent.get_skills_dir()
     return agent, workspace_path, resolve_skills_dir(workspace_path, agent_id=agent_id)
+
+
+def _describe_skill_source(
+    *,
+    skill: dict[str, Any],
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    source = str(skill.get("source") or "user").strip()
+    path = str(skill.get("path") or "")
+
+    if source == "builtin":
+        return {
+            "source_group": "system",
+            "source_origin_kind": "builtin",
+            "source_origin_agent_id": None,
+        }
+
+    generated_by = str(metadata.get("generated_by") or "").strip()
+    path_parts = Path(path).parts
+    agent_from_path: str | None = None
+    for index in range(len(path_parts) - 5):
+        if (
+            path_parts[index] == ".horbot"
+            and path_parts[index + 1] == "agents"
+            and path_parts[index + 3] == "workspace"
+            and path_parts[index + 4] == ".horbot-agent"
+            and path_parts[index + 5] == "skills"
+        ):
+            agent_from_path = path_parts[index + 2]
+            break
+
+    if generated_by == "skill-evolution" and agent_from_path:
+        return {
+            "source_group": "custom",
+            "source_origin_kind": "agent",
+            "source_origin_agent_id": agent_from_path,
+        }
+
+    return {
+        "source_group": "custom",
+        "source_origin_kind": "manual",
+        "source_origin_agent_id": None,
+    }
 
 
 def _build_memory_store(agent_id: Optional[str] = None):
@@ -7420,6 +7467,7 @@ async def get_skills(agent_id: Optional[str] = None):
             meta=meta if isinstance(meta, dict) else {},
             normalized_from_legacy=bool(compat.get("normalized_from_legacy", False)),
         )
+        source_meta = _describe_skill_source(skill=skill, metadata=metadata)
 
         result.append({
             "name": skill["name"],
@@ -7438,6 +7486,7 @@ async def get_skills(agent_id: Optional[str] = None):
             "install": meta.get("install", []) if isinstance(meta.get("install"), list) else [],
             "missing_requirements": loader._get_missing_requirements(meta) if not loader._check_requirements(meta) else None,
             "compatibility": compatibility,
+            **source_meta,
         })
     
     return {"skills": result}
@@ -7454,6 +7503,11 @@ async def get_skill_detail(skill_name: str, agent_id: Optional[str] = None):
     content = loader.load_skill(skill_name)
     if not content:
         raise HTTPException(status_code=404, detail="Skill not found")
+
+    skill_info = next(
+        (item for item in loader.list_skills(filter_unavailable=False, include_disabled=True) if item["name"] == skill_name),
+        None,
+    )
     
     metadata = loader.get_skill_metadata(skill_name) or {}
     meta = loader._get_skill_meta(skill_name)
@@ -7463,14 +7517,19 @@ async def get_skill_detail(skill_name: str, agent_id: Optional[str] = None):
         meta=meta if isinstance(meta, dict) else {},
         normalized_from_legacy=bool(compat.get("normalized_from_legacy", False)),
     )
+    source_meta = _describe_skill_source(skill=skill_info or {"source": "user", "path": str(skills_dir / skill_name / "SKILL.md")}, metadata=metadata)
 
     return {
         "name": skill_name,
+        "path": skill_info["path"] if skill_info else str(skills_dir / skill_name / "SKILL.md"),
+        "source": skill_info["source"] if skill_info else "user",
         "content": content,
         "metadata": metadata,
         "description": metadata.get("description", skill_name),
         "available": loader._check_requirements(meta),
+        "enabled": skill_info["enabled"] if skill_info else loader._get_skill_enabled(skill_name),
         "always": meta.get("always", False) or metadata.get("always", False),
+        "requires": meta.get("requires", {}),
         "schema": compat.get("canonical_schema", "horbot"),
         "schema_version": compat.get("canonical_schema_version", 1),
         "source_schema": compat.get("source_schema", "horbot"),
@@ -7479,6 +7538,7 @@ async def get_skill_detail(skill_name: str, agent_id: Optional[str] = None):
         "install": meta.get("install", []) if isinstance(meta.get("install"), list) else [],
         "missing_requirements": loader._get_missing_requirements(meta) if not loader._check_requirements(meta) else None,
         "compatibility": compatibility,
+        **source_meta,
     }
 
 class SkillCreateRequest(BaseModel):
@@ -7589,6 +7649,64 @@ async def import_skill_package(
         "description": result.get("description", ""),
         "warnings": result.get("warnings", []),
         "compatibility": compatibility,
+    }
+
+@router.post("/skills/consolidate-generated")
+async def consolidate_generated_skills(agent_id: Optional[str] = None):
+    """Manually consolidate auto-generated skill families."""
+    from horbot.agent.skill_evolution import SkillEvolutionEngine
+
+    _, workspace_path, skills_dir = _resolve_skill_dir_for_request(agent_id)
+    engine = SkillEvolutionEngine(
+        workspace=workspace_path,
+        agent_id=agent_id,
+        skills_dir=skills_dir,
+    )
+    result = engine.consolidate_generated_skills()
+    return {
+        **result,
+        "message": (
+            f"Consolidated {result['merged_skill_count']} generated skills "
+            f"across {len(result['updated_families'])} skill families."
+        ),
+    }
+
+@router.post("/skills/{skill_name}/promote")
+async def promote_skill_to_builtin(skill_name: str, agent_id: Optional[str] = None):
+    """Promote a user skill into the project builtin skills directory."""
+    import shutil
+    from horbot.agent.skills import BUILTIN_SKILLS_DIR, SkillsLoader
+
+    _, workspace_path, skills_dir = _resolve_skill_dir_for_request(agent_id)
+    loader = SkillsLoader(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
+
+    skills = loader.list_skills(filter_unavailable=False, include_disabled=True)
+    skill_info = next((s for s in skills if s["name"] == skill_name), None)
+    if not skill_info:
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_name}' not found")
+    if skill_info["source"] == "builtin":
+        raise HTTPException(status_code=403, detail="Skill is already a builtin skill")
+
+    source_path = Path(skill_info["path"])
+    target_dir = BUILTIN_SKILLS_DIR / skill_name
+    target_file = target_dir / "SKILL.md"
+    if target_dir.exists() or target_file.exists():
+        raise HTTPException(status_code=409, detail=f"Builtin skill '{skill_name}' already exists")
+
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    if source_path.name == "SKILL.md":
+        shutil.copytree(source_path.parent, target_dir)
+        shutil.rmtree(source_path.parent)
+    else:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_file.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
+        source_path.unlink()
+
+    return {
+        "name": skill_name,
+        "path": str(target_file),
+        "source": "builtin",
+        "message": f"Skill '{skill_name}' promoted to builtin successfully",
     }
 
 @router.delete("/skills/{skill_name}")

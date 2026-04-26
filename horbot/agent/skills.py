@@ -17,9 +17,7 @@ def resolve_skills_dir(workspace: Path, agent_id: str | None = None) -> Path:
     """Resolve the user skills directory for a workspace/agent combination."""
     workspace = Path(workspace)
 
-    override_metadata_root = workspace / AGENT_METADATA_DIRNAME
-    if override_metadata_root.exists():
-        return override_metadata_root / "skills"
+    metadata_skills = workspace / AGENT_METADATA_DIRNAME / "skills"
 
     if agent_id:
         try:
@@ -31,7 +29,14 @@ def resolve_skills_dir(workspace: Path, agent_id: str | None = None) -> Path:
         except Exception:
             pass
 
-    return workspace / "skills"
+    if metadata_skills.parent.exists():
+        return metadata_skills
+
+    legacy_skills = workspace / "skills"
+    if legacy_skills.exists():
+        return legacy_skills
+
+    return metadata_skills
 
 
 class SkillsLoader:

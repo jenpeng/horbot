@@ -50,16 +50,16 @@ Agent-to-agent prompts are also biased toward shorter subtask replies so long re
 
 - `SOUL.md`
 - `USER.md`
-- current agent `skills/`
-- current agent `memory/`
+- current agent `.horbot-agent/skills/`
+- current agent `.horbot-agent/memory/`
 
 ## Current Runtime Model
 
 The active runtime layout is:
 
 - `.horbot/agents/<agent-id>/workspace`
-- `.horbot/agents/<agent-id>/memory`
-- `.horbot/agents/<agent-id>/sessions`
-- `.horbot/agents/<agent-id>/skills`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/memory`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/sessions`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`
 
 Legacy `.horbot/context` and `.horbot/memory` are not part of the current model.

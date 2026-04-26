@@ -62,6 +62,8 @@
 - `DELETE /api/skills/{skill_name}`
 - `PATCH /api/skills/{skill_name}/toggle`
 - `POST /api/skills/import`
+- `POST /api/skills/consolidate-generated`
+- `POST /api/skills/{skill_name}/promote`
 
 ### Runtime And Status
 
@@ -78,12 +80,16 @@
 - Agent creation requires explicit `provider` and `model`.
 - Team history and direct-message history automatically merge legacy and current session storage when possible.
 - Skills APIs resolve to the current agent skill directory, not a generic legacy workspace path.
+- The current agent skill directory is `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`.
+- `GET /api/skills` and `GET /api/skills/{skill_name}` also return skill source metadata such as `source_group`, `source_origin_kind`, and `source_origin_agent_id` so the UI can distinguish built-in, manual, and agent-generated skills.
 - `PATCH /api/config/web-search` can update the global web-search `enabled` flag, the active search provider, provider-specific toggles such as `tavilyEnabled` and `langsearchEnabled`, provider-scoped search API keys, plus other runtime search defaults used by the Configuration page.
 - `POST /api/chat/sessions` returns UUID-based session keys such as `session_4f0c...`, avoiding timestamp collisions.
 - `GET /api/chat/history` and `GET /api/conversations/{conv_id}/messages` now normalize standalone remote image URLs in assistant messages into `files` attachments when possible, so the chat UI can render the standard image card experience.
 - `GET /api/files/cache/remote-images` and `DELETE /api/files/cache/remote-images` expose the runtime-managed remote image cache used for those promoted image cards.
 - Channel endpoint metadata now includes WeCom, including required fields for `bot_id` and `secret`.
 - `POST /api/skills/import` validates `.skill` and `.zip` packages before writing them into the active agent skill directory.
+- `POST /api/skills/consolidate-generated` manually merges related `auto-*` skills into broader families and preserves detailed notes under `references/`.
+- `POST /api/skills/{skill_name}/promote` moves a custom workspace skill into the built-in skill set.
 - Team relay SSE flows include relay-oriented events such as `agent_start`, `agent_mentioned`, and `agent_done`.
 - `agent_mentioned` may also include `mentioned_by_name`, `handoff_mode` (`relay` / `continue` / `summary`), and `handoff_preview` so the frontend can show clearer baton status.
 

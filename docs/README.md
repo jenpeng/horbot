@@ -18,8 +18,9 @@ Horbot is a lightweight multi-agent assistant stack with:
 - promoted remote image links that render as normal image-card attachments, plus a manual remote-image cache clear entry in Configuration
 - MCP and external channel integration
 - Playwright-backed browser tooling with `browser`, `web_search`, and `web_fetch` as the standard web tool path
-- background skill distillation from reusable work
+- background skill distillation from reusable work into skill families plus `references/` notes
 - validated `.skill` / `.zip` imports with compatibility checks
+- Skills UI actions for consolidating auto-generated skills and promoting custom skills into built-in system skills
 - WeCom AI Bot channel support with reply streaming and media handling
 
 ## Interface Preview
@@ -50,11 +51,13 @@ The images below are captured from the current Horbot Web UI with the interface 
 The active runtime model is agent-scoped:
 
 - `.horbot/agents/<agent-id>/workspace`
-- `.horbot/agents/<agent-id>/memory`
-- `.horbot/agents/<agent-id>/sessions`
-- `.horbot/agents/<agent-id>/skills`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/memory`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/sessions`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`
 
 Legacy `.horbot/context` and `.horbot/memory` directories are no longer used by the current memory pipeline.
+
+Legacy agent-owned top-level directories such as `.horbot/agents/<agent-id>/{memory,sessions,skills}` are migration-only and should not be reintroduced.
 
 Creating an agent in the current UI requires choosing both `provider` and `model` up front.
 

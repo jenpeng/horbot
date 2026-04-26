@@ -7,7 +7,6 @@ from loguru import logger
 
 from horbot.config.schema import AgentConfig, AgentsConfig, Config
 from horbot.config.loader import get_cached_config
-from horbot.utils.paths import get_agent_memory_dir
 from horbot.workspace.manager import get_workspace_manager
 
 
@@ -75,7 +74,9 @@ class AgentInstance:
     
     def get_memory_dir(self) -> Path:
         """Get the agent's memory directory."""
-        return get_agent_memory_dir(self.id)
+        personality = self._config.personality if self._config else ""
+        ws = self._workspace_manager.get_agent_workspace(self.id, personality)
+        return Path(ws.memory_path)
     
     def get_sessions_dir(self) -> Path:
         """Get the agent's sessions directory."""
