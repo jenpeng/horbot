@@ -40,14 +40,6 @@ export default defineConfig({
             return 'webmcp';
           }
 
-          if (id.includes('/src/services/skills.ts') || id.includes('/src/pages/SkillsPage.tsx')) {
-            return 'skills';
-          }
-
-          if (id.includes('/src/hooks/useConfigurationState.ts') || id.includes('/src/pages/ConfigPage.tsx')) {
-            return 'config';
-          }
-
           return undefined;
         },
       },

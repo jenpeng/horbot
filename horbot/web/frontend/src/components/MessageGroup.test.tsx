@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import MessageGroup from './MessageGroup';
@@ -10,24 +10,32 @@ vi.mock('./MarkdownRenderer', () => ({
   default: ({ content }: { content: string }) => <div>{content}</div>,
 }));
 
-const renderWithProviders = (message: Message) => render(
-  <MemoryRouter>
-    <ToastProvider>
-      <I18nProvider>
-        <MessageGroup
-          messages={[message]}
-          agentName="Agent A"
-          isUser={false}
-          formatTime={() => '10:00'}
-        />
-      </I18nProvider>
-    </ToastProvider>
-  </MemoryRouter>,
-);
+const renderWithProviders = async (message: Message) => {
+  const view = render(
+    <MemoryRouter>
+      <ToastProvider>
+        <I18nProvider>
+          <MessageGroup
+            messages={[message]}
+            agentName="Agent A"
+            isUser={false}
+            formatTime={() => '10:00'}
+          />
+        </I18nProvider>
+      </ToastProvider>
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => {
+    expect(screen.queryByText('Loading...')).not.toBeInTheDocument();
+  });
+
+  return view;
+};
 
 describe('MessageGroup', () => {
-  it('shows provider diagnostics for assistant error messages', () => {
-    renderWithProviders({
+  it('shows provider diagnostics for assistant error messages', async () => {
+    await renderWithProviders({
       id: 'msg-1',
       role: 'assistant',
       content: '模型服务响应超时，请稍后重试。',
@@ -57,8 +65,8 @@ describe('MessageGroup', () => {
     expect(screen.getByText('504')).toBeInTheDocument();
   });
 
-  it('shows a direct processing bubble when a streaming assistant has status but no content', () => {
-    renderWithProviders({
+  it('shows a direct processing bubble when a streaming assistant has status but no content', async () => {
+    await renderWithProviders({
       id: 'msg-streaming-direct',
       role: 'assistant',
       content: '',
@@ -72,8 +80,8 @@ describe('MessageGroup', () => {
     expect(screen.queryByText('Team relay')).not.toBeInTheDocument();
   });
 
-  it('detaches image attachments into a compact bubble when message also has text', () => {
-    renderWithProviders({
+  it('detaches image attachments into a compact bubble when message also has text', async () => {
+    await renderWithProviders({
       id: 'msg-2',
       role: 'assistant',
       content: '这里是配图说明文字。',
@@ -97,8 +105,8 @@ describe('MessageGroup', () => {
     expect(screen.getByText('这里是配图说明文字。')).toBeInTheDocument();
   });
 
-  it('renders multiple images in a compact grid', () => {
-    renderWithProviders({
+  it('renders multiple images in a compact grid', async () => {
+    await renderWithProviders({
       id: 'msg-3',
       role: 'assistant',
       content: '这是多图结果。',
@@ -132,8 +140,8 @@ describe('MessageGroup', () => {
     expect(screen.getAllByTestId('message-file-open-preview')).toHaveLength(2);
   });
 
-  it('collapses more than four images into a 2x2 grid with overflow badge', () => {
-    renderWithProviders({
+  it('collapses more than four images into a 2x2 grid with overflow badge', async () => {
+    await renderWithProviders({
       id: 'msg-4',
       role: 'assistant',
       content: '这是五张图。',
@@ -197,8 +205,8 @@ describe('MessageGroup', () => {
     expect(screen.getByTestId('message-file-image-overflow')).toHaveTextContent('+1');
   });
 
-  it('supports previous and next navigation in image preview modal', () => {
-    renderWithProviders({
+  it('supports previous and next navigation in image preview modal', async () => {
+    await renderWithProviders({
       id: 'msg-5',
       role: 'assistant',
       content: '这是可切换预览。',
@@ -241,8 +249,8 @@ describe('MessageGroup', () => {
     expect(screen.getByRole('heading', { name: 'first.jpg' })).toBeInTheDocument();
   });
 
-  it('renders a thumbnail strip in the preview modal for multi-image messages', () => {
-    renderWithProviders({
+  it('renders a thumbnail strip in the preview modal for multi-image messages', async () => {
+    await renderWithProviders({
       id: 'msg-6',
       role: 'assistant',
       content: '这是多图缩略条。',
@@ -295,8 +303,8 @@ describe('MessageGroup', () => {
     expect(thumbnails[1]).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('renders PDF attachments inside the preview modal instead of relying on a new tab', () => {
-    const { container } = renderWithProviders({
+  it('renders PDF attachments inside the preview modal instead of relying on a new tab', async () => {
+    const { container } = await renderWithProviders({
       id: 'msg-7',
       role: 'assistant',
       content: '这是 PDF 预览。',
@@ -322,8 +330,8 @@ describe('MessageGroup', () => {
     expect(iframe).toBeInTheDocument();
   });
 
-  it('renders Word attachments in the preview modal with the inline preview endpoint', () => {
-    const { container } = renderWithProviders({
+  it('renders Word attachments in the preview modal with the inline preview endpoint', async () => {
+    const { container } = await renderWithProviders({
       id: 'msg-8',
       role: 'assistant',
       content: '这是 Word 预览。',
@@ -350,8 +358,8 @@ describe('MessageGroup', () => {
     expect(iframe).toBeInTheDocument();
   });
 
-  it('renders PowerPoint attachments in the preview modal with the inline preview endpoint', () => {
-    const { container } = renderWithProviders({
+  it('renders PowerPoint attachments in the preview modal with the inline preview endpoint', async () => {
+    const { container } = await renderWithProviders({
       id: 'msg-9',
       role: 'assistant',
       content: '这是 PowerPoint 预览。',

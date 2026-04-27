@@ -1,14 +1,39 @@
-import React, { useState } from 'react';
+import React, { Suspense, useState } from 'react';
 import { useConfigurationState } from '../hooks/useConfigurationState';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import ConfigCheckResult from '../components/ConfigCheckResult';
 import ConfigurationHeader from '../components/config/ConfigurationHeader';
 import ConfigurationOverview from '../components/config/ConfigurationOverview';
-import AgentConfigSection from '../components/config/AgentConfigSection';
-import WorkspaceConfigSection from '../components/config/WorkspaceConfigSection';
-import WebSearchConfigSection from '../components/config/WebSearchConfigSection';
-import ProviderConfigSection from '../components/config/ProviderConfigSection';
 import { useI18n } from '../contexts/I18nContext';
+import { lazyWithReload } from '../utils/lazyWithReload';
+
+const AgentConfigSection = lazyWithReload(
+  'AgentConfigSection',
+  () => import('../components/config/AgentConfigSection'),
+);
+const WorkspaceConfigSection = lazyWithReload(
+  'WorkspaceConfigSection',
+  () => import('../components/config/WorkspaceConfigSection'),
+);
+const WebSearchConfigSection = lazyWithReload(
+  'WebSearchConfigSection',
+  () => import('../components/config/WebSearchConfigSection'),
+);
+const ProviderConfigSection = lazyWithReload(
+  'ProviderConfigSection',
+  () => import('../components/config/ProviderConfigSection'),
+);
+
+const sectionFallback = (
+  <div className="rounded-3xl border border-slate-200 bg-white px-6 py-8 shadow-sm">
+    <div className="space-y-3 animate-pulse">
+      <div className="h-5 w-40 rounded-full bg-slate-200" />
+      <div className="h-4 w-full rounded-full bg-slate-100" />
+      <div className="h-4 w-5/6 rounded-full bg-slate-100" />
+      <div className="h-28 rounded-2xl bg-slate-50" />
+    </div>
+  </div>
+);
 
 const ConfigPage: React.FC = () => {
   const { t } = useI18n();
@@ -109,65 +134,73 @@ const ConfigPage: React.FC = () => {
         )}
 
         <div id="config-agent" className="scroll-mt-24">
-          <AgentConfigSection
-            modelsConfig={state.modelsConfig}
-            providerOptions={state.providerOptions}
-            modelChanges={state.modelChanges}
-            modelSaving={state.modelSaving}
-            agentSettings={state.agentSettings}
-          agentErrors={state.agentErrors}
-          hasAgentChanges={state.hasAgentChanges}
-          hasModelsChanges={state.hasModelsChanges}
-          isSavingAgent={state.isSavingAgent}
-          isSavingModels={state.isSavingModels}
-          mainAgent={state.mainAgent}
-          onUpdateModelConfig={state.updateModelConfig}
-          onSaveModel={state.handleSaveModel}
-          onSaveAgentSettings={state.handleSaveAgentSettings}
-          onSaveModelsConfig={state.handleSaveModelsConfig}
-            onAgentSettingsChange={(field, value) => {
-              state.setAgentSettings((prev) => ({ ...prev, [field]: value }));
-            }}
-            clearFieldError={state.clearFieldError}
-          />
+          <Suspense fallback={sectionFallback}>
+            <AgentConfigSection
+              modelsConfig={state.modelsConfig}
+              providerOptions={state.providerOptions}
+              modelChanges={state.modelChanges}
+              modelSaving={state.modelSaving}
+              agentSettings={state.agentSettings}
+              agentErrors={state.agentErrors}
+              hasAgentChanges={state.hasAgentChanges}
+              hasModelsChanges={state.hasModelsChanges}
+              isSavingAgent={state.isSavingAgent}
+              isSavingModels={state.isSavingModels}
+              mainAgent={state.mainAgent}
+              onUpdateModelConfig={state.updateModelConfig}
+              onSaveModel={state.handleSaveModel}
+              onSaveAgentSettings={state.handleSaveAgentSettings}
+              onSaveModelsConfig={state.handleSaveModelsConfig}
+              onAgentSettingsChange={(field, value) => {
+                state.setAgentSettings((prev) => ({ ...prev, [field]: value }));
+              }}
+              clearFieldError={state.clearFieldError}
+            />
+          </Suspense>
         </div>
 
         <div id="config-workspace" className="scroll-mt-24">
-          <WorkspaceConfigSection
-          workspacePath={state.workspacePath}
-          hasWorkspaceChanges={state.hasWorkspaceChanges}
-          isSavingWorkspace={state.isSavingWorkspace}
-          mainAgent={state.mainAgent}
-          onWorkspacePathChange={state.setWorkspacePath}
-          onSaveWorkspace={state.handleSaveWorkspace}
-        />
+          <Suspense fallback={sectionFallback}>
+            <WorkspaceConfigSection
+              workspacePath={state.workspacePath}
+              hasWorkspaceChanges={state.hasWorkspaceChanges}
+              isSavingWorkspace={state.isSavingWorkspace}
+              mainAgent={state.mainAgent}
+              onWorkspacePathChange={state.setWorkspacePath}
+              onSaveWorkspace={state.handleSaveWorkspace}
+            />
+          </Suspense>
         </div>
 
         <div id="config-web-search" className="scroll-mt-24">
-          <WebSearchConfigSection
-            currentWebSearchConfig={state.currentWebSearchConfig}
-            selectedWebSearchProvider={state.selectedWebSearchProvider}
-            webSearchProviders={state.webSearchProviders}
-            isLoadingProviders={state.isLoadingProviders}
-            hasWebSearchChanges={state.hasWebSearchChanges}
-            canSaveWebSearch={state.canSaveWebSearch}
-            isSavingWebSearch={state.isSavingWebSearch}
-            remoteImageCacheStatus={state.remoteImageCacheStatus}
-            isClearingRemoteImageCache={state.isClearingRemoteImageCache}
-            onWebSearchChange={state.updateWebSearchConfig}
-            onSaveWebSearch={state.handleSaveWebSearch}
-            onClearRemoteImageCache={state.handleClearRemoteImageCache}
-          />
+          <Suspense fallback={sectionFallback}>
+            <WebSearchConfigSection
+              currentWebSearchConfig={state.currentWebSearchConfig}
+              selectedWebSearchProvider={state.selectedWebSearchProvider}
+              webSearchProviders={state.webSearchProviders}
+              isLoadingProviders={state.isLoadingProviders}
+              hasWebSearchChanges={state.hasWebSearchChanges}
+              canSaveWebSearch={state.canSaveWebSearch}
+              isSavingWebSearch={state.isSavingWebSearch}
+              remoteImageCacheStatus={state.remoteImageCacheStatus}
+              isClearingRemoteImageCache={state.isClearingRemoteImageCache}
+              onWebSearchChange={state.updateWebSearchConfig}
+              onSaveWebSearch={state.handleSaveWebSearch}
+              onClearRemoteImageCache={state.handleClearRemoteImageCache}
+            />
+          </Suspense>
         </div>
 
         <div id="config-providers" className="scroll-mt-24">
-          <ProviderConfigSection
-            providers={state.config?.providers}
-            onProviderAdded={state.handleProviderAdded}
-            onProviderUpdated={() => state.refreshConfigFromServer()}
-            onProviderDeleted={state.handleProviderDeleted}
-            onError={(message) => state.setError(message)}
-          />
+          <Suspense fallback={sectionFallback}>
+            <ProviderConfigSection
+              providers={state.config?.providers}
+              onProviderAdded={state.handleProviderAdded}
+              onProviderUpdated={() => state.refreshConfigFromServer()}
+              onProviderDeleted={state.handleProviderDeleted}
+              onError={(message) => state.setError(message)}
+            />
+          </Suspense>
         </div>
       </div>
 

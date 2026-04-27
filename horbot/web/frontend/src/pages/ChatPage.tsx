@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { Suspense, useDeferredValue, useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import {
   ArrowDown,
   Bot,
@@ -7,7 +7,6 @@ import {
   ChevronsUp,
   CirclePlay,
   Globe,
-  FoldVertical,
   FolderOpen,
   Network,
   PencilLine,
@@ -32,6 +31,7 @@ import { chatService, ChatStreamError } from '../services/chat';
 import type { StreamState, UploadedFile } from '../services/chat';
 import type { ConversationState } from '../stores/conversationStore';
 import { createAsyncResourceCache } from '../utils/asyncResourceCache';
+import { lazyWithReload } from '../utils/lazyWithReload';
 
 interface AgentInfo {
   id: string;
@@ -178,6 +178,39 @@ interface HistorySearchMatch {
   role: 'user' | 'assistant';
   label: string;
   preview: string;
+  messageIds: string[];
+}
+
+interface RemoteHistorySearchMatch {
+  message_id: string;
+  turn_id?: string;
+  request_id?: string;
+  role: 'user' | 'assistant';
+  preview: string;
+  timestamp?: string;
+  agent_id?: string;
+  agent_name?: string;
+}
+
+type HistorySearchTimeRange = 'all' | '7d' | '30d';
+
+type HistoryLoadMode = 'initial' | 'before' | 'after' | 'around';
+
+interface ConversationHistoryWindowState {
+  oldestMessageId?: string;
+  newestMessageId?: string;
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
+  totalMessages?: number;
+}
+
+interface ConversationHistoryPage {
+  oldest_message_id?: string | null;
+  newest_message_id?: string | null;
+  has_more_before?: boolean;
+  has_more_after?: boolean;
+  returned_messages?: number;
+  total_messages?: number;
 }
 
 type RelayGroupState = RelayTimelineStep['state'];
@@ -209,6 +242,21 @@ type TranslateFn = (key: string, values?: Record<string, number | string>) => st
 
 const EMPTY_MESSAGES: UIMessage[] = [];
 const EMPTY_TYPING_AGENTS: string[] = [];
+const CONVERSATION_HISTORY_PAGE_SIZE = 80;
+const CONVERSATION_HISTORY_SEARCH_PAGE_SIZE = 20;
+const CONVERSATION_HISTORY_SEARCH_CONTEXT = 20;
+const TURN_VIRTUALIZATION_THRESHOLD = 40;
+const TURN_VIRTUALIZATION_ESTIMATED_HEIGHT = 360;
+const TURN_VIRTUALIZATION_OVERSCAN = 4;
+const TURN_VIRTUALIZATION_ROW_GAP = 12;
+
+const resolveHistorySearchSince = (range: HistorySearchTimeRange): string | undefined => {
+  if (range === 'all') {
+    return undefined;
+  }
+  const days = range === '7d' ? 7 : 30;
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+};
 
 const chatDirectoryCache = createAsyncResourceCache(
   async (): Promise<ChatDirectoryBundle> => {
@@ -489,6 +537,64 @@ const resolveChatWebSocketUrl = (): string => {
   return url.toString();
 };
 
+const buildConversationMessagesUrl = (
+  conversationId: string,
+  options: {
+    limit?: number;
+    beforeId?: string;
+    afterId?: string;
+    aroundId?: string;
+    contextBefore?: number;
+    contextAfter?: number;
+  } = {},
+): string => {
+  const params = new URLSearchParams();
+  if (options.limit) {
+    params.set('limit', String(options.limit));
+  }
+  if (options.beforeId) {
+    params.set('before_id', options.beforeId);
+  }
+  if (options.afterId) {
+    params.set('after_id', options.afterId);
+  }
+  if (options.aroundId) {
+    params.set('around_id', options.aroundId);
+  }
+  if (typeof options.contextBefore === 'number') {
+    params.set('context_before', String(options.contextBefore));
+  }
+  if (typeof options.contextAfter === 'number') {
+    params.set('context_after', String(options.contextAfter));
+  }
+
+  const query = params.toString();
+  return `/api/conversations/${conversationId}/messages${query ? `?${query}` : ''}`;
+};
+
+const buildConversationSearchUrl = (
+  conversationId: string,
+  query: string,
+  options: {
+    limit?: number;
+    offset?: number;
+    since?: string;
+  } = {},
+): string => {
+  const params = new URLSearchParams();
+  params.set('q', query);
+  if (options.limit) {
+    params.set('limit', String(options.limit));
+  }
+  if (typeof options.offset === 'number' && options.offset > 0) {
+    params.set('offset', String(options.offset));
+  }
+  if (options.since) {
+    params.set('since', options.since);
+  }
+  return `/api/conversations/${conversationId}/search?${params.toString()}`;
+};
+
 const normalizeMessageFile = (value: unknown): MessageFile | null => {
   if (!value || typeof value !== 'object') {
     return null;
@@ -520,6 +626,11 @@ const normalizeMessageFile = (value: unknown): MessageFile | null => {
       : typeof file.original_name === 'string'
         ? file.original_name
         : '',
+    storedFilename: typeof file.storedFilename === 'string'
+      ? file.storedFilename
+      : typeof file.stored_filename === 'string'
+        ? file.stored_filename
+        : undefined,
     mimeType: typeof file.mimeType === 'string'
       ? file.mimeType
       : typeof file.mime_type === 'string'
@@ -566,6 +677,7 @@ const serializeMessageFiles = (files?: MessageFile[]): UploadedFile[] | undefine
     file_id: file.fileId,
     filename: file.filename,
     original_name: file.originalName,
+    stored_filename: file.storedFilename,
     mime_type: file.mimeType,
     size: file.size,
     category: file.category,
@@ -590,6 +702,35 @@ const buildMessageMergeKey = (message: Pick<
     turnId: message.turnId || '',
     requestId: message.requestId || '',
   });
+};
+
+const doesHistoryMessageReplaceStreamEntry = (
+  message: Pick<UIMessage, 'id' | 'turnId' | 'agentId'>,
+  streamEntry: Pick<StreamMessageEntry, 'messageId' | 'turnId' | 'agentId'>,
+): boolean => {
+  if (message.id === streamEntry.messageId) {
+    return true;
+  }
+  if (!streamEntry.turnId || !message.turnId || message.turnId !== streamEntry.turnId) {
+    return false;
+  }
+  if (!streamEntry.agentId) {
+    return true;
+  }
+  return message.agentId === streamEntry.agentId;
+};
+
+const findReplacedStreamEntries = (
+  historyMessages: UIMessage[],
+  streamEntries: StreamMessageEntry[],
+): StreamMessageEntry[] => {
+  if (historyMessages.length === 0 || streamEntries.length === 0) {
+    return [];
+  }
+
+  return streamEntries.filter((streamEntry) => (
+    historyMessages.some((message) => doesHistoryMessageReplaceStreamEntry(message, streamEntry))
+  ));
 };
 
 const groupMessagesBySpeaker = (messages: UIMessage[]): UIMessage[][] => {
@@ -642,6 +783,11 @@ const buildSearchPreview = (value?: string, maxLength: number = 96): string => {
   return `${normalized.slice(0, Math.max(1, maxLength - 1))}…`;
 };
 
+const findHistorySearchMatchIndexByMessageId = (
+  matches: HistorySearchMatch[],
+  messageId: string,
+): number => matches.findIndex((match) => match.messageIds.includes(messageId));
+
 const estimateConversationTokens = (messages: UIMessage[]): number => {
   const totalChars = messages.reduce((sum, message) => (
     sum + cleanHistoryMessageContent(message.content || '').length
@@ -652,6 +798,24 @@ const estimateConversationTokens = (messages: UIMessage[]): number => {
 const formatApproxTokenCount = (count: number): string => (
   count >= 1000 ? `${Math.round(count / 1000)}k` : `${count}`
 );
+
+const findTurnVirtualRangeIndex = (offsets: number[], target: number): number => {
+  let low = 0;
+  let high = offsets.length - 1;
+  let bestIndex = 0;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if (offsets[mid] <= target) {
+      bestIndex = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return bestIndex;
+};
 
 const resolveTurnRequestId = (turn: MessageTurn): string | undefined => (
   [...turn.assistantMessages].reverse().find((message) => !!message.requestId)?.requestId
@@ -1238,6 +1402,16 @@ const ChatIconButton: React.FC<{
   </button>
 );
 
+const HistorySearchPopover = lazyWithReload(
+  'HistorySearchPopover',
+  () => import('../components/chat/HistorySearchPopover'),
+);
+
+const RelayTimelinePanel = lazyWithReload(
+  'RelayTimelinePanel',
+  () => import('../components/chat/RelayTimelinePanel'),
+);
+
 const ChatPage: React.FC = () => {
   const { intlLocale, t } = useI18n();
   const toast = useToast();
@@ -1246,7 +1420,16 @@ const ChatPage: React.FC = () => {
   const [externalAgents, setExternalAgents] = useState<AgentInfo[]>([]);
   const [teams, setTeams] = useState<TeamInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [historyLoadingConversationId, setHistoryLoadingConversationId] = useState<string | null>(null);
+  const [historyLoadingState, setHistoryLoadingState] = useState<{
+    conversationId: string | null;
+    mode: HistoryLoadMode;
+  }>({
+    conversationId: null,
+    mode: 'initial',
+  });
+  const [historyWindowStateByConversation, setHistoryWindowStateByConversation] = useState<
+    Record<string, ConversationHistoryWindowState>
+  >({});
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [expandedTurnIds, setExpandedTurnIds] = useState<Record<string, boolean>>({});
@@ -1268,7 +1451,18 @@ const ChatPage: React.FC = () => {
   const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [historySearchIndex, setHistorySearchIndex] = useState(0);
   const [isHistorySearchOpen, setIsHistorySearchOpen] = useState(false);
+  const [historySearchTimeRange, setHistorySearchTimeRange] = useState<HistorySearchTimeRange>('all');
+  const [remoteHistorySearchMatches, setRemoteHistorySearchMatches] = useState<RemoteHistorySearchMatch[]>([]);
+  const [remoteHistorySearchTotal, setRemoteHistorySearchTotal] = useState(0);
+  const [remoteHistorySearchHasMore, setRemoteHistorySearchHasMore] = useState(false);
+  const [remoteHistorySearchOffset, setRemoteHistorySearchOffset] = useState(0);
+  const [isRemoteHistorySearchLoading, setIsRemoteHistorySearchLoading] = useState(false);
+  const [isRemoteHistorySearchLoadingMore, setIsRemoteHistorySearchLoadingMore] = useState(false);
+  const [activeRemoteHistoryResultId, setActiveRemoteHistoryResultId] = useState<string | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
+  const [turnViewportState, setTurnViewportState] = useState({ scrollTop: 0, height: 0 });
+  const [turnListOffsetTop, setTurnListOffsetTop] = useState(0);
+  const [turnHeightVersion, setTurnHeightVersion] = useState(0);
 
   const directAgents = useMemo(
     () => [...agents, ...externalAgents],
@@ -1291,6 +1485,7 @@ const ChatPage: React.FC = () => {
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const turnListContainerRef = useRef<HTMLDivElement>(null);
   const historySearchInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentRequestIdRef = useRef<string | null>(null);
@@ -1303,16 +1498,35 @@ const ChatPage: React.FC = () => {
   const historyResultRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const relayHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const historyLoadPromisesRef = useRef(new Map<string, Promise<void>>());
+  const remoteHistorySearchAbortRef = useRef<AbortController | null>(null);
+  const pendingHistorySearchJumpRef = useRef<{
+    conversationId: string;
+    messageId: string;
+  } | null>(null);
   const relayHistoryRefreshIntervalsRef = useRef(new Map<string, ReturnType<typeof setInterval>>());
   const relayHistoryRefreshStopTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const conversationReconcileTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>[]>());
   const pendingInitialBottomScrollConversationIdRef = useRef<string | null>(null);
+  const pendingHistoryPrependScrollRef = useRef<{
+    conversationId: string;
+    previousScrollHeight: number;
+    previousScrollTop: number;
+  } | null>(null);
+  const historyWindowStateRef = useRef<Record<string, ConversationHistoryWindowState>>({});
+  const currentConversationIdRef = useRef<string | null>(null);
   const chatWebSocketRef = useRef<WebSocket | null>(null);
   const chatWebSocketReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subscribedSessionKeysRef = useRef(new Set<string>());
   const websocketEventHandlerRef = useRef<((eventData: Record<string, unknown>) => void) | null>(null);
   const liveConversationStreamsRef = useRef(new Map<string, Map<string, StreamMessageEntry>>());
   const activePrimarySessionKeyRef = useRef<string | null>(null);
+  const bottomStickRafRef = useRef<number | null>(null);
+  const bottomStickConversationIdRef = useRef<string | null>(null);
+  const bottomStickReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bottomStickDelayedTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const virtualizedTurnHeightsRef = useRef<Record<string, number>>({});
+  const virtualizedTurnElementsRef = useRef(new Map<string, HTMLDivElement>());
+  const virtualizedTurnResizeObserverRef = useRef<ResizeObserver | null>(null);
   const relayStatusSnapshotRef = useRef<RelayStatusSnapshot>({
     pendingAgentNames: [],
     activeAgentNames: [],
@@ -1463,6 +1677,14 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => {
     return () => {
+      if (bottomStickRafRef.current) {
+        window.cancelAnimationFrame(bottomStickRafRef.current);
+      }
+      if (bottomStickReleaseTimerRef.current) {
+        clearTimeout(bottomStickReleaseTimerRef.current);
+      }
+      bottomStickDelayedTimersRef.current.forEach((timerId) => clearTimeout(timerId));
+      bottomStickDelayedTimersRef.current = [];
       if (interruptNoticeTimerRef.current) {
         clearTimeout(interruptNoticeTimerRef.current);
       }
@@ -1485,6 +1707,9 @@ const ChatPage: React.FC = () => {
       relayHistoryRefreshStopTimersRef.current.clear();
       conversationReconcileTimersRef.current.forEach((timerIds) => timerIds.forEach((timerId) => clearTimeout(timerId)));
       conversationReconcileTimersRef.current.clear();
+      virtualizedTurnResizeObserverRef.current?.disconnect();
+      virtualizedTurnResizeObserverRef.current = null;
+      virtualizedTurnElementsRef.current.clear();
     };
   }, []);
 
@@ -1536,7 +1761,28 @@ const ChatPage: React.FC = () => {
     window.history.replaceState(null, '', nextUrl);
   }, [currentConversation]);
   
-  const isHistoryLoading = !!currentConversationId && historyLoadingConversationId === currentConversationId;
+  const currentHistoryWindow = currentConversationId
+    ? historyWindowStateByConversation[currentConversationId]
+    : undefined;
+  const isHistoryLoading = Boolean(
+    currentConversationId
+    && historyLoadingState.conversationId === currentConversationId
+    && historyLoadingState.mode === 'initial',
+  );
+  const isLoadingOlderHistory = Boolean(
+    currentConversationId
+    && historyLoadingState.conversationId === currentConversationId
+    && historyLoadingState.mode === 'before',
+  );
+  const isLoadingHistorySearchContext = Boolean(
+    currentConversationId
+    && historyLoadingState.conversationId === currentConversationId
+    && historyLoadingState.mode === 'around',
+  );
+  const isPartialHistoryLoaded = Boolean(
+    currentHistoryWindow?.hasMoreBefore || currentHistoryWindow?.hasMoreAfter,
+  );
+  const canJumpBackToLatest = Boolean(currentHistoryWindow?.hasMoreAfter);
   
   const generateId = () => Math.random().toString(36).substring(2, 15);
 
@@ -1640,7 +1886,8 @@ const ChatPage: React.FC = () => {
         const hasToolCalls = msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
         const hasContent = msg.content && msg.content.trim();
         const hasFiles = hasRenderableMessageFiles(msg.files);
-        if (!hasContent && !hasToolCalls && !hasFiles) return false;
+        const hasExecutionSteps = msg.execution_steps && Array.isArray(msg.execution_steps) && msg.execution_steps.length > 0;
+        if (!hasContent && !hasToolCalls && !hasFiles && !hasExecutionSteps) return false;
         if (msg.content && msg.content.startsWith('Message sent to ')) return false;
         return true;
       })
@@ -1709,17 +1956,9 @@ const ChatPage: React.FC = () => {
   ) => {
     const registry = getConversationStreamRegistry(convId);
     const snapshot = streamEntries || Array.from(registry.values());
-    const streamMessageIds = new Set<string>();
-    const streamTurnIds = new Set<string>();
     const streamAgentIds = new Set<string>();
 
     snapshot.forEach((entry) => {
-      if (entry.messageId) {
-        streamMessageIds.add(entry.messageId);
-      }
-      if (entry.turnId) {
-        streamTurnIds.add(entry.turnId);
-      }
       if (entry.agentId) {
         streamAgentIds.add(entry.agentId);
         removeTypingAgent(convId, entry.agentId);
@@ -1731,33 +1970,79 @@ const ChatPage: React.FC = () => {
 
     const runReconcile = async () => {
       try {
-        const response = await fetch(`/api/conversations/${convId}/messages`);
+        const response = await fetch(buildConversationMessagesUrl(convId, {
+          limit: CONVERSATION_HISTORY_PAGE_SIZE,
+          afterId: historyWindowStateRef.current[convId]?.newestMessageId,
+        }));
         const data = await response.json();
-        const historyMessages = Array.isArray(data.messages)
+        let historyMessages = Array.isArray(data.messages)
           ? formatConversationHistoryMessages(data.messages)
           : [];
+        let page = (data.page || {}) as ConversationHistoryPage;
+        let replacedStreamEntries = findReplacedStreamEntries(historyMessages, snapshot);
+
+        if (snapshot.length > 0 && replacedStreamEntries.length === 0) {
+          const latestResponse = await fetch(buildConversationMessagesUrl(convId, {
+            limit: CONVERSATION_HISTORY_PAGE_SIZE,
+          }));
+          const latestData = await latestResponse.json();
+          const latestHistoryMessages = Array.isArray(latestData.messages)
+            ? formatConversationHistoryMessages(latestData.messages)
+            : [];
+          const latestReplacedStreamEntries = findReplacedStreamEntries(latestHistoryMessages, snapshot);
+          if (latestReplacedStreamEntries.length > 0) {
+            historyMessages = latestHistoryMessages;
+            page = (latestData.page || {}) as ConversationHistoryPage;
+            replacedStreamEntries = latestReplacedStreamEntries;
+          }
+        }
+
+        const hasHistoryReplacement = replacedStreamEntries.length > 0;
         const existingMessages = (getMessages(convId) as UIMessage[]).filter((message) => {
           if (message.role !== 'assistant') {
             return true;
           }
-          if (streamMessageIds.has(message.id)) {
-            return false;
-          }
-          if (message.isStreaming) {
-            return false;
-          }
-          if (message.turnId && streamTurnIds.has(message.turnId)) {
-            return false;
-          }
-          if (message.metadata?._relay_phase === 'pending') {
-            return false;
-          }
-          if (message.agentId && streamAgentIds.has(message.agentId) && !message.content.trim()) {
-            return false;
+          if (hasHistoryReplacement) {
+            const shouldReplaceMessage = replacedStreamEntries.some((entry) => (
+              doesHistoryMessageReplaceStreamEntry(message, entry)
+            ));
+            if (shouldReplaceMessage) {
+              return false;
+            }
+            if (message.metadata?._relay_phase === 'pending') {
+              return false;
+            }
+            if (message.agentId && streamAgentIds.has(message.agentId) && !message.content.trim()) {
+              return false;
+            }
           }
           return true;
         });
-        setMessages(convId, mergeConversationHistory(historyMessages, existingMessages));
+        const nextMessages = mergeConversationHistory(historyMessages, existingMessages);
+        setMessages(convId, nextMessages);
+        if (currentConversationIdRef.current === convId) {
+          armBottomStickForConversation(convId);
+          stickConversationToBottom(convId);
+        }
+        setHistoryWindowStateByConversation((prev) => {
+          const previousWindow = prev[convId] || { hasMoreBefore: false, hasMoreAfter: false };
+          return {
+            ...prev,
+            [convId]: {
+              oldestMessageId: previousWindow.oldestMessageId || page.oldest_message_id || undefined,
+              newestMessageId: page.newest_message_id || previousWindow.newestMessageId || undefined,
+              hasMoreBefore: typeof page.has_more_before === 'boolean'
+                ? page.has_more_before
+                : previousWindow.hasMoreBefore,
+              hasMoreAfter: typeof page.has_more_after === 'boolean'
+                ? page.has_more_after
+                : previousWindow.hasMoreAfter,
+              totalMessages: typeof page.total_messages === 'number'
+                ? page.total_messages
+                : previousWindow.totalMessages,
+            },
+          };
+        });
       } catch (error) {
         console.error('Failed to reconcile conversation after done:', error);
       }
@@ -1777,6 +2062,7 @@ const ChatPage: React.FC = () => {
     mergeConversationHistory,
     removeTypingAgent,
     setMessages,
+    setHistoryWindowStateByConversation,
   ]);
   
   const formatTime = useCallback((timestamp?: string) => {
@@ -1811,20 +2097,102 @@ const ChatPage: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior, block: 'end' });
   }, []);
 
+  const stickConversationToBottom = useCallback((conversationId: string, remainingFrames: number = 8) => {
+    if (bottomStickRafRef.current) {
+      window.cancelAnimationFrame(bottomStickRafRef.current);
+      bottomStickRafRef.current = null;
+    }
+
+    const run = (framesLeft: number) => {
+      bottomStickRafRef.current = window.requestAnimationFrame(() => {
+        if (currentConversationIdRef.current !== conversationId) {
+          bottomStickRafRef.current = null;
+          return;
+        }
+
+        scrollToBottom('auto');
+
+        if (framesLeft > 1) {
+          run(framesLeft - 1);
+          return;
+        }
+
+        bottomStickRafRef.current = null;
+      });
+    };
+
+    run(Math.max(1, remainingFrames));
+  }, [scrollToBottom]);
+
+  const armBottomStickForConversation = useCallback((conversationId: string) => {
+    bottomStickConversationIdRef.current = conversationId;
+    if (bottomStickReleaseTimerRef.current) {
+      clearTimeout(bottomStickReleaseTimerRef.current);
+    }
+    bottomStickDelayedTimersRef.current.forEach((timerId) => clearTimeout(timerId));
+    bottomStickDelayedTimersRef.current = [250, 900, 1800, 2800].map((delay) => (
+      setTimeout(() => {
+        if (bottomStickConversationIdRef.current === conversationId) {
+          stickConversationToBottom(conversationId, 2);
+        }
+      }, delay)
+    ));
+    bottomStickReleaseTimerRef.current = setTimeout(() => {
+      if (bottomStickConversationIdRef.current === conversationId) {
+        bottomStickConversationIdRef.current = null;
+      }
+      bottomStickDelayedTimersRef.current.forEach((timerId) => clearTimeout(timerId));
+      bottomStickDelayedTimersRef.current = [];
+      bottomStickReleaseTimerRef.current = null;
+    }, 3000);
+  }, [stickConversationToBottom]);
+
+  useEffect(() => {
+    currentConversationIdRef.current = currentConversationId;
+  }, [currentConversationId]);
+
   useEffect(() => {
     const container = chatContainerRef.current;
     if (!container) {
       return;
     }
 
+    let frameId: number | null = null;
     const updateScrollState = () => {
       const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
       setIsNearBottom(distanceFromBottom < 120);
+      setTurnViewportState((prev) => (
+        prev.scrollTop === container.scrollTop && prev.height === container.clientHeight
+          ? prev
+          : { scrollTop: container.scrollTop, height: container.clientHeight }
+      ));
+    };
+
+    const scheduleUpdateScrollState = () => {
+      if (frameId !== null) {
+        return;
+      }
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        updateScrollState();
+      });
     };
 
     updateScrollState();
-    container.addEventListener('scroll', updateScrollState, { passive: true });
-    return () => container.removeEventListener('scroll', updateScrollState);
+    container.addEventListener('scroll', scheduleUpdateScrollState, { passive: true });
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => scheduleUpdateScrollState())
+      : null;
+    resizeObserver?.observe(container);
+
+    return () => {
+      container.removeEventListener('scroll', scheduleUpdateScrollState);
+      resizeObserver?.disconnect();
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
   }, [currentConversationId]);
 
   useEffect(() => {
@@ -1833,8 +2201,9 @@ const ChatPage: React.FC = () => {
     }
 
     pendingInitialBottomScrollConversationIdRef.current = currentConversationId;
+    armBottomStickForConversation(currentConversationId);
     setIsNearBottom(true);
-  }, [currentConversationId]);
+  }, [armBottomStickForConversation, currentConversationId]);
 
   const applyDirectoryBundle = useCallback((directory: ChatDirectoryBundle) => {
     setAgents(directory.agents);
@@ -1862,6 +2231,37 @@ const ChatPage: React.FC = () => {
       scrollToBottom();
     }
   }, [messages, isNearBottom, scrollToBottom]);
+
+  useEffect(() => {
+    historyWindowStateRef.current = historyWindowStateByConversation;
+  }, [historyWindowStateByConversation]);
+
+  useLayoutEffect(() => {
+    const pendingAdjustment = pendingHistoryPrependScrollRef.current;
+    if (!pendingAdjustment || pendingAdjustment.conversationId !== currentConversationId) {
+      return;
+    }
+
+    const container = chatContainerRef.current;
+    if (!container) {
+      pendingHistoryPrependScrollRef.current = null;
+      return;
+    }
+
+    container.scrollTop = pendingAdjustment.previousScrollTop
+      + (container.scrollHeight - pendingAdjustment.previousScrollHeight);
+    pendingHistoryPrependScrollRef.current = null;
+  }, [currentConversationId, messages]);
+
+  useLayoutEffect(() => {
+    if (!currentConversationId) {
+      return;
+    }
+    if (bottomStickConversationIdRef.current !== currentConversationId) {
+      return;
+    }
+    stickConversationToBottom(currentConversationId, 2);
+  }, [currentConversationId, stickConversationToBottom, turnHeightVersion]);
   
   useEffect(() => {
     const initialize = async () => {
@@ -1954,42 +2354,157 @@ const ChatPage: React.FC = () => {
     setSelectedAgentId(defaultAgent.id);
   }, [directAgents, teams, currentConversationId, getOrCreateDMConversation, getOrCreateTeamConversation, setCurrentConversation]);
   
-  const loadConversationHistory = useCallback((convId: string) => {
+  const loadConversationHistory = useCallback((
+    convId: string,
+    options: {
+      mode?: HistoryLoadMode;
+      aroundId?: string;
+      forceRefreshLatest?: boolean;
+    } = {},
+  ): Promise<void> => {
     const existingRequest = historyLoadPromisesRef.current.get(convId);
     if (existingRequest) {
+      if (options.forceRefreshLatest) {
+        return existingRequest.then(() => loadConversationHistory(convId, options));
+      }
       return existingRequest;
     }
 
-    setHistoryLoadingConversationId(convId);
+    const mode = options.mode || 'initial';
+    const existingMessages = getMessages(convId) as UIMessage[];
+    const currentWindow = historyWindowStateRef.current[convId];
+    const shouldSnapBackToLatest = Boolean(
+      mode === 'initial'
+      && !options.forceRefreshLatest
+      && currentWindow?.hasMoreAfter,
+    );
+    const effectiveMode: HistoryLoadMode = mode === 'initial'
+      && !options.forceRefreshLatest
+      && !shouldSnapBackToLatest
+      && existingMessages.length > 0
+      && currentWindow?.newestMessageId
+      ? 'after'
+      : mode;
+
+    if (effectiveMode === 'before' && !currentWindow?.hasMoreBefore) {
+      return Promise.resolve();
+    }
+    if (effectiveMode === 'before' && !currentWindow?.oldestMessageId) {
+      return Promise.resolve();
+    }
+    if (effectiveMode === 'after' && !currentWindow?.newestMessageId) {
+      return Promise.resolve();
+    }
+    if (effectiveMode === 'around' && !options.aroundId) {
+      return Promise.resolve();
+    }
+
+    if (effectiveMode === 'before' && chatContainerRef.current) {
+      pendingHistoryPrependScrollRef.current = {
+        conversationId: convId,
+        previousScrollHeight: chatContainerRef.current.scrollHeight,
+        previousScrollTop: chatContainerRef.current.scrollTop,
+      };
+    }
+
+    setHistoryLoadingState({
+      conversationId: convId,
+      mode: effectiveMode,
+    });
 
     const request = (async () => {
       try {
-        const response = await fetch(`/api/conversations/${convId}/messages`);
+        const response = await fetch(buildConversationMessagesUrl(convId, {
+          limit: CONVERSATION_HISTORY_PAGE_SIZE,
+          beforeId: effectiveMode === 'before' ? currentWindow?.oldestMessageId : undefined,
+          afterId: effectiveMode === 'after' ? currentWindow?.newestMessageId : undefined,
+          aroundId: effectiveMode === 'around' ? options.aroundId : undefined,
+          contextBefore: effectiveMode === 'around' ? CONVERSATION_HISTORY_SEARCH_CONTEXT : undefined,
+          contextAfter: effectiveMode === 'around' ? CONVERSATION_HISTORY_SEARCH_CONTEXT : undefined,
+        }));
         const data = await response.json();
-        
+
         if (data.messages && Array.isArray(data.messages)) {
           const formattedMessages = formatConversationHistoryMessages(data.messages);
-          setMessages(convId, mergeConversationHistory(formattedMessages, getMessages(convId) as UIMessage[]));
+          const latestExistingMessages = getMessages(convId) as UIMessage[];
+          const nextMessages = effectiveMode === 'around' || effectiveMode === 'initial'
+            ? formattedMessages
+            : mergeConversationHistory(formattedMessages, latestExistingMessages);
+          setMessages(convId, nextMessages);
+          if (effectiveMode === 'after' && currentConversationIdRef.current === convId) {
+            armBottomStickForConversation(convId);
+            stickConversationToBottom(convId);
+          }
+
+          const page = (data.page || {}) as ConversationHistoryPage;
+          setHistoryWindowStateByConversation((prev) => {
+            const previousWindow = prev[convId] || { hasMoreBefore: false, hasMoreAfter: false };
+            if (effectiveMode === 'around' || effectiveMode === 'initial') {
+              return {
+                ...prev,
+                [convId]: {
+                  oldestMessageId: page.oldest_message_id || undefined,
+                  newestMessageId: page.newest_message_id || undefined,
+                  hasMoreBefore: Boolean(page.has_more_before),
+                  hasMoreAfter: Boolean(page.has_more_after),
+                  totalMessages: typeof page.total_messages === 'number'
+                    ? page.total_messages
+                    : previousWindow.totalMessages,
+                },
+              };
+            }
+            return {
+              ...prev,
+              [convId]: {
+                oldestMessageId: effectiveMode === 'after'
+                  ? (previousWindow.oldestMessageId || page.oldest_message_id || undefined)
+                  : (page.oldest_message_id || previousWindow.oldestMessageId || undefined),
+                newestMessageId: page.newest_message_id || previousWindow.newestMessageId || undefined,
+                hasMoreBefore: typeof page.has_more_before === 'boolean'
+                  ? page.has_more_before
+                  : previousWindow.hasMoreBefore,
+                hasMoreAfter: effectiveMode === 'before'
+                  ? previousWindow.hasMoreAfter
+                  : (typeof page.has_more_after === 'boolean'
+                    ? page.has_more_after
+                    : previousWindow.hasMoreAfter),
+                totalMessages: typeof page.total_messages === 'number'
+                  ? page.total_messages
+                  : previousWindow.totalMessages,
+              },
+            };
+          });
         }
       } catch (error) {
+        if (effectiveMode === 'before' && pendingHistoryPrependScrollRef.current?.conversationId === convId) {
+          pendingHistoryPrependScrollRef.current = null;
+        }
         console.error('Failed to load conversation history:', error);
       } finally {
         historyLoadPromisesRef.current.delete(convId);
-        setHistoryLoadingConversationId((currentLoadingConvId) => (
-          currentLoadingConvId === convId ? null : currentLoadingConvId
+        setHistoryLoadingState((currentLoadingState) => (
+          currentLoadingState.conversationId === convId
+            ? { conversationId: null, mode: 'initial' }
+            : currentLoadingState
         ));
         if (pendingInitialBottomScrollConversationIdRef.current === convId) {
           pendingInitialBottomScrollConversationIdRef.current = null;
-          window.requestAnimationFrame(() => {
-            scrollToBottom('auto');
-          });
+          armBottomStickForConversation(convId);
+          stickConversationToBottom(convId);
         }
       }
     })();
 
     historyLoadPromisesRef.current.set(convId, request);
     return request;
-  }, [formatConversationHistoryMessages, setMessages, getMessages, mergeConversationHistory, scrollToBottom]);
+  }, [
+    formatConversationHistoryMessages,
+    getMessages,
+    mergeConversationHistory,
+    armBottomStickForConversation,
+    stickConversationToBottom,
+    setMessages,
+  ]);
 
   const settleTimedOutRequestFromHistory = useCallback(async (
     convId: string,
@@ -2001,7 +2516,10 @@ const ChatPage: React.FC = () => {
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
-        const response = await fetch(`/api/conversations/${convId}/messages`);
+        const response = await fetch(buildConversationMessagesUrl(convId, {
+          limit: CONVERSATION_HISTORY_PAGE_SIZE,
+          afterId: historyWindowStateRef.current[convId]?.newestMessageId,
+        }));
         const data = await response.json();
         const rawMessages: Array<Record<string, unknown>> = Array.isArray(data.messages) ? data.messages : [];
         const matchedAssistantMessage = rawMessages.find((message: Record<string, unknown>) => (
@@ -2016,6 +2534,10 @@ const ChatPage: React.FC = () => {
               && cleanHistoryMessageContent((message as { content?: string }).content || '').trim().length > 0
             )
             || hasRenderableMessageFiles((message as { files?: unknown }).files)
+            || (
+              Array.isArray((message as { execution_steps?: unknown[] }).execution_steps)
+              && (message as { execution_steps?: unknown[] }).execution_steps!.length > 0
+            )
           )
         ));
 
@@ -2132,7 +2654,7 @@ const ChatPage: React.FC = () => {
       }));
     }
 
-    void loadConversationHistory(conversationIdToOpen);
+    void loadConversationHistory(conversationIdToOpen, { forceRefreshLatest: true });
     ensureRelayHistoryRefresh(conversationIdToOpen);
     if (activate) {
       setCurrentConversation(conversationIdToOpen);
@@ -2784,7 +3306,7 @@ const ChatPage: React.FC = () => {
   
   useEffect(() => {
     if (currentConversationId) {
-      void loadConversationHistory(currentConversationId);
+      void loadConversationHistory(currentConversationId, { forceRefreshLatest: true });
     }
   }, [currentConversationId, loadConversationHistory]);
 
@@ -2810,7 +3332,7 @@ const ChatPage: React.FC = () => {
     if (agent) {
       const conv = getOrCreateDMConversation(agentId, agent.name);
       setCurrentConversation(conv.id);
-      void loadConversationHistory(conv.id);
+      void loadConversationHistory(conv.id, { forceRefreshLatest: true });
       setSelectedAgentId(agentId);
       setSelectedTeamId(null);
     }
@@ -2821,11 +3343,94 @@ const ChatPage: React.FC = () => {
     if (team) {
       const conv = getOrCreateTeamConversation(teamId, team.name, team.members, team.description);
       setCurrentConversation(conv.id);
-      void loadConversationHistory(conv.id);
+      void loadConversationHistory(conv.id, { forceRefreshLatest: true });
       setSelectedTeamId(teamId);
       setSelectedAgentId(null);
     }
   }, [teams, getOrCreateTeamConversation, loadConversationHistory, setCurrentConversation]);
+
+  const handleLoadOlderHistory = useCallback(() => {
+    if (!currentConversationId || isLoadingOlderHistory) {
+      return;
+    }
+    void loadConversationHistory(currentConversationId, { mode: 'before' });
+  }, [currentConversationId, isLoadingOlderHistory, loadConversationHistory]);
+
+  const handleJumpBackToLatestHistory = useCallback(() => {
+    if (!currentConversationId || historyLoadingState.conversationId === currentConversationId) {
+      return;
+    }
+    void loadConversationHistory(currentConversationId, {
+      mode: 'initial',
+      forceRefreshLatest: true,
+    });
+  }, [currentConversationId, historyLoadingState.conversationId, loadConversationHistory]);
+
+  const fetchRemoteHistorySearch = useCallback(async (
+    convId: string,
+    query: string,
+    options: {
+      append?: boolean;
+      offset?: number;
+      signal?: AbortSignal;
+    } = {},
+  ) => {
+    const since = resolveHistorySearchSince(historySearchTimeRange);
+    const response = await fetch(buildConversationSearchUrl(convId, query, {
+      limit: CONVERSATION_HISTORY_SEARCH_PAGE_SIZE,
+      offset: options.offset,
+      since,
+    }), options.signal ? { signal: options.signal } : undefined);
+    const data = await response.json();
+    const nextMatches = Array.isArray(data.matches) ? data.matches as RemoteHistorySearchMatch[] : [];
+    setRemoteHistorySearchMatches((prev) => (
+      options.append ? [...prev, ...nextMatches] : nextMatches
+    ));
+    setRemoteHistorySearchTotal(typeof data.total_matches === 'number' ? data.total_matches : 0);
+    setRemoteHistorySearchHasMore(Boolean(data.has_more));
+    setRemoteHistorySearchOffset(typeof data.next_offset === 'number'
+      ? data.next_offset
+      : ((options.offset || 0) + nextMatches.length));
+  }, [historySearchTimeRange]);
+
+  const handleLoadMoreRemoteHistorySearch = useCallback(async () => {
+    if (!currentConversationId || !historySearchQuery.trim() || !remoteHistorySearchHasMore || isRemoteHistorySearchLoadingMore) {
+      return;
+    }
+    setIsRemoteHistorySearchLoadingMore(true);
+    try {
+      await fetchRemoteHistorySearch(currentConversationId, historySearchQuery.trim(), {
+        append: true,
+        offset: remoteHistorySearchOffset,
+      });
+    } catch (error) {
+      console.error('Failed to load more full-history search results:', error);
+    } finally {
+      setIsRemoteHistorySearchLoadingMore(false);
+    }
+  }, [
+    currentConversationId,
+    fetchRemoteHistorySearch,
+    historySearchQuery,
+    isRemoteHistorySearchLoadingMore,
+    remoteHistorySearchHasMore,
+    remoteHistorySearchOffset,
+  ]);
+
+  const handleSelectRemoteHistorySearchMatch = useCallback(async (match: RemoteHistorySearchMatch) => {
+    if (!currentConversationId || isLoadingHistorySearchContext) {
+      return;
+    }
+    pendingHistorySearchJumpRef.current = {
+      conversationId: currentConversationId,
+      messageId: match.message_id,
+    };
+    setActiveRemoteHistoryResultId(match.message_id);
+    await loadConversationHistory(currentConversationId, {
+      mode: 'around',
+      aroundId: match.message_id,
+    });
+  }, [currentConversationId, isLoadingHistorySearchContext, loadConversationHistory]);
   
   const handleSendMessage = useCallback(async (
     content: string,
@@ -3604,6 +4209,15 @@ const ChatPage: React.FC = () => {
   }, [directAgents]);
 
   const messageTurns = useMemo(() => buildMessageTurns(messages), [messages]);
+  const deferredHistorySearchQuery = useDeferredValue(historySearchQuery);
+  const normalizedHistorySearchQuery = useMemo(
+    () => normalizeSearchText(deferredHistorySearchQuery),
+    [deferredHistorySearchQuery],
+  );
+  const trimmedHistorySearchQuery = useMemo(
+    () => deferredHistorySearchQuery.trim(),
+    [deferredHistorySearchQuery],
+  );
   const lastFailedTurnRequestId = useMemo(() => {
     if (!lastFailedTurnId) {
       return undefined;
@@ -3612,8 +4226,7 @@ const ChatPage: React.FC = () => {
     return failedTurn ? resolveTurnRequestId(failedTurn) : undefined;
   }, [lastFailedTurnId, messageTurns]);
   const historySearchMatches = useMemo<HistorySearchMatch[]>(() => {
-    const query = normalizeSearchText(historySearchQuery);
-    if (!query) {
+    if (!normalizedHistorySearchQuery) {
       return [];
     }
 
@@ -3621,13 +4234,14 @@ const ChatPage: React.FC = () => {
     messageTurns.forEach((turn, turnIndex) => {
       if (turn.userMessage) {
         const normalized = normalizeSearchText(turn.userMessage.content);
-        if (normalized.includes(query)) {
+        if (normalized.includes(normalizedHistorySearchQuery)) {
           matches.push({
             key: `user:${turn.id}`,
             turnId: turn.id,
             role: 'user',
             label: t('chat.historyTurnUserLabel', { turn: turnIndex + 1 }),
             preview: buildSearchPreview(turn.userMessage.content),
+            messageIds: [turn.userMessage.id],
           });
         }
       }
@@ -3637,7 +4251,7 @@ const ChatPage: React.FC = () => {
           .map((message) => cleanHistoryMessageContent(message.content || ''))
           .join('\n');
         const normalized = normalizeSearchText(content);
-        if (!normalized.includes(query)) {
+        if (!normalized.includes(normalizedHistorySearchQuery)) {
           return;
         }
         const firstMessage = group[0];
@@ -3651,16 +4265,23 @@ const ChatPage: React.FC = () => {
             name: firstMessage?.agentName || getAgentName(firstMessage?.agentId) || t('chat.assistantFallback'),
           }),
           preview: buildSearchPreview(content),
+          messageIds: group.map((message) => message.id),
         });
       });
     });
 
     return matches;
-  }, [getAgentName, historySearchQuery, messageTurns, t]);
+  }, [getAgentName, messageTurns, normalizedHistorySearchQuery, t]);
 
   const activeHistoryMatch = historySearchMatches.length > 0
     ? historySearchMatches[Math.min(historySearchIndex, historySearchMatches.length - 1)]
     : null;
+  const remoteHistorySearchVisibleMatches = useMemo(
+    () => remoteHistorySearchMatches.filter((match) => (
+      findHistorySearchMatchIndexByMessageId(historySearchMatches, match.message_id) < 0
+    )),
+    [historySearchMatches, remoteHistorySearchMatches],
+  );
 
   useEffect(() => {
     setExpandedTurnIds({});
@@ -3670,7 +4291,17 @@ const ChatPage: React.FC = () => {
     setHistorySearchQuery('');
     setHistorySearchIndex(0);
     setIsHistorySearchOpen(false);
+    setHistorySearchTimeRange('all');
     setActiveHistoryResultKey(null);
+    setRemoteHistorySearchMatches([]);
+    setRemoteHistorySearchTotal(0);
+    setRemoteHistorySearchHasMore(false);
+    setRemoteHistorySearchOffset(0);
+    setIsRemoteHistorySearchLoadingMore(false);
+    setActiveRemoteHistoryResultId(null);
+    remoteHistorySearchAbortRef.current?.abort();
+    remoteHistorySearchAbortRef.current = null;
+    pendingHistorySearchJumpRef.current = null;
   }, [currentConversation?.id]);
 
   useEffect(() => {
@@ -3683,6 +4314,67 @@ const ChatPage: React.FC = () => {
       setHistorySearchIndex(0);
     }
   }, [historySearchMatches, historySearchIndex]);
+
+  useEffect(() => {
+    if (!currentConversationId) {
+      return undefined;
+    }
+
+    if (!trimmedHistorySearchQuery || !isPartialHistoryLoaded) {
+      remoteHistorySearchAbortRef.current?.abort();
+      remoteHistorySearchAbortRef.current = null;
+      setRemoteHistorySearchMatches([]);
+      setRemoteHistorySearchTotal(0);
+      setRemoteHistorySearchHasMore(false);
+      setRemoteHistorySearchOffset(0);
+      setIsRemoteHistorySearchLoading(false);
+      setIsRemoteHistorySearchLoadingMore(false);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    remoteHistorySearchAbortRef.current?.abort();
+    remoteHistorySearchAbortRef.current = controller;
+    setIsRemoteHistorySearchLoading(true);
+
+    const timerId = window.setTimeout(() => {
+      void fetchRemoteHistorySearch(currentConversationId, trimmedHistorySearchQuery, {
+        signal: controller.signal,
+      })
+        .then(() => {
+          if (controller.signal.aborted) {
+            return;
+          }
+        })
+        .catch((error: unknown) => {
+          if (controller.signal.aborted) {
+            return;
+          }
+          console.error('Failed to search full conversation history:', error);
+          setRemoteHistorySearchMatches([]);
+          setRemoteHistorySearchTotal(0);
+          setRemoteHistorySearchHasMore(false);
+          setRemoteHistorySearchOffset(0);
+        })
+        .finally(() => {
+          if (remoteHistorySearchAbortRef.current === controller) {
+            remoteHistorySearchAbortRef.current = null;
+          }
+          if (!controller.signal.aborted) {
+            setIsRemoteHistorySearchLoading(false);
+          }
+        });
+    }, 220);
+
+    return () => {
+      window.clearTimeout(timerId);
+      controller.abort();
+      if (remoteHistorySearchAbortRef.current === controller) {
+        remoteHistorySearchAbortRef.current = null;
+      }
+      setIsRemoteHistorySearchLoading(false);
+    };
+  }, [currentConversationId, fetchRemoteHistorySearch, isPartialHistoryLoaded, trimmedHistorySearchQuery]);
 
   useEffect(() => {
     if (!activeHistoryMatch) {
@@ -3704,6 +4396,21 @@ const ChatPage: React.FC = () => {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [activeHistoryMatch]);
+
+  useEffect(() => {
+    const pendingJump = pendingHistorySearchJumpRef.current;
+    if (!pendingJump || pendingJump.conversationId !== currentConversationId) {
+      return;
+    }
+
+    const matchIndex = findHistorySearchMatchIndexByMessageId(historySearchMatches, pendingJump.messageId);
+    if (matchIndex < 0) {
+      return;
+    }
+
+    pendingHistorySearchJumpRef.current = null;
+    setHistorySearchIndex(matchIndex);
+  }, [currentConversationId, historySearchMatches]);
 
   useEffect(() => {
     if (currentConversation?.type !== ConversationType.TEAM || messageTurns.length === 0) {
@@ -3825,19 +4532,6 @@ const ChatPage: React.FC = () => {
     }, 2200);
   }, [pendingRelayJump, expandedTurnIds, messageTurns]);
   
-  const relayStateLabel = useCallback((state: RelayGroupState) => {
-    switch (state) {
-      case 'active':
-        return t('chat.statusActive');
-      case 'waiting':
-        return t('chat.statusWaiting');
-      case 'error':
-        return t('chat.statusFailed');
-      default:
-        return t('chat.statusDone');
-    }
-  }, [t]);
-
   const getRelayGroupLabelLocalized = useCallback((group: UIMessage[], index: number): string => {
     const { sourceName, targetName, conversationType, handoffMode } = getRelayGroupTransition(group, getAgentName);
     if (conversationType === 'user_to_agent' && targetName) {
@@ -4074,6 +4768,172 @@ const ChatPage: React.FC = () => {
     return null;
   }, [messageTurns.length, messages]);
 
+  const shouldVirtualizeTurns = useMemo(() => (
+    messageTurns.length >= TURN_VIRTUALIZATION_THRESHOLD
+    && !historySearchQuery.trim()
+    && !activeHistoryResultKey
+    && !activeRemoteHistoryResultId
+    && !pendingRelayJump
+    && !highlightedRelayGroupKey
+    && !isLoadingHistorySearchContext
+  ), [
+    activeHistoryResultKey,
+    activeRemoteHistoryResultId,
+    highlightedRelayGroupKey,
+    historySearchQuery,
+    isLoadingHistorySearchContext,
+    messageTurns.length,
+    pendingRelayJump,
+  ]);
+
+  useLayoutEffect(() => {
+    const nextOffsetTop = turnListContainerRef.current?.offsetTop || 0;
+    setTurnListOffsetTop((prev) => (prev === nextOffsetTop ? prev : nextOffsetTop));
+  }, [
+    canJumpBackToLatest,
+    currentConversation?.id,
+    currentConversation?.type,
+    currentConversationHealth,
+    currentHistoryWindow?.hasMoreBefore,
+    messageTurns.length,
+  ]);
+
+  const turnVirtualizationMetrics = useMemo(() => {
+    const rowHeights = messageTurns.map((turn) => (
+      virtualizedTurnHeightsRef.current[turn.id] || TURN_VIRTUALIZATION_ESTIMATED_HEIGHT
+    ));
+    const rowOffsets: number[] = new Array(messageTurns.length);
+    let currentOffset = 0;
+
+    rowHeights.forEach((height, index) => {
+      rowOffsets[index] = currentOffset;
+      currentOffset += height;
+    });
+
+    return {
+      rowHeights,
+      rowOffsets,
+      totalHeight: currentOffset,
+    };
+  }, [messageTurns, turnHeightVersion]);
+
+  const visibleVirtualizedTurnIndexes = useMemo(() => {
+    if (!shouldVirtualizeTurns || messageTurns.length === 0) {
+      return messageTurns.map((_, index) => index);
+    }
+
+    const viewportTop = Math.max(0, turnViewportState.scrollTop - turnListOffsetTop);
+    const viewportBottom = viewportTop + Math.max(1, turnViewportState.height);
+    const { rowHeights, rowOffsets } = turnVirtualizationMetrics;
+    const maxOffset = Math.max(0, turnVirtualizationMetrics.totalHeight - 1);
+    const startIndex = Math.max(
+      0,
+      findTurnVirtualRangeIndex(rowOffsets, Math.min(viewportTop, maxOffset)) - TURN_VIRTUALIZATION_OVERSCAN,
+    );
+
+    let stopIndex = findTurnVirtualRangeIndex(rowOffsets, Math.min(viewportBottom, maxOffset));
+    while (
+      stopIndex < rowHeights.length - 1
+      && rowOffsets[stopIndex] + rowHeights[stopIndex] < viewportBottom
+    ) {
+      stopIndex += 1;
+    }
+    stopIndex = Math.min(rowHeights.length - 1, stopIndex + TURN_VIRTUALIZATION_OVERSCAN);
+
+    const indexes: number[] = [];
+    for (let index = startIndex; index <= stopIndex; index += 1) {
+      indexes.push(index);
+    }
+    return indexes;
+  }, [messageTurns, shouldVirtualizeTurns, turnListOffsetTop, turnViewportState, turnVirtualizationMetrics]);
+
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      let hasHeightChange = false;
+      entries.forEach((entry) => {
+        const element = entry.target as HTMLDivElement;
+        const turnId = element.dataset.turnId;
+        if (!turnId) {
+          return;
+        }
+        const nextHeight = Math.ceil(element.getBoundingClientRect().height);
+        if (!nextHeight || virtualizedTurnHeightsRef.current[turnId] === nextHeight) {
+          return;
+        }
+        virtualizedTurnHeightsRef.current[turnId] = nextHeight;
+        hasHeightChange = true;
+      });
+
+      if (hasHeightChange) {
+        setTurnHeightVersion((prev) => prev + 1);
+      }
+    });
+
+    virtualizedTurnResizeObserverRef.current = observer;
+    virtualizedTurnElementsRef.current.forEach((element) => observer.observe(element));
+
+    return () => {
+      if (virtualizedTurnResizeObserverRef.current === observer) {
+        virtualizedTurnResizeObserverRef.current = null;
+      }
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    const activeTurnIds = new Set(messageTurns.map((turn) => turn.id));
+    let removedHeight = false;
+
+    Object.keys(virtualizedTurnHeightsRef.current).forEach((turnId) => {
+      if (activeTurnIds.has(turnId)) {
+        return;
+      }
+      delete virtualizedTurnHeightsRef.current[turnId];
+      removedHeight = true;
+    });
+
+    virtualizedTurnElementsRef.current.forEach((element, turnId) => {
+      if (activeTurnIds.has(turnId)) {
+        return;
+      }
+      virtualizedTurnResizeObserverRef.current?.unobserve(element);
+      virtualizedTurnElementsRef.current.delete(turnId);
+    });
+
+    if (removedHeight) {
+      setTurnHeightVersion((prev) => prev + 1);
+    }
+  }, [messageTurns]);
+
+  const registerVirtualizedTurnElement = useCallback((turnId: string, element: HTMLDivElement | null) => {
+    const existingElement = virtualizedTurnElementsRef.current.get(turnId);
+    if (existingElement === element) {
+      return;
+    }
+
+    if (existingElement) {
+      virtualizedTurnResizeObserverRef.current?.unobserve(existingElement);
+      virtualizedTurnElementsRef.current.delete(turnId);
+    }
+
+    if (!element) {
+      return;
+    }
+
+    virtualizedTurnElementsRef.current.set(turnId, element);
+    virtualizedTurnResizeObserverRef.current?.observe(element);
+
+    const nextHeight = Math.ceil(element.getBoundingClientRect().height);
+    if (nextHeight && virtualizedTurnHeightsRef.current[turnId] !== nextHeight) {
+      virtualizedTurnHeightsRef.current[turnId] = nextHeight;
+      setTurnHeightVersion((prev) => prev + 1);
+    }
+  }, []);
+
   const handleHistorySearchMove = useCallback((direction: 'prev' | 'next') => {
     if (historySearchMatches.length === 0) {
       return;
@@ -4296,6 +5156,373 @@ const ChatPage: React.FC = () => {
     formatAgentNamesForStatusLocalized,
     t,
   ]);
+
+  const renderTurnCard = useCallback((turn: MessageTurn, actualTurnIndex: number) => {
+    const participantNames = turn.participantAgentIds
+      .map((agentId) => getAgentName(agentId))
+      .filter(Boolean) as string[];
+    const isTeamTurn = currentConversation?.type === ConversationType.TEAM;
+    const isInterruptedTurn = canResumeInterruptedRequest && lastInterruptedTurnId === turn.id;
+    const relayTimelineSteps = isTeamTurn
+      ? getRelayTimelineStepsLocalized(turn)
+      : [];
+    const isTimelineExpanded = relayTimelineSteps.length > 0
+      ? (expandedTimelineTurnIds[turn.id] ?? false)
+      : false;
+    const finalResponseGroup = turn.responseGroups.at(-1);
+    const finalResponderName = finalResponseGroup?.[0]
+      ? (finalResponseGroup[0].agentName || getAgentName(finalResponseGroup[0].agentId) || t('chat.assistantFallback'))
+      : undefined;
+    const isCollapsibleRelay = isTeamTurn && turn.relayCount > 1;
+    const allowRelayCollapse = turn.relayCount > MAX_VISIBLE_RELAY_GROUPS_WITHOUT_COLLAPSE;
+    const isExpanded = isCollapsibleRelay
+      ? (expandedTurnIds[turn.id] ?? false)
+      : true;
+    const highlightedGroupIndex = highlightedRelayLocation?.turnId === turn.id
+      ? highlightedRelayLocation.groupIndex
+      : null;
+    const pendingJumpGroupIndex = pendingRelayJump?.turnId === turn.id
+      ? pendingRelayJump.groupIndex
+      : null;
+    const interruptedGroupIndex = isInterruptedTurn && lastInterruptedMessageId
+      ? turn.responseGroups.findIndex((group) => group.some((message) => message.id === lastInterruptedMessageId))
+      : -1;
+    const manualExpandedSegments = expandedRelaySegments[turn.id] || [];
+    const defaultVisibleRelayGroupIndexes = getDefaultVisibleRelayGroupIndexes(turn, {
+      highlightedGroupIndex,
+      pendingJumpGroupIndex,
+      interruptedGroupIndex,
+    });
+    const visibleRelayGroupIndexes = !allowRelayCollapse
+      ? new Set(turn.responseGroups.map((_, groupIndex) => groupIndex))
+      : isExpanded
+        ? new Set(turn.responseGroups.map((_, groupIndex) => groupIndex))
+        : (() => {
+            const nextIndexes = new Set(defaultVisibleRelayGroupIndexes);
+            manualExpandedSegments.forEach((segment) => {
+              for (let index = segment.startIndex; index <= segment.endIndex; index += 1) {
+                nextIndexes.add(index);
+              }
+            });
+            return nextIndexes;
+          })();
+    const relayRenderItems = buildRelayRenderItems(
+      turn.responseGroups,
+      visibleRelayGroupIndexes,
+      getRelayGroupLabelLocalized,
+    );
+    const hiddenRelayCount = relayRenderItems.reduce(
+      (total, item) => total + (item.type === 'summary' ? item.hiddenCount : 0),
+      0,
+    );
+    const inspectedStep = highlightedGroupIndex !== null && highlightedGroupIndex >= 0
+      ? (relayTimelineSteps.find((step) => step.groupIndex === highlightedGroupIndex) || null)
+      : null;
+    const turnRetryPending = Boolean(
+      showReconnect
+      && canRetryCurrentConversation
+      && lastFailedTurnId
+      && turn.userMessage?.id === lastFailedTurnId,
+    );
+    const turnRequestId = resolveTurnRequestId(turn);
+    const turnRequestBadge = formatRequestIdBadge(turnRequestId);
+
+    return (
+      <section
+        key={turn.id}
+        data-testid="chat-turn-card"
+        data-turn-id={turn.id}
+        data-expanded={isExpanded ? 'true' : 'false'}
+        className={`rounded-[22px] border px-3 py-2.5 shadow-sm ${
+          turnRetryPending
+            ? 'border-amber-200 bg-amber-50/60'
+            : turn.hasError
+              ? 'border-red-200 bg-red-50/60'
+              : 'border-slate-200 bg-white'
+        }`}
+      >
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+              {t('chat.turnLabel', { turn: actualTurnIndex + 1 })}
+            </span>
+            {isTeamTurn && (
+              <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700">
+                {turn.relayCount > 1 ? t('chat.relayCount', { count: turn.relayCount }) : t('chat.singleResponse')}
+              </span>
+            )}
+            {turn.hasError && (
+              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+                turnRetryPending
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-red-100 text-red-700'
+              }`}>
+                {turnRetryPending ? t('chat.turnRetryPending') : t('chat.turnHasFailure')}
+              </span>
+            )}
+            {turn.hasError && turnRequestId && turnRequestBadge && (
+              <span
+                title={turnRequestId}
+                className={`inline-flex items-center rounded-full border px-2 py-1 font-mono text-[11px] font-medium ${
+                  turnRetryPending
+                    ? 'border-amber-200 bg-white text-amber-800'
+                    : 'border-red-200 bg-white text-red-700'
+                }`}
+              >
+                {t('chat.requestIdBadge', { id: turnRequestBadge })}
+              </span>
+            )}
+            {isInterruptedTurn && (
+              <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                {t('chat.turnInterrupted')}
+              </span>
+            )}
+          </div>
+          {participantNames.length > 0 && (
+            <span className="text-xs text-slate-500">
+              {t('chat.responders', { names: participantNames.join(' · ') })}
+            </span>
+          )}
+        </div>
+
+        {isInterruptedTurn && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-emerald-200 bg-emerald-50/80 px-4 py-3">
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-emerald-800">
+                <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold shadow-sm">
+                  {t('chat.interruptResumeBadge')}
+                </span>
+                <span>{t('chat.interruptResumeHint')}</span>
+              </div>
+              {turn.userMessage?.content && (
+                <p className="text-sm text-emerald-900">
+                  {t('chat.lastRequest', { preview: buildRequestPreviewLocalized(turn.userMessage.content, 40) })}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <ChatIconButton
+                label={t('chat.resumeFromHere')}
+                dataTestId="chat-turn-resume"
+                onClick={() => void handleResumeInterruptedRequest()}
+                tone="success"
+                icon={<CirclePlay className="h-4 w-4" strokeWidth={2} />}
+              />
+              <ChatIconButton
+                label={t('chat.continueInput')}
+                onClick={requestInputFocus}
+                tone="success"
+                icon={<PencilLine className="h-4 w-4" strokeWidth={2} />}
+              />
+            </div>
+          </div>
+        )}
+
+        {(relayTimelineSteps.length > 0 || (isCollapsibleRelay && allowRelayCollapse)) && (
+          <Suspense fallback={null}>
+            <RelayTimelinePanel
+              relayTimelineSteps={relayTimelineSteps}
+              isTimelineExpanded={isTimelineExpanded}
+              turnRetryPending={turnRetryPending}
+              finalResponderName={finalResponderName}
+              highlightedGroupIndex={highlightedGroupIndex}
+              pendingJumpGroupIndex={pendingJumpGroupIndex}
+              onToggleTimeline={() => toggleTimelineExpanded(turn.id)}
+              onJumpToRelayStep={(groupIndex) => jumpToRelayStep(turn.id, groupIndex)}
+              showRelaySummary={isCollapsibleRelay && allowRelayCollapse}
+              participantCount={participantNames.length}
+              inspectedStep={inspectedStep}
+              isExpanded={isExpanded}
+              hiddenRelayCount={hiddenRelayCount}
+              onToggleTurnExpanded={() => toggleTurnExpanded(turn.id)}
+            />
+          </Suspense>
+        )}
+
+        <div className="space-y-3">
+          {turn.userMessage && (
+            <div
+              ref={(node) => {
+                historyResultRefs.current[`user:${turn.id}`] = node;
+              }}
+              className={`ml-auto max-w-[84%] scroll-mt-24 rounded-2xl border border-slate-200 bg-slate-50/80 px-1.5 py-1 ${
+                activeHistoryResultKey === `user:${turn.id}` ? 'ring-2 ring-sky-300 ring-offset-2' : ''
+              }`}
+            >
+              <MessageGroup
+                messages={[turn.userMessage]}
+                isUser
+                formatTime={formatTime}
+              />
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {relayRenderItems.map((item) => {
+              if (item.type === 'summary') {
+                return (
+                  <div
+                    key={item.key}
+                    data-testid="chat-turn-collapsed-summary"
+                    data-turn-id={turn.id}
+                    data-start-index={String(item.startIndex)}
+                    data-end-index={String(item.endIndex)}
+                    data-hidden-count={String(item.hiddenCount)}
+                    className="group rounded-3xl border border-dashed border-slate-300 bg-slate-100/70 px-4 py-3 transition-all hover:border-slate-400 hover:bg-white hover:shadow-sm"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                          <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-slate-700 shadow-sm">
+                            {t('chat.collapsedStableRelay', { count: item.hiddenCount })}
+                          </span>
+                          <span>
+                            {t('chat.batonRange', { start: item.startIndex + 1, end: item.endIndex + 1 })}
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-600">
+                          {formatCollapsedRelayLabelsLocalized(item.labels)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <ChatIconButton
+                          label={t('chat.expandRelaySegment')}
+                          dataTestId="chat-turn-expand-segment"
+                          onClick={() => toggleRelaySegmentExpanded(turn.id, item.startIndex, item.endIndex)}
+                          className="group-hover:border-slate-400"
+                          icon={<ChevronsDown className="h-4 w-4" strokeWidth={2} />}
+                        />
+                        <ChatIconButton
+                          label={t('chat.expandFullRelay')}
+                          onClick={() => toggleTurnExpanded(turn.id)}
+                          className="group-hover:border-slate-400"
+                          icon={<UnfoldVertical className="h-4 w-4" strokeWidth={2} />}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              const firstMsg = item.group[0];
+              const agentName = firstMsg.agentName || getAgentName(firstMsg.agentId);
+              const relayGroupKey = `${turn.id}:${item.groupIndex}`;
+              const isHighlighted = highlightedRelayGroupKey === relayGroupKey;
+              const expandedSegmentAtStart = !isExpanded
+                ? isRelaySegmentStart(manualExpandedSegments, item.groupIndex)
+                : null;
+              const groupExecutionSteps = item.group.reduce<ExecutionStep[]>(
+                (allSteps, message) => mergeLocalizedExecutionSteps(allSteps, message.executionSteps),
+                [],
+              );
+
+              return (
+                <div key={item.key} className="space-y-2">
+                  {expandedSegmentAtStart && (
+                    <div
+                      data-testid="chat-turn-expanded-segment"
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-sky-200 bg-sky-50/80 px-4 py-3 shadow-sm ring-1 ring-sky-200/70"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                          <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-sky-700 shadow-sm">
+                            {t('chat.expandedSegment')}
+                          </span>
+                          <span>
+                            {t('chat.batonRange', { start: expandedSegmentAtStart.startIndex + 1, end: expandedSegmentAtStart.endIndex + 1 })}
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-600">
+                          {t('chat.expandedSegmentHint')}
+                        </p>
+                      </div>
+                      <ChatIconButton
+                        label={t('chat.collapseRelaySegment')}
+                        onClick={() => toggleRelaySegmentExpanded(
+                          turn.id,
+                          expandedSegmentAtStart.startIndex,
+                          expandedSegmentAtStart.endIndex,
+                        )}
+                        icon={<ChevronsUp className="h-4 w-4" strokeWidth={2} />}
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex justify-start">
+                    <div
+                      ref={(node) => {
+                        relayGroupRefs.current[relayGroupKey] = node;
+                        historyResultRefs.current[relayGroupKey] = node;
+                      }}
+                      data-testid="chat-turn-group"
+                      data-turn-id={turn.id}
+                      data-group-index={String(item.groupIndex)}
+                      data-highlighted={isHighlighted ? 'true' : 'false'}
+                      className={`max-w-[84%] scroll-mt-24 rounded-2xl border px-1.5 py-1 ${
+                        firstMsg.isError
+                          ? 'border-red-200 bg-red-50/50'
+                          : 'border-slate-200 bg-slate-50/70'
+                      } ${
+                        isHighlighted || activeHistoryResultKey === relayGroupKey
+                          ? 'ring-2 ring-sky-300 ring-offset-2'
+                          : ''
+                      }`}
+                    >
+                      <MessageGroup
+                        messages={item.group}
+                        agentName={agentName}
+                        agentId={firstMsg.agentId}
+                        isUser={false}
+                        formatTime={formatTime}
+                        onRetryMessage={(message) => handleRetryMessage(message as UIMessage)}
+                        showRetryPending={turnRetryPending}
+                      >
+                        <MessageExecutionCard
+                          steps={groupExecutionSteps}
+                          isStreaming={item.group.some((message) => message.isStreaming)}
+                        />
+                      </MessageGroup>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+    );
+  }, [
+    activeHistoryResultKey,
+    buildRequestPreviewLocalized,
+    canResumeInterruptedRequest,
+    canRetryCurrentConversation,
+    currentConversation?.type,
+    expandedRelaySegments,
+    expandedTimelineTurnIds,
+    expandedTurnIds,
+    formatCollapsedRelayLabelsLocalized,
+    formatTime,
+    getAgentName,
+    getDefaultVisibleRelayGroupIndexes,
+    getRelayGroupLabelLocalized,
+    getRelayTimelineStepsLocalized,
+    handleResumeInterruptedRequest,
+    handleRetryMessage,
+    highlightedRelayGroupKey,
+    highlightedRelayLocation,
+    jumpToRelayStep,
+    lastFailedTurnId,
+    lastInterruptedMessageId,
+    lastInterruptedTurnId,
+    mergeLocalizedExecutionSteps,
+    pendingRelayJump,
+    requestInputFocus,
+    showReconnect,
+    t,
+    toggleRelaySegmentExpanded,
+    toggleTimelineExpanded,
+    toggleTurnExpanded,
+  ]);
   
   return (
     <div className="flex h-full min-h-full overflow-hidden">
@@ -4479,84 +5706,37 @@ const ChatPage: React.FC = () => {
                     </button>
 
                     {(isHistorySearchOpen || historySearchQuery) && (
-                      <div className="absolute right-0 top-full z-20 mt-2 w-[min(92vw,32rem)] rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold text-slate-800">{t('chat.historySearchSession')}</div>
-                            <div className="text-[11px] text-slate-400">{t('chat.historySearchTurns', { count: messageTurns.length })}</div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setIsHistorySearchOpen(false)}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-                            aria-label={t('chat.closeSearch')}
-                          >
-                            <X className="h-4 w-4" strokeWidth={2} />
-                          </button>
-                        </div>
-
-                        <div className="mt-3">
-                          <div className="relative">
-                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" strokeWidth={2} />
-                            <input
-                              ref={historySearchInputRef}
-                              value={historySearchQuery}
-                              onChange={(event) => {
-                                setHistorySearchQuery(event.target.value);
-                                setHistorySearchIndex(0);
-                              }}
-                              placeholder={t('chat.historySearchPlaceholder')}
-                              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-10 text-sm text-slate-700 outline-none transition focus:border-sky-300 focus:bg-white focus:ring-2 focus:ring-sky-100"
-                            />
-                            {historySearchQuery && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setHistorySearchQuery('');
-                                  setHistorySearchIndex(0);
-                                  setActiveHistoryResultKey(null);
-                                }}
-                                className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-600"
-                                aria-label={t('chat.searchClear')}
-                              >
-                                <X className="h-3.5 w-3.5" strokeWidth={2} />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleHistorySearchMove('prev')}
-                            disabled={historySearchMatches.length === 0}
-                            className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            {t('chat.previousResult')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleHistorySearchMove('next')}
-                            disabled={historySearchMatches.length === 0}
-                            className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            {t('chat.nextResult')}
-                          </button>
-                          {historySearchMatches.length > 0 && (
-                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
-                              {historySearchIndex + 1} / {historySearchMatches.length}
-                            </span>
-                          )}
-                        </div>
-
-                        {activeHistoryMatch && (
-                          <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
-                            <span className="font-medium text-slate-700">{activeHistoryMatch.label}</span>
-                            {' · '}
-                            {activeHistoryMatch.preview}
-                          </p>
-                        )}
-                      </div>
+                      <Suspense fallback={null}>
+                        <HistorySearchPopover
+                          t={t}
+                          messageTurnsCount={messageTurns.length}
+                          historySearchInputRef={historySearchInputRef}
+                          historySearchQuery={historySearchQuery}
+                          setHistorySearchQuery={setHistorySearchQuery}
+                          setHistorySearchIndex={setHistorySearchIndex}
+                          setActiveHistoryResultKey={setActiveHistoryResultKey}
+                          setActiveRemoteHistoryResultId={setActiveRemoteHistoryResultId}
+                          onClose={() => setIsHistorySearchOpen(false)}
+                          isPartialHistoryLoaded={isPartialHistoryLoaded}
+                          historySearchTimeRange={historySearchTimeRange}
+                          setHistorySearchTimeRange={setHistorySearchTimeRange}
+                          handleHistorySearchMove={handleHistorySearchMove}
+                          historySearchMatchesCount={historySearchMatches.length}
+                          historySearchIndex={historySearchIndex}
+                          activeHistoryMatch={activeHistoryMatch}
+                          remoteHistorySearchTotal={remoteHistorySearchTotal}
+                          isRemoteHistorySearchLoading={isRemoteHistorySearchLoading}
+                          remoteHistorySearchVisibleMatches={remoteHistorySearchVisibleMatches}
+                          getAgentName={getAgentName}
+                          formatTime={formatTime}
+                          activeRemoteHistoryResultId={activeRemoteHistoryResultId}
+                          handleSelectRemoteHistorySearchMatch={handleSelectRemoteHistorySearchMatch}
+                          isLoadingHistorySearchContext={isLoadingHistorySearchContext}
+                          remoteHistorySearchHasMore={remoteHistorySearchHasMore}
+                          handleLoadMoreRemoteHistorySearch={handleLoadMoreRemoteHistorySearch}
+                          isRemoteHistorySearchLoadingMore={isRemoteHistorySearchLoadingMore}
+                        />
+                      </Suspense>
                     )}
                   </div>
                 )}
@@ -4803,590 +5983,67 @@ const ChatPage: React.FC = () => {
                     )}
                   </div>
 
-                  {messageTurns.map((turn, idx) => {
-                    const participantNames = turn.participantAgentIds
-                      .map((agentId) => getAgentName(agentId))
-                      .filter(Boolean) as string[];
-                    const isTeamTurn = currentConversation.type === ConversationType.TEAM;
-                    const isInterruptedTurn = canResumeInterruptedRequest && lastInterruptedTurnId === turn.id;
-                    const relayTimelineSteps = isTeamTurn
-                      ? getRelayTimelineStepsLocalized(turn)
-                      : [];
-                    const isTimelineExpanded = relayTimelineSteps.length > 0
-                      ? (expandedTimelineTurnIds[turn.id] ?? false)
-                      : false;
-                    const relayTimelineCompletedCount = relayTimelineSteps.filter((step) => step.state === 'done').length;
-                    const relayTimelineActiveCount = relayTimelineSteps.filter((step) => step.state === 'active').length;
-                    const relayTimelineWaitingCount = relayTimelineSteps.filter((step) => step.state === 'waiting').length;
-                    const relayTimelineFailedCount = relayTimelineSteps.filter((step) => step.state === 'error').length;
-                    const finalResponseGroup = turn.responseGroups.at(-1);
-                    const finalResponderName = finalResponseGroup?.[0]
-                      ? (finalResponseGroup[0].agentName || getAgentName(finalResponseGroup[0].agentId) || t('chat.assistantFallback'))
-                      : undefined;
-                    const activeRelayStep = relayTimelineSteps.find((step) => step.state === 'active');
-                    const waitingRelayStep = relayTimelineSteps.find((step) => step.state === 'waiting');
-                    const batonHeadline = activeRelayStep
-                      ? t('chat.timelineHeadlineActive', { label: activeRelayStep.label })
-                      : waitingRelayStep
-                        ? t('chat.timelineHeadlineWaiting', { label: waitingRelayStep.label })
-                        : finalResponderName
-                          ? t('chat.timelineHeadlineFinal', { name: finalResponderName })
-                          : t('chat.timelineHeadlineDone');
-                    const batonDetail = activeRelayStep
-                      ? activeRelayStep.detail
-                      : waitingRelayStep
-                        ? waitingRelayStep.detail
-                        : relayTimelineFailedCount > 0
-                          ? t('chat.timelineDetailFailed')
-                          : t('chat.timelineDetailIdle');
-                    const isCollapsibleRelay = isTeamTurn && turn.relayCount > 1;
-                    const allowRelayCollapse = turn.relayCount > MAX_VISIBLE_RELAY_GROUPS_WITHOUT_COLLAPSE;
-                    const isExpanded = isCollapsibleRelay
-                      ? (expandedTurnIds[turn.id] ?? false)
-                      : true;
-                    const highlightedGroupIndex = highlightedRelayLocation?.turnId === turn.id
-                      ? highlightedRelayLocation.groupIndex
-                      : null;
-                    const pendingJumpGroupIndex = pendingRelayJump?.turnId === turn.id
-                      ? pendingRelayJump.groupIndex
-                      : null;
-                    const interruptedGroupIndex = isInterruptedTurn && lastInterruptedMessageId
-                      ? turn.responseGroups.findIndex((group) => group.some((message) => message.id === lastInterruptedMessageId))
-                      : -1;
-                    const manualExpandedSegments = expandedRelaySegments[turn.id] || [];
-                    const defaultVisibleRelayGroupIndexes = getDefaultVisibleRelayGroupIndexes(turn, {
-                          highlightedGroupIndex,
-                          pendingJumpGroupIndex,
-                          interruptedGroupIndex,
-                        });
-                    const visibleRelayGroupIndexes = !allowRelayCollapse
-                      ? new Set(turn.responseGroups.map((_, groupIndex) => groupIndex))
-                      : isExpanded
-                      ? new Set(turn.responseGroups.map((_, groupIndex) => groupIndex))
-                      : (() => {
-                          const nextIndexes = new Set(defaultVisibleRelayGroupIndexes);
-                          manualExpandedSegments.forEach((segment) => {
-                            for (let index = segment.startIndex; index <= segment.endIndex; index += 1) {
-                              nextIndexes.add(index);
-                            }
-                          });
-                          return nextIndexes;
-                        })();
-                    const relayRenderItems = buildRelayRenderItems(
-                      turn.responseGroups,
-                      visibleRelayGroupIndexes,
-                      getRelayGroupLabelLocalized,
-                    );
-                    const hiddenRelayCount = relayRenderItems.reduce(
-                      (total, item) => total + (item.type === 'summary' ? item.hiddenCount : 0),
-                      0,
-                    );
-                    const inspectedStep = highlightedGroupIndex !== null && highlightedGroupIndex >= 0
-                      ? relayTimelineSteps.find((step) => step.groupIndex === highlightedGroupIndex)
-                      : null;
-
-                    const turnRetryPending = Boolean(
-                      showReconnect
-                      && canRetryCurrentConversation
-                      && lastFailedTurnId
-                      && turn.userMessage?.id === lastFailedTurnId,
-                    );
-                    const turnRequestId = resolveTurnRequestId(turn);
-                    const turnRequestBadge = formatRequestIdBadge(turnRequestId);
-
-                    return (
-                      <section
-                        key={`${turn.id}-${idx}`}
-                        data-testid="chat-turn-card"
-                        data-turn-id={turn.id}
-                        data-expanded={isExpanded ? 'true' : 'false'}
-                        className={`rounded-[22px] border px-3 py-2.5 shadow-sm ${
-                          turnRetryPending
-                            ? 'border-amber-200 bg-amber-50/60'
-                            : turn.hasError
-                              ? 'border-red-200 bg-red-50/60'
-                            : 'border-slate-200 bg-white'
-                        }`}
+                  {canJumpBackToLatest && (
+                    <div className="flex justify-center">
+                      <button
+                        type="button"
+                        onClick={handleJumpBackToLatestHistory}
+                        disabled={historyLoadingState.conversationId === currentConversationId}
+                        className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-4 py-2 text-xs font-medium text-sky-700 shadow-sm transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                              {t('chat.turnLabel', { turn: idx + 1 })}
-                            </span>
-                            {isTeamTurn && (
-                              <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700">
-                                {turn.relayCount > 1 ? t('chat.relayCount', { count: turn.relayCount }) : t('chat.singleResponse')}
-                              </span>
-                            )}
-                            {turn.hasError && (
-                              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
-                                turnRetryPending
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-red-100 text-red-700'
-                              }`}>
-                                {turnRetryPending ? t('chat.turnRetryPending') : t('chat.turnHasFailure')}
-                              </span>
-                            )}
-                            {turn.hasError && turnRequestId && turnRequestBadge && (
-                              <span
-                                title={turnRequestId}
-                                className={`inline-flex items-center rounded-full border px-2 py-1 font-mono text-[11px] font-medium ${
-                                  turnRetryPending
-                                    ? 'border-amber-200 bg-white text-amber-800'
-                                    : 'border-red-200 bg-white text-red-700'
-                                }`}
-                              >
-                                {t('chat.requestIdBadge', { id: turnRequestBadge })}
-                              </span>
-                            )}
-                            {isInterruptedTurn && (
-                              <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                                {t('chat.turnInterrupted')}
-                              </span>
-                            )}
-                          </div>
-                          {participantNames.length > 0 && (
-                            <span className="text-xs text-slate-500">
-                              {t('chat.responders', { names: participantNames.join(' · ') })}
-                            </span>
-                          )}
-                        </div>
+                        <ArrowDown className="h-3.5 w-3.5" strokeWidth={2} />
+                        {t('chat.jumpBackToLatest')}
+                      </button>
+                    </div>
+                  )}
 
-                        {isInterruptedTurn && (
-                          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-emerald-200 bg-emerald-50/80 px-4 py-3">
-                            <div className="space-y-1">
-                              <div className="flex flex-wrap items-center gap-2 text-xs text-emerald-800">
-                                <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold shadow-sm">
-                                  {t('chat.interruptResumeBadge')}
-                                </span>
-                                <span>{t('chat.interruptResumeHint')}</span>
-                              </div>
-                              {turn.userMessage?.content && (
-                                <p className="text-sm text-emerald-900">
-                                  {t('chat.lastRequest', { preview: buildRequestPreviewLocalized(turn.userMessage.content, 40) })}
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <ChatIconButton
-                                label={t('chat.resumeFromHere')}
-                                dataTestId="chat-turn-resume"
-                                onClick={() => void handleResumeInterruptedRequest()}
-                                tone="success"
-                                icon={<CirclePlay className="h-4 w-4" strokeWidth={2} />}
-                              />
-                              <ChatIconButton
-                                label={t('chat.continueInput')}
-                                onClick={requestInputFocus}
-                                tone="success"
-                                icon={<PencilLine className="h-4 w-4" strokeWidth={2} />}
-                              />
-                            </div>
-                          </div>
-                        )}
+                  {currentHistoryWindow?.hasMoreBefore && (
+                    <div className="flex justify-center">
+                      <button
+                        type="button"
+                        onClick={handleLoadOlderHistory}
+                        disabled={isLoadingOlderHistory}
+                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <ChevronsUp className="h-3.5 w-3.5" strokeWidth={2} />
+                        {isLoadingOlderHistory ? t('chat.loadingOlderHistory') : t('chat.loadOlderHistory')}
+                      </button>
+                    </div>
+                  )}
 
-                        {relayTimelineSteps.length > 0 && (
-                          <div className="mb-4 rounded-3xl border border-slate-200 bg-slate-50/80 px-4 py-3">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                                <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-slate-700 shadow-sm">
-                                  {t('chat.timelineTitle')}
-                                </span>
-                                <span>{t('chat.timelineHint')}</span>
-                              </div>
-                              <ChatIconButton
-                                label={isTimelineExpanded ? t('chat.timelineCollapse') : t('chat.timelineExpand')}
-                                dataTestId="chat-turn-timeline-toggle"
-                                onClick={() => toggleTimelineExpanded(turn.id)}
-                                icon={isTimelineExpanded
-                                  ? <ChevronsUp className="h-4 w-4" strokeWidth={2} />
-                                  : <ChevronsDown className="h-4 w-4" strokeWidth={2} />}
-                              />
-                            </div>
-                            {!isTimelineExpanded ? (
-                              <div
-                                className="mt-3 space-y-3"
-                                data-testid="chat-turn-timeline"
-                                data-collapsed="true"
-                              >
-                                <div className={`rounded-2xl border px-3 py-3 shadow-sm ${
-                                  activeRelayStep
-                                    ? 'border-sky-200 bg-sky-50/90'
-                                    : waitingRelayStep
-                                      ? 'border-amber-200 bg-amber-50/90'
-                                        : relayTimelineFailedCount > 0
-                                          ? (turnRetryPending ? 'border-amber-200 bg-amber-50/90' : 'border-red-200 bg-red-50/90')
-                                          : 'border-emerald-200 bg-emerald-50/90'
-                                }`}>
-                                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                                    <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-slate-700 shadow-sm">
-                                      {t('chat.liveBaton')}
-                                    </span>
-                                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 font-medium ${
-                                      activeRelayStep
-                                        ? 'bg-sky-100 text-sky-700'
-                                        : waitingRelayStep
-                                          ? 'bg-amber-100 text-amber-700'
-                                          : relayTimelineFailedCount > 0
-                                            ? (turnRetryPending ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-700')
-                                            : 'bg-emerald-100 text-emerald-700'
-                                    }`}>
-                                      {activeRelayStep
-                                        ? t('chat.statusActive')
-                                        : waitingRelayStep
-                                          ? t('chat.statusWaiting')
-                                          : relayTimelineFailedCount > 0
-                                            ? (turnRetryPending ? t('chat.timelineRetryPending') : t('chat.timelineHasFailure'))
-                                            : t('chat.statusDone')}
-                                    </span>
-                                    <span className="inline-flex items-center rounded-full bg-white/80 px-2.5 py-1 font-medium text-slate-600">
-                                      {t('chat.totalBatons', { count: relayTimelineSteps.length })}
-                                    </span>
-                                    {activeRelayStep && waitingRelayStep && (
-                                      <span className="inline-flex items-center rounded-full bg-white/80 px-2.5 py-1 font-medium text-slate-600">
-                                        {t('chat.nextBaton', { label: waitingRelayStep.label })}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="mt-2 text-sm font-semibold text-slate-800">
-                                    {batonHeadline}
-                                  </p>
-                                  <p className="mt-1 text-xs leading-5 text-slate-600">
-                                    {batonDetail}
-                                  </p>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  {relayTimelineSteps.map((step, timelineIdx) => (
-                                    <button
-                                      key={`${step.key}:collapsed`}
-                                      type="button"
-                                      title={t('chat.jumpToBaton', { index: timelineIdx + 1, label: step.label })}
-                                      aria-label={t('chat.jumpToBaton', { index: timelineIdx + 1, label: step.label })}
-                                      onClick={() => jumpToRelayStep(turn.id, step.groupIndex)}
-                                      className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${
-                                        step.state === 'error'
-                                          ? 'border-red-200 bg-red-50 text-red-700'
-                                          : step.state === 'active'
-                                            ? 'border-sky-200 bg-sky-50 text-sky-700'
-                                            : step.state === 'waiting'
-                                              ? 'border-amber-200 bg-amber-50 text-amber-700'
-                                              : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                      }`}
-                                    >
-                                      <span className={`inline-block h-2 w-2 rounded-full ${
-                                        step.state === 'error'
-                                          ? 'bg-red-500'
-                                          : step.state === 'active'
-                                            ? 'animate-pulse bg-sky-500'
-                                            : step.state === 'waiting'
-                                              ? 'bg-amber-500'
-                                              : 'bg-emerald-500'
-                                      }`} />
-                                      <span>{t('chat.batonLabel', { index: timelineIdx + 1 })}</span>
-                                      <span className="max-w-[14rem] truncate">{step.label}</span>
-                                    </button>
-                                  ))}
-                                </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  {relayTimelineCompletedCount > 0 && (
-                                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                                      {t('chat.completedCount', { count: relayTimelineCompletedCount })}
-                                    </span>
-                                  )}
-                                  {relayTimelineActiveCount > 0 && (
-                                    <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">
-                                      {t('chat.activeCount', { count: relayTimelineActiveCount })}
-                                    </span>
-                                  )}
-                                  {relayTimelineWaitingCount > 0 && (
-                                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
-                                      {t('chat.waitingCount', { count: relayTimelineWaitingCount })}
-                                    </span>
-                                  )}
-                                  {relayTimelineFailedCount > 0 && (
-                                    <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">
-                                      {t('chat.failedCount', { count: relayTimelineFailedCount })}
-                                    </span>
-                                  )}
-                                  {finalResponderName && (
-                                    <span className="text-xs text-slate-500">
-                                      {t('chat.finalOutput', { name: finalResponderName })}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            ) : (
-                              <div
-                                className="mt-3 flex flex-wrap items-center gap-2"
-                                data-testid="chat-turn-timeline"
-                              >
-                                {relayTimelineSteps.map((step, timelineIdx) => {
-                                  const isStepActive = highlightedGroupIndex === step.groupIndex
-                                    || pendingJumpGroupIndex === step.groupIndex;
+                  <div
+                    ref={turnListContainerRef}
+                    className={shouldVirtualizeTurns ? 'relative' : 'space-y-3'}
+                    style={shouldVirtualizeTurns
+                      ? { height: `${turnVirtualizationMetrics.totalHeight}px` }
+                      : undefined}
+                  >
+                    {shouldVirtualizeTurns
+                      ? visibleVirtualizedTurnIndexes.map((turnIndex) => {
+                          const turn = messageTurns[turnIndex];
+                          if (!turn) {
+                            return null;
+                          }
 
-                                  return (
-                                    <React.Fragment key={step.key}>
-                                      <button
-                                        type="button"
-                                        data-testid="chat-turn-timeline-step"
-                                        title={t('chat.jumpToBaton', { index: timelineIdx + 1, label: step.label })}
-                                        aria-label={t('chat.jumpToBaton', { index: timelineIdx + 1, label: step.label })}
-                                        onClick={() => jumpToRelayStep(turn.id, step.groupIndex)}
-                                        className={`min-w-[144px] max-w-[220px] rounded-2xl border px-3 py-2 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${
-                                          step.state === 'error'
-                                            ? 'border-red-200 bg-red-50'
-                                            : step.state === 'active'
-                                              ? 'border-sky-200 bg-sky-50'
-                                              : step.state === 'waiting'
-                                                ? 'border-amber-200 bg-amber-50'
-                                                : 'border-emerald-200 bg-emerald-50'
-                                        } ${
-                                          isStepActive
-                                            ? 'ring-2 ring-sky-300 ring-offset-2 -translate-y-0.5 shadow-md'
-                                            : 'hover:ring-1 hover:ring-slate-300'
-                                        }`}
-                                      >
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <span className="text-xs font-semibold text-slate-700">
-                                            {t('chat.batonLabel', { index: timelineIdx + 1 })}
-                                          </span>
-                                          <span
-                                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                                              step.state === 'error'
-                                                ? 'bg-red-100 text-red-700'
-                                                : step.state === 'active'
-                                                  ? 'bg-sky-100 text-sky-700'
-                                                  : step.state === 'waiting'
-                                                    ? 'bg-amber-100 text-amber-700'
-                                                    : 'bg-emerald-100 text-emerald-700'
-                                            }`}
-                                          >
-                                            {step.state === 'error'
-                                              ? t('chat.statusFailed')
-                                              : step.state === 'active'
-                                                ? t('chat.statusActive')
-                                                : step.state === 'waiting'
-                                                  ? t('chat.statusWaiting')
-                                                  : t('chat.statusDone')}
-                                          </span>
-                                          {step.isFinal && (
-                                            <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                                              {t('chat.finalOutputBadge')}
-                                            </span>
-                                          )}
-                                        </div>
-                                        <p className="mt-2 text-sm font-medium text-slate-800">
-                                          {step.label}
-                                        </p>
-                                        <p className="mt-1 text-xs text-slate-500">
-                                          {step.detail}
-                                        </p>
-                                      </button>
-                                      {timelineIdx < relayTimelineSteps.length - 1 && (
-                                        <div className="hidden h-px w-6 bg-slate-300 md:block" />
-                                      )}
-                                    </React.Fragment>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {isCollapsibleRelay && allowRelayCollapse && (
-                          <div className="mb-4 rounded-3xl border border-violet-200 bg-violet-50/70 px-4 py-3 transition-all hover:border-violet-300 hover:bg-violet-50 hover:shadow-sm">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div className="space-y-1">
-                                <div className="flex flex-wrap items-center gap-2 text-xs text-violet-700">
-                                  <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-violet-700 shadow-sm">
-                                    {t('chat.relaySummaryTitle')}
-                                  </span>
-                                  {finalResponderName && (
-                                    <span>{t('chat.finalReply', { name: finalResponderName })}</span>
-                                  )}
-                                  <span>{t('chat.participantCount', { count: participantNames.length })}</span>
-                                  {inspectedStep && (
-                                    <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-1 font-medium text-sky-700 ring-1 ring-sky-200">
-                                      {t('chat.inspectingStep', { index: inspectedStep.groupIndex + 1 })}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-sm text-slate-600">
-                                  {inspectedStep
-                                    ? t('chat.inspectedStepDetail', { index: inspectedStep.groupIndex + 1, label: inspectedStep.label, state: relayStateLabel(inspectedStep.state) })
-                                    : isExpanded
-                                      ? t('chat.relayExpandedDetail')
-                                      : hiddenRelayCount > 0
-                                        ? t('chat.relayCollapsedDetail', { count: hiddenRelayCount })
-                                        : t('chat.relayAllVisible')}
-                                </p>
-                              </div>
-                              <ChatIconButton
-                                label={isExpanded ? t('chat.collapseRelayProcess') : t('chat.expandRelayProcess')}
-                                dataTestId="chat-turn-toggle"
-                                onClick={() => toggleTurnExpanded(turn.id)}
-                                tone="violet"
-                                icon={isExpanded
-                                  ? <FoldVertical className="h-4 w-4" strokeWidth={2} />
-                                  : <UnfoldVertical className="h-4 w-4" strokeWidth={2} />}
-                              />
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="space-y-3">
-                          {turn.userMessage && (
+                          return (
                             <div
-                              ref={(node) => {
-                                historyResultRefs.current[`user:${turn.id}`] = node;
+                              key={turn.id}
+                              ref={(node) => registerVirtualizedTurnElement(turn.id, node)}
+                              data-turn-id={turn.id}
+                              style={{
+                                position: 'absolute',
+                                top: `${turnVirtualizationMetrics.rowOffsets[turnIndex]}px`,
+                                left: 0,
+                                right: 0,
+                                paddingBottom: `${TURN_VIRTUALIZATION_ROW_GAP}px`,
                               }}
-                              className={`ml-auto max-w-[84%] scroll-mt-24 rounded-2xl border border-slate-200 bg-slate-50/80 px-1.5 py-1 ${
-                                activeHistoryResultKey === `user:${turn.id}` ? 'ring-2 ring-sky-300 ring-offset-2' : ''
-                              }`}
                             >
-                              <MessageGroup
-                                messages={[turn.userMessage]}
-                                isUser
-                                formatTime={formatTime}
-                              />
+                              {renderTurnCard(turn, turnIndex)}
                             </div>
-                          )}
-
-                          <div className="space-y-3">
-                            {relayRenderItems.map((item) => {
-                              if (item.type === 'summary') {
-                                return (
-                                  <div
-                                    key={item.key}
-                                    data-testid="chat-turn-collapsed-summary"
-                                    data-turn-id={turn.id}
-                                    data-start-index={String(item.startIndex)}
-                                    data-end-index={String(item.endIndex)}
-                                    data-hidden-count={String(item.hiddenCount)}
-                                    className="group rounded-3xl border border-dashed border-slate-300 bg-slate-100/70 px-4 py-3 transition-all hover:border-slate-400 hover:bg-white hover:shadow-sm"
-                                  >
-                                    <div className="flex flex-wrap items-center justify-between gap-3">
-                                      <div className="space-y-1">
-                                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                                          <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-slate-700 shadow-sm">
-                                            {t('chat.collapsedStableRelay', { count: item.hiddenCount })}
-                                          </span>
-                                          <span>
-                                            {t('chat.batonRange', { start: item.startIndex + 1, end: item.endIndex + 1 })}
-                                          </span>
-                                        </div>
-                                        <p className="text-sm text-slate-600">
-                                          {formatCollapsedRelayLabelsLocalized(item.labels)}
-                                        </p>
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        <ChatIconButton
-                                          label={t('chat.expandRelaySegment')}
-                                          dataTestId="chat-turn-expand-segment"
-                                          onClick={() => toggleRelaySegmentExpanded(turn.id, item.startIndex, item.endIndex)}
-                                          className="group-hover:border-slate-400"
-                                          icon={<ChevronsDown className="h-4 w-4" strokeWidth={2} />}
-                                        />
-                                        <ChatIconButton
-                                          label={t('chat.expandFullRelay')}
-                                          onClick={() => toggleTurnExpanded(turn.id)}
-                                          className="group-hover:border-slate-400"
-                                          icon={<UnfoldVertical className="h-4 w-4" strokeWidth={2} />}
-                                        />
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              }
-
-                              const firstMsg = item.group[0];
-                              const agentName = firstMsg.agentName || getAgentName(firstMsg.agentId);
-                              const relayGroupKey = `${turn.id}:${item.groupIndex}`;
-                              const isHighlighted = highlightedRelayGroupKey === relayGroupKey;
-                              const expandedSegmentAtStart = !isExpanded
-                                ? isRelaySegmentStart(manualExpandedSegments, item.groupIndex)
-                                : null;
-                              const groupExecutionSteps = item.group.reduce<ExecutionStep[]>(
-                                (allSteps, message) => mergeLocalizedExecutionSteps(allSteps, message.executionSteps),
-                                [],
-                              );
-
-                              return (
-                                <div key={item.key} className="space-y-2">
-                                  {expandedSegmentAtStart && (
-                                    <div
-                                      data-testid="chat-turn-expanded-segment"
-                                      className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-sky-200 bg-sky-50/80 px-4 py-3 shadow-sm ring-1 ring-sky-200/70"
-                                    >
-                                      <div className="space-y-1">
-                                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                                          <span className="inline-flex items-center rounded-full bg-white px-2.5 py-1 font-semibold text-sky-700 shadow-sm">
-                                            {t('chat.expandedSegment')}
-                                          </span>
-                                          <span>
-                                            {t('chat.batonRange', { start: expandedSegmentAtStart.startIndex + 1, end: expandedSegmentAtStart.endIndex + 1 })}
-                                          </span>
-                                        </div>
-                                        <p className="text-sm text-slate-600">
-                                          {t('chat.expandedSegmentHint')}
-                                        </p>
-                                      </div>
-                                      <ChatIconButton
-                                        label={t('chat.collapseRelaySegment')}
-                                        onClick={() => toggleRelaySegmentExpanded(
-                                          turn.id,
-                                          expandedSegmentAtStart.startIndex,
-                                          expandedSegmentAtStart.endIndex,
-                                        )}
-                                        icon={<ChevronsUp className="h-4 w-4" strokeWidth={2} />}
-                                      />
-                                    </div>
-                                  )}
-
-                                  <div className="flex justify-start">
-                                  <div
-                                    ref={(node) => {
-                                      relayGroupRefs.current[relayGroupKey] = node;
-                                      historyResultRefs.current[relayGroupKey] = node;
-                                    }}
-                                    data-testid="chat-turn-group"
-                                    data-turn-id={turn.id}
-                                    data-group-index={String(item.groupIndex)}
-                                    data-highlighted={isHighlighted ? 'true' : 'false'}
-                                    className={`max-w-[84%] scroll-mt-24 rounded-2xl border px-1.5 py-1 ${
-                                      firstMsg.isError
-                                        ? 'border-red-200 bg-red-50/50'
-                                        : 'border-slate-200 bg-slate-50/70'
-                                    } ${
-                                      isHighlighted || activeHistoryResultKey === relayGroupKey
-                                        ? 'ring-2 ring-sky-300 ring-offset-2'
-                                        : ''
-                                    }`}
-                                  >
-                                    <MessageGroup
-                                      messages={item.group}
-                                      agentName={agentName}
-                                      agentId={firstMsg.agentId}
-                                      isUser={false}
-                                      formatTime={formatTime}
-                                      onRetryMessage={(message) => handleRetryMessage(message as UIMessage)}
-                                      showRetryPending={turnRetryPending}
-                                    >
-                                      <MessageExecutionCard
-                                        steps={groupExecutionSteps}
-                                        isStreaming={item.group.some((message) => message.isStreaming)}
-                                      />
-                                    </MessageGroup>
-                                  </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </section>
-                    );
-                  })}
+                          );
+                        })
+                      : messageTurns.map((turn, turnIndex) => renderTurnCard(turn, turnIndex))}
+                  </div>
                   
                     <TypingIndicator
                     agentNames={typingAgents

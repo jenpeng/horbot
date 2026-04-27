@@ -205,7 +205,7 @@ await watcher.start()
 1. **创建技能目录**：
 
 ```bash
-mkdir -p skills/my-skill
+mkdir -p .horbot/agents/main/workspace/.horbot-agent/skills/my-skill
 ```
 
 2. **创建 SKILL.md 文件**：

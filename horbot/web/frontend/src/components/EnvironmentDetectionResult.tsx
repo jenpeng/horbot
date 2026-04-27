@@ -112,6 +112,11 @@ const formatBytes = (bytes: number): string => {
   return `${gb.toFixed(2)} GB`;
 };
 
+const formatWorkspaceLabel = (workspacePath: string): string => {
+  const segments = workspacePath.split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) || workspacePath;
+};
+
 const EnvironmentDetectionResult: React.FC<EnvironmentDetectionResultProps> = ({
   data,
   title = '环境检测结果',
@@ -240,9 +245,18 @@ const EnvironmentDetectionResult: React.FC<EnvironmentDetectionResultProps> = ({
               <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-surface-200">
                 <span className="text-sm text-surface-600">路径</span>
                 <span className="text-sm font-mono text-surface-900 truncate max-w-xs" title={data.workspace.path}>
-                  {data.workspace.path}
+                  {formatWorkspaceLabel(data.workspace.path)}
                 </span>
               </div>
+              <details className="rounded-lg border border-surface-200 bg-white p-3">
+                <summary className="cursor-pointer list-none text-xs font-semibold uppercase tracking-wide text-surface-500 marker:hidden">
+                  实际目录
+                </summary>
+                <div className="mt-2 break-all font-mono text-xs text-surface-700">{data.workspace.path}</div>
+                <p className="mt-2 text-xs text-surface-500">
+                  这是当前环境的工作区根目录；各 Agent 的 memory、sessions、skills 会继续写入各自工作区下的 `.horbot-agent/`。
+                </p>
+              </details>
               <div className="flex gap-3">
                 <div className="flex-1 flex items-center justify-between p-3 bg-white rounded-lg border border-surface-200">
                   <span className="text-sm text-surface-600">存在</span>

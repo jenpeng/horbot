@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatPage from './ChatPage';
 import { I18nProvider } from '../contexts/I18nContext';
 import { ToastProvider } from '../contexts/ToastContext';
-import { messages } from '../i18n/messages';
+import zhCNMessages from '../i18n/locales/zh-CN';
 import { ChatStreamError, chatService } from '../services/chat';
 import { useConversationStore } from '../stores/conversationStore';
 import { ConversationType, type Conversation, type Message } from '../types/conversation';
@@ -119,16 +119,6 @@ const seedConversationStore = (conversation: Conversation) => {
   }));
 };
 
-const seedConversationMessages = (conversationId: string, messages: Message[]) => {
-  useConversationStore.setState((state) => ({
-    ...state,
-    messages: {
-      ...state.messages,
-      [conversationId]: messages,
-    },
-  }));
-};
-
 describe('ChatPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -136,6 +126,10 @@ describe('ChatPage', () => {
     MockWebSocket.instances = [];
     window.localStorage.clear();
     Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
       value: vi.fn(),
     });
@@ -151,7 +145,7 @@ describe('ChatPage', () => {
       if (url === '/api/teams') {
         return Promise.resolve(createJsonResponse({ teams: [team] }));
       }
-      if (url === '/api/conversations/dm_partner-agent/messages') {
+      if (url.startsWith('/api/conversations/dm_partner-agent/messages')) {
         return Promise.resolve(createJsonResponse({
           conversation_id: 'dm_partner-agent',
           conversation: {
@@ -164,7 +158,7 @@ describe('ChatPage', () => {
           messages: [],
         }));
       }
-      if (url === '/api/conversations/team_team-a/messages') {
+      if (url.startsWith('/api/conversations/team_team-a/messages')) {
         return Promise.resolve(createJsonResponse({
           conversation_id: 'team_team-a',
           conversation: {
@@ -197,9 +191,9 @@ describe('ChatPage', () => {
     renderWithProviders(<ChatPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Partner Agent')).toBeInTheDocument();
+      expect(screen.getAllByText('Partner Agent').length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/External|外部/).length).toBeGreaterThan(0);
     });
-    expect(screen.getAllByText(/External|外部/).length).toBeGreaterThan(0);
   });
 
   it('passes team-enabled external agents to the team message input mention list', async () => {
@@ -225,6 +219,89 @@ describe('ChatPage', () => {
     );
   });
 
+  it('sticks to the bottom after initial history load completes', async () => {
+    const conversationId = 'dm_agent-a';
+    const scrollToMock = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      value: scrollToMock,
+    });
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [] }));
+      }
+      if (url.startsWith(`/api/conversations/${conversationId}/messages`)) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          conversation: {
+            id: conversationId,
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: [
+            {
+              id: 'user-1',
+              role: 'user',
+              content: 'hello',
+              timestamp: new Date(Date.now() - 60_000).toISOString(),
+            },
+            {
+              id: 'assistant-1',
+              role: 'assistant',
+              content: 'world',
+              timestamp: new Date().toISOString(),
+              metadata: {
+                agent_id: 'agent-a',
+                agent_name: 'Agent A',
+              },
+            },
+          ],
+          page: {
+            oldest_message_id: 'user-1',
+            newest_message_id: 'assistant-1',
+            has_more_before: false,
+            has_more_after: false,
+            total_messages: 2,
+          },
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
+    seedConversationStore({
+      id: conversationId,
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(scrollToMock).toHaveBeenCalled();
+    });
+
+    expect(scrollToMock.mock.calls.some(([arg]) => (
+      typeof arg === 'object'
+      && arg !== null
+      && 'top' in arg
+      && typeof (arg as { top?: number }).top === 'number'
+    ))).toBe(true);
+  });
+
   it('keeps assistant history messages that only contain image files', async () => {
     const remoteUrl = 'https://image.pollinations.ai/prompt/pony?seed=7';
     const fetchMock = vi.mocked(fetch);
@@ -239,7 +316,7 @@ describe('ChatPage', () => {
       if (url === '/api/teams') {
         return Promise.resolve(createJsonResponse({ teams: [] }));
       }
-      if (url === '/api/conversations/dm_agent-a/messages') {
+      if (url.startsWith('/api/conversations/dm_agent-a/messages')) {
         return Promise.resolve(createJsonResponse({
           conversation_id: 'dm_agent-a',
           conversation: {
@@ -307,8 +384,89 @@ describe('ChatPage', () => {
     expect(assistantMessage?.content).toBe('');
   });
 
+  it('keeps assistant history messages that only contain execution steps', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [] }));
+      }
+      if (url.startsWith('/api/conversations/dm_agent-a/messages')) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: 'dm_agent-a',
+          conversation: {
+            id: 'dm_agent-a',
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: [
+            {
+              id: 'assistant-exec-only',
+              role: 'assistant',
+              content: '',
+              timestamp: new Date().toISOString(),
+              execution_steps: [
+                {
+                  id: 'step-restore',
+                  type: 'tool_call',
+                  title: '执行 exec',
+                  status: 'success',
+                  timestamp: new Date().toISOString(),
+                  details: {
+                    toolName: 'exec',
+                  },
+                },
+              ],
+              metadata: {
+                agent_id: 'agent-a',
+                agent_name: 'Agent A',
+              },
+            },
+          ],
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
+    seedConversationStore({
+      id: 'dm_agent-a',
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(messageGroupMock).toHaveBeenCalled();
+    });
+
+    const messageGroupCalls = messageGroupMock.mock.calls as Array<[unknown]>;
+    const matchedCall = messageGroupCalls.find(([props]) => {
+      const messages = (props as { messages?: Message[] }).messages || [];
+      return messages.some((message) => message.id === 'assistant-exec-only');
+    });
+
+    expect(matchedCall).toBeTruthy();
+    const renderedMessages = ((matchedCall?.[0] as { messages?: Message[] })?.messages || []);
+    const assistantMessage = renderedMessages.find((message) => message.id === 'assistant-exec-only');
+    expect(assistantMessage?.executionSteps?.[0]?.id).toBe('step-restore');
+    expect(assistantMessage?.content).toBe('');
+  });
+
   it('provides a localized retry banner message for Chinese chat sessions', () => {
-    expect(messages['zh-CN']['chat.sessionRetryLastMessage']).toBe('上一轮请求失败，可重试。');
+    expect(zhCNMessages['chat.sessionRetryLastMessage']).toBe('上一轮请求失败，可重试。');
   });
 
   it('clears the stale retry banner after a later successful send', async () => {
@@ -413,7 +571,7 @@ describe('ChatPage', () => {
       if (url === '/api/teams') {
         return Promise.resolve(createJsonResponse({ teams: [team] }));
       }
-      if (url === '/api/conversations/dm_agent-a/messages') {
+      if (url.startsWith('/api/conversations/dm_agent-a/messages')) {
         return Promise.resolve(createJsonResponse({
           conversation_id: 'dm_agent-a',
           conversation: {
@@ -477,7 +635,7 @@ describe('ChatPage', () => {
       if (url === '/api/teams') {
         return Promise.resolve(createJsonResponse({ teams: [team] }));
       }
-      if (url === `/api/conversations/${conversationId}/messages`) {
+      if (url.startsWith(`/api/conversations/${conversationId}/messages`)) {
         return Promise.resolve(createJsonResponse({
           conversation_id: conversationId,
           conversation: {
@@ -577,7 +735,7 @@ describe('ChatPage', () => {
       if (url === '/api/teams') {
         return Promise.resolve(createJsonResponse({ teams: [team] }));
       }
-      if (url === `/api/conversations/${conversationId}/messages`) {
+      if (url.startsWith(`/api/conversations/${conversationId}/messages`)) {
         return Promise.resolve(createJsonResponse({
           conversation_id: conversationId,
           conversation: {
@@ -730,7 +888,10 @@ describe('ChatPage', () => {
       expect(streamingAssistant?.executionSteps?.some((step) => step.id === 'step-thinking-first')).toBe(true);
     });
 
-    resolveStream?.();
+    const finishStream = resolveStream as (() => void) | null;
+    if (finishStream) {
+      finishStream();
+    }
   });
 
   it('keeps execution steps visible when websocket steps arrive before agent_start', async () => {
@@ -784,6 +945,164 @@ describe('ChatPage', () => {
       ));
       expect(streamingAssistant?.executionSteps?.some((step) => step.id === 'step-ws-thinking')).toBe(true);
       expect(streamingAssistant?.content).toBe('analyzing websocket work');
+    });
+  });
+
+  it('keeps the latest persisted assistant bubble after reconcile falls back from an empty incremental page', async () => {
+    const conversationId = 'dm_agent-a';
+    const requestId = 'req-reconcile-fallback';
+    const turnId = 'turn-reconcile-fallback';
+    const persistedAssistantMessage = {
+      id: 'history-assistant-final',
+      role: 'assistant',
+      content: '我已恢复第 7 页。现在读取',
+      timestamp: new Date().toISOString(),
+      execution_steps: [
+        {
+          id: 'step-restore',
+          type: 'tool_call',
+          title: '执行 exec',
+          status: 'success',
+          timestamp: new Date().toISOString(),
+          details: {
+            toolName: 'exec',
+          },
+        },
+      ],
+      metadata: {
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: turnId,
+        request_id: requestId,
+      },
+    };
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [] }));
+      }
+      if (url === `/api/conversations/${conversationId}/messages?limit=80&after_id=history-assistant-final`) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          messages: [],
+          page: {
+            oldest_message_id: 'history-user-final',
+            newest_message_id: 'history-assistant-final',
+            has_more_before: false,
+            has_more_after: false,
+            total_messages: 2,
+          },
+        }));
+      }
+      if (url.startsWith(`/api/conversations/${conversationId}/messages`)) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          conversation: {
+            id: conversationId,
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: [
+            {
+              id: 'history-user-final',
+              role: 'user',
+              content: 'hello',
+              timestamp: new Date().toISOString(),
+              metadata: {
+                turn_id: turnId,
+                request_id: requestId,
+              },
+            },
+            persistedAssistantMessage,
+          ],
+          page: {
+            oldest_message_id: 'history-user-final',
+            newest_message_id: 'history-assistant-final',
+            has_more_before: false,
+            has_more_after: false,
+            total_messages: 2,
+          },
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
+    vi.spyOn(chatService, 'streamChat').mockImplementationOnce(async ({ onStateChange, onRequestStart, onChunk }) => {
+      onStateChange?.('connecting');
+      onRequestStart?.(requestId);
+      onChunk({
+        event: 'request_start',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: turnId,
+        message_id: 'stream-assistant-final',
+      });
+      onChunk({
+        event: 'step_start',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: turnId,
+        message_id: 'stream-assistant-final',
+        step_id: 'step-restore',
+        step_type: 'tool_call',
+        title: '执行 exec',
+      });
+      onChunk({
+        event: 'step_complete',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: turnId,
+        message_id: 'stream-assistant-final',
+        step_id: 'step-restore',
+        step_type: 'tool_call',
+        status: 'success',
+        details: {
+          toolName: 'exec',
+        },
+      });
+      onChunk({
+        event: 'request_end',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: turnId,
+        message_id: 'stream-assistant-final',
+        content: '我已恢复第 7 页。现在读取',
+      });
+      onChunk({ event: 'done' });
+    });
+
+    seedConversationStore({
+      id: conversationId,
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-send-button')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-send-button'));
+
+    await waitFor(() => {
+      const conversationMessages = useConversationStore.getState().messages[conversationId] || [];
+      const latestAssistant = conversationMessages.find((message) => message.id === 'history-assistant-final');
+      expect(latestAssistant?.content).toBe('我已恢复第 7 页。现在读取');
+      expect(latestAssistant?.executionSteps?.[0]?.id).toBe('step-restore');
     });
   });
 
@@ -843,6 +1162,40 @@ describe('ChatPage', () => {
       },
     ])).flat();
 
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [externalAgent] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [team] }));
+      }
+      if (url.startsWith(`/api/conversations/${conversationId}/messages`)) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          conversation: {
+            id: conversationId,
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: largeTurnMessages,
+          page: {
+            oldest_message_id: 'user-0',
+            newest_message_id: 'assistant-17',
+            has_more_before: false,
+            has_more_after: false,
+            total_messages: largeTurnMessages.length,
+          },
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
     seedConversationStore({
       id: conversationId,
       type: ConversationType.DM,
@@ -852,7 +1205,6 @@ describe('ChatPage', () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    seedConversationMessages(conversationId, largeTurnMessages);
 
     renderWithProviders(<ChatPage />);
 
@@ -862,5 +1214,632 @@ describe('ChatPage', () => {
 
     expect(screen.getByText('Oversized context')).toBeInTheDocument();
     expect(screen.getByText(/Approx .* tokens .* turns/)).toBeInTheDocument();
+  });
+
+  it('queries the server-side full-history search when the loaded window is partial', async () => {
+    const conversationId = 'dm_agent-a';
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [] }));
+      }
+      if (url.startsWith(`/api/conversations/${conversationId}/messages`)) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          conversation: {
+            id: conversationId,
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: [
+            {
+              id: 'recent-user',
+              role: 'user',
+              content: 'recent question',
+              timestamp: new Date().toISOString(),
+            },
+            {
+              id: 'recent-assistant',
+              role: 'assistant',
+              content: 'recent answer',
+              timestamp: new Date().toISOString(),
+              metadata: {
+                agent_id: 'agent-a',
+                agent_name: 'Agent A',
+                turn_id: 'turn-recent',
+                request_id: 'req-recent',
+              },
+            },
+          ],
+          page: {
+            oldest_message_id: 'recent-user',
+            newest_message_id: 'recent-assistant',
+            has_more_before: true,
+            has_more_after: false,
+            total_messages: 120,
+          },
+        }));
+      }
+      if (url.startsWith(`/api/conversations/${conversationId}/search`)) {
+        if (url.includes('offset=20')) {
+          return Promise.resolve(createJsonResponse({
+            conversation_id: conversationId,
+            matches: [
+              {
+                message_id: 'older-assistant-2',
+                role: 'assistant',
+                preview: 'legacy needle result page 2',
+                agent_id: 'agent-a',
+                agent_name: 'Agent A',
+                timestamp: new Date().toISOString(),
+              },
+            ],
+            total_matches: 2,
+            has_more: false,
+            next_offset: null,
+          }));
+        }
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          matches: [
+            {
+              message_id: 'older-assistant-1',
+              role: 'assistant',
+              preview: 'legacy needle result page 1',
+              agent_id: 'agent-a',
+              agent_name: 'Agent A',
+              timestamp: new Date().toISOString(),
+            },
+          ],
+          total_matches: 2,
+          has_more: true,
+          next_offset: 20,
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
+    seedConversationStore({
+      id: conversationId,
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Search History' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search History' }));
+    const historySearchInput = await screen.findByPlaceholderText('Type keywords to quickly locate messages');
+    fireEvent.change(historySearchInput, {
+      target: { value: 'legacy needle' },
+    });
+
+    await waitFor(() => {
+      expect(vi.mocked(fetch).mock.calls.some(([request]) => {
+        const url = String(request);
+        return url.startsWith(`/api/conversations/${conversationId}/search`)
+          && url.includes('q=legacy+needle')
+          && url.includes('limit=20');
+      })).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Last 7 days' }));
+
+    await waitFor(() => {
+      expect(vi.mocked(fetch).mock.calls.some(([request]) => {
+        const url = String(request);
+        return url.startsWith(`/api/conversations/${conversationId}/search`)
+          && url.includes('q=legacy+needle')
+          && url.includes('since=');
+      })).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Load more full-history results' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load more full-history results' }));
+
+    await waitFor(() => {
+      expect(vi.mocked(fetch).mock.calls.some(([request]) => {
+        const url = String(request);
+        return url.startsWith(`/api/conversations/${conversationId}/search`)
+          && url.includes('offset=20');
+      })).toBe(true);
+    });
+  });
+
+  it('loads around the selected full-history result and jumps to it', async () => {
+    const conversationId = 'dm_agent-a';
+    const scrollIntoViewMock = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [] }));
+      }
+      if (url.includes('around_id=old-assistant')) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          conversation: {
+            id: conversationId,
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: [
+            {
+              id: 'old-user',
+              role: 'user',
+              content: 'Where is the legacy note?',
+              timestamp: new Date(Date.now() - 60_000).toISOString(),
+            },
+            {
+              id: 'old-assistant',
+              role: 'assistant',
+              content: 'legacy keyword answer',
+              timestamp: new Date(Date.now() - 59_000).toISOString(),
+              metadata: {
+                agent_id: 'agent-a',
+                agent_name: 'Agent A',
+                turn_id: 'turn-legacy',
+                request_id: 'req-legacy',
+              },
+            },
+          ],
+          page: {
+            oldest_message_id: 'old-user',
+            newest_message_id: 'old-assistant',
+            has_more_before: true,
+            has_more_after: true,
+            total_messages: 120,
+          },
+        }));
+      }
+      if (url.startsWith(`/api/conversations/${conversationId}/messages`)) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          conversation: {
+            id: conversationId,
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: [
+            {
+              id: 'recent-user',
+              role: 'user',
+              content: 'recent question',
+              timestamp: new Date().toISOString(),
+            },
+            {
+              id: 'recent-assistant',
+              role: 'assistant',
+              content: 'recent answer',
+              timestamp: new Date().toISOString(),
+              metadata: {
+                agent_id: 'agent-a',
+                agent_name: 'Agent A',
+                turn_id: 'turn-recent',
+                request_id: 'req-recent',
+              },
+            },
+          ],
+          page: {
+            oldest_message_id: 'recent-user',
+            newest_message_id: 'recent-assistant',
+            has_more_before: true,
+            has_more_after: false,
+            total_messages: 120,
+          },
+        }));
+      }
+      if (url.startsWith(`/api/conversations/${conversationId}/search`)) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          matches: [
+            {
+              message_id: 'old-assistant',
+              role: 'assistant',
+              preview: 'legacy keyword answer',
+              agent_id: 'agent-a',
+              agent_name: 'Agent A',
+              timestamp: new Date(Date.now() - 59_000).toISOString(),
+            },
+          ],
+          total_matches: 1,
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
+    seedConversationStore({
+      id: conversationId,
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Search History' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search History' }));
+    const historySearchInput = await screen.findByPlaceholderText('Type keywords to quickly locate messages');
+    fireEvent.change(historySearchInput, {
+      target: { value: 'legacy' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('legacy keyword answer')).toBeInTheDocument();
+    });
+
+    const previousScrollCalls = scrollIntoViewMock.mock.calls.length;
+    fireEvent.click(screen.getByText('legacy keyword answer'));
+
+    await waitFor(() => {
+      expect(vi.mocked(fetch).mock.calls.some(([request]) => {
+        const url = String(request);
+        return url.startsWith(`/api/conversations/${conversationId}/messages`)
+          && url.includes('around_id=old-assistant')
+          && url.includes('context_before=20')
+          && url.includes('context_after=20');
+      })).toBe(true);
+    });
+
+    await waitFor(() => {
+      const conversationMessages = useConversationStore.getState().messages[conversationId] || [];
+      expect(conversationMessages.some((message) => message.id === 'old-assistant')).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(scrollIntoViewMock.mock.calls.length).toBeGreaterThan(previousScrollCalls);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Back to latest messages' })).toBeInTheDocument();
+    });
+
+    const latestFetchCountBeforeJump = vi.mocked(fetch).mock.calls.filter(([request]) => {
+      const url = String(request);
+      return url.startsWith(`/api/conversations/${conversationId}/messages`)
+        && !url.includes('around_id=')
+        && !url.includes('before_id=')
+        && !url.includes('after_id=');
+    }).length;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to latest messages' }));
+
+    await waitFor(() => {
+      const latestFetchCount = vi.mocked(fetch).mock.calls.filter(([request]) => {
+        const url = String(request);
+        return url.startsWith(`/api/conversations/${conversationId}/messages`)
+          && !url.includes('around_id=')
+          && !url.includes('before_id=')
+          && !url.includes('after_id=');
+      }).length;
+      expect(latestFetchCount).toBeGreaterThan(latestFetchCountBeforeJump);
+    });
+
+    await waitFor(() => {
+      const conversationMessages = useConversationStore.getState().messages[conversationId] || [];
+      expect(conversationMessages.some((message) => message.id === 'recent-assistant')).toBe(true);
+    });
+  });
+
+  it('refreshes back to the latest history window when a partial window receives newer chat activity', async () => {
+    const conversationId = 'dm_agent-a';
+    let latestWindowRequestCount = 0;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [] }));
+      }
+      if (url.startsWith(`/api/conversations/${conversationId}/messages`)) {
+        if (url.includes('after_id=old-assistant')) {
+          return Promise.resolve(createJsonResponse({
+            conversation_id: conversationId,
+            conversation: {
+              id: conversationId,
+              type: ConversationType.DM,
+              target_id: 'agent-a',
+              name: 'Agent A',
+              agent_ids: ['agent-a'],
+            },
+            messages: [
+              {
+                id: 'mid-user',
+                role: 'user',
+                content: 'middle history question',
+                timestamp: new Date(Date.now() - 15_000).toISOString(),
+              },
+              {
+                id: 'mid-assistant',
+                role: 'assistant',
+                content: 'middle history answer',
+                timestamp: new Date(Date.now() - 14_000).toISOString(),
+                metadata: {
+                  agent_id: 'agent-a',
+                  agent_name: 'Agent A',
+                },
+              },
+            ],
+            page: {
+              oldest_message_id: 'old-user',
+              newest_message_id: 'mid-assistant',
+              has_more_before: true,
+              has_more_after: true,
+              total_messages: 140,
+            },
+          }));
+        }
+
+        latestWindowRequestCount += 1;
+        if (latestWindowRequestCount === 1) {
+          return Promise.resolve(createJsonResponse({
+            conversation_id: conversationId,
+            conversation: {
+              id: conversationId,
+              type: ConversationType.DM,
+              target_id: 'agent-a',
+              name: 'Agent A',
+              agent_ids: ['agent-a'],
+            },
+            messages: [
+              {
+                id: 'old-user',
+                role: 'user',
+                content: 'old history question',
+                timestamp: new Date(Date.now() - 90_000).toISOString(),
+              },
+              {
+                id: 'old-assistant',
+                role: 'assistant',
+                content: 'old history answer',
+                timestamp: new Date(Date.now() - 89_000).toISOString(),
+                metadata: {
+                  agent_id: 'agent-a',
+                  agent_name: 'Agent A',
+                  turn_id: 'turn-old',
+                  request_id: 'req-old',
+                },
+              },
+            ],
+            page: {
+              oldest_message_id: 'old-user',
+              newest_message_id: 'old-assistant',
+              has_more_before: true,
+              has_more_after: true,
+              total_messages: 140,
+            },
+          }));
+        }
+
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          conversation: {
+            id: conversationId,
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: [
+            {
+              id: 'recent-user',
+              role: 'user',
+              content: 'recent question',
+              timestamp: new Date(Date.now() - 2_000).toISOString(),
+            },
+            {
+              id: 'recent-assistant',
+              role: 'assistant',
+              content: 'recent answer',
+              timestamp: new Date(Date.now() - 1_000).toISOString(),
+              metadata: {
+                agent_id: 'agent-a',
+                agent_name: 'Agent A',
+                turn_id: 'turn-recent',
+                request_id: 'req-recent',
+              },
+            },
+          ],
+          page: {
+            oldest_message_id: 'recent-user',
+            newest_message_id: 'recent-assistant',
+            has_more_before: true,
+            has_more_after: false,
+            total_messages: 142,
+          },
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
+    seedConversationStore({
+      id: conversationId,
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      const conversationMessages = useConversationStore.getState().messages[conversationId] || [];
+      expect(conversationMessages.some((message) => message.id === 'old-assistant')).toBe(true);
+    });
+
+    const socket = MockWebSocket.instances[0];
+    expect(socket).toBeTruthy();
+
+    act(() => {
+      socket.emitMessage({
+        session_key: 'web:dm_agent-a',
+        event: 'request_end',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: 'turn-live',
+        message_id: 'assistant-live',
+        content: 'live answer',
+      });
+    });
+
+    await waitFor(() => {
+      const conversationMessages = useConversationStore.getState().messages[conversationId] || [];
+      expect(conversationMessages.some((message) => message.id === 'recent-assistant')).toBe(true);
+    });
+
+    expect(vi.mocked(fetch).mock.calls.some(([request]) => {
+      const url = String(request);
+      return url.startsWith(`/api/conversations/${conversationId}/messages`)
+        && url.includes('after_id=old-assistant');
+    })).toBe(false);
+  });
+
+  it('queues a forced latest refresh instead of reusing an in-flight stale history request', async () => {
+    const conversationId = 'dm_agent-a';
+    let resolveInitialHistory: (() => void) | null = null;
+    let historyRequestCount = 0;
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [] }));
+      }
+      if (url.startsWith(`/api/conversations/${conversationId}/messages`)) {
+        historyRequestCount += 1;
+        if (historyRequestCount === 1) {
+          return new Promise<Response>((resolve) => {
+            resolveInitialHistory = () => resolve(createJsonResponse({
+              conversation_id: conversationId,
+              messages: [
+                {
+                  id: 'stale-assistant',
+                  role: 'assistant',
+                  content: 'stale history answer',
+                  timestamp: new Date(Date.now() - 60_000).toISOString(),
+                  metadata: {
+                    agent_id: 'agent-a',
+                    agent_name: 'Agent A',
+                  },
+                },
+              ],
+              page: {
+                oldest_message_id: 'stale-assistant',
+                newest_message_id: 'stale-assistant',
+                has_more_before: true,
+                has_more_after: true,
+                total_messages: 120,
+              },
+            }));
+          });
+        }
+
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          messages: [
+            {
+              id: 'latest-assistant',
+              role: 'assistant',
+              content: 'latest history answer',
+              timestamp: new Date().toISOString(),
+              metadata: {
+                agent_id: 'agent-a',
+                agent_name: 'Agent A',
+              },
+            },
+          ],
+          page: {
+            oldest_message_id: 'latest-assistant',
+            newest_message_id: 'latest-assistant',
+            has_more_before: true,
+            has_more_after: false,
+            total_messages: 121,
+          },
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
+    seedConversationStore({
+      id: conversationId,
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(historyRequestCount).toBe(1);
+    });
+
+    const agentButton = screen.getAllByRole('button').find((button) => (
+      button.textContent?.includes('Agent A')
+    ));
+    expect(agentButton).toBeTruthy();
+    fireEvent.click(agentButton as HTMLButtonElement);
+
+    act(() => {
+      resolveInitialHistory?.();
+    });
+
+    await waitFor(() => {
+      expect(historyRequestCount).toBeGreaterThan(1);
+    });
+
+    await waitFor(() => {
+      const conversationMessages = useConversationStore.getState().messages[conversationId] || [];
+      expect(conversationMessages.some((message) => message.id === 'latest-assistant')).toBe(true);
+    });
   });
 });

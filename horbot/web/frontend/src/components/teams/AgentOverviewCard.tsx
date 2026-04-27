@@ -1,6 +1,11 @@
 import type { AgentInfo } from '../../pages/teams/types';
 import { useI18n } from '../../contexts/I18nContext';
 
+const formatWorkspaceLabel = (workspacePath: string): string => {
+  const segments = workspacePath.split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) || workspacePath;
+};
+
 interface AgentOverviewCardProps {
   selectedAgent: AgentInfo;
   selectedAgentStatusMeta: {
@@ -34,6 +39,9 @@ const AgentOverviewCard = ({
   onOpenChat,
 }: AgentOverviewCardProps) => {
   const { t } = useI18n();
+  const workspaceHint = selectedAgent.workspace
+    ? t('teams.agentOverview.workspaceHintCustom')
+    : t('teams.agentOverview.workspaceHintDefault');
   return (
   <div className="bg-white rounded-2xl border border-surface-200 p-6 transition-shadow" data-focus-anchor="agent-overview">
     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -141,7 +149,18 @@ const AgentOverviewCard = ({
       )}
       <div>
         <span className="font-semibold text-surface-900">{t('teams.agentOverview.workspaceLabel')}</span>
-        <span className="break-all">{workspacePath}</span>
+        <span>{formatWorkspaceLabel(workspacePath)}</span>
+        <p className="mt-1 text-xs text-surface-500">
+          {workspaceHint}
+        </p>
+        <details className="mt-2 rounded-xl border border-surface-200 bg-white/70 px-3 py-2">
+          <summary className="cursor-pointer list-none text-xs font-medium text-surface-500 marker:hidden">
+            查看完整路径
+          </summary>
+          <code className="mt-2 block break-all font-mono text-xs text-surface-700">
+            {workspacePath}
+          </code>
+        </details>
       </div>
       <div className="mt-2">
         <span className="font-semibold text-surface-900">{t('teams.agentOverview.systemPromptLabel')}</span>

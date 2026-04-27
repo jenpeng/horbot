@@ -171,13 +171,36 @@ describe('SkillsPage', () => {
     });
   });
 
-  it('groups system and custom skills and shows custom origin badges', async () => {
+  it('switches between custom and system skill tabs', async () => {
     renderWithI18n(<SkillsPage />);
 
-    expect(await screen.findByText('System Skills (1)')).toBeInTheDocument();
-    expect(screen.getByText('Custom Skills (1)')).toBeInTheDocument();
-    expect(screen.getByText('System')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Custom (1)' })).toBeInTheDocument();
+    expect(screen.getByText('research-helper')).toBeInTheDocument();
     expect(screen.getByText('Manual')).toBeInTheDocument();
+    expect(screen.queryByText('excel-xlsx')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'System (1)' }));
+
+    expect(await screen.findByText('excel-xlsx')).toBeInTheDocument();
+    expect(screen.getByText('System')).toBeInTheDocument();
+  });
+
+  it('searches only within the active skill tab and can clear the query', async () => {
+    renderWithI18n(<SkillsPage />);
+
+    const searchInput = await screen.findByPlaceholderText('Search custom skills...');
+    fireEvent.change(searchInput, { target: { value: 'excel' } });
+
+    expect(screen.queryByText('research-helper')).not.toBeInTheDocument();
+    expect(screen.queryByText('excel-xlsx')).not.toBeInTheDocument();
+    expect(screen.getByText('No skills found')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'System (1)' }));
+    expect(await screen.findByPlaceholderText('Search system skills...')).toBeInTheDocument();
+    expect(await screen.findByText('excel-xlsx')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(await screen.findByText('excel-xlsx')).toBeInTheDocument();
   });
 
   it('manually consolidates generated skills and refreshes the list', async () => {
@@ -240,14 +263,17 @@ describe('SkillsPage', () => {
     expect(await screen.findByText('Skill "research-helper" promoted to builtin')).toBeInTheDocument();
   });
 
-  it('shows the skill path in the detail modal', async () => {
+  it('shows the skill storage path and source hint in the detail modal', async () => {
     renderWithI18n(<SkillsPage />);
 
     expect(await screen.findByText('research-helper')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('research-helper'));
 
-    expect(await screen.findByText('Path')).toBeInTheDocument();
+    expect(await screen.findByText('Storage Path')).toBeInTheDocument();
     expect(screen.getByText('/tmp/research-helper')).toBeInTheDocument();
+    expect(
+      screen.getByText('Custom skills are stored per agent under workspace/.horbot-agent/skills.'),
+    ).toBeInTheDocument();
   });
 });

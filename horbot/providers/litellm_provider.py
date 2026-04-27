@@ -490,9 +490,10 @@ class LiteLLMProvider(LLMProvider):
                     
                     # Add images and audio to the message
                     for file_info in files:
+                        stored_filename = file_info.get("stored_filename") or file_info.get("filename", "")
                         if file_info.get("category") == "image":
                             # Read image file and convert to base64
-                            file_path = Path(self.upload_dir) / file_info.get("filename", "")
+                            file_path = Path(self.upload_dir) / stored_filename
                             logger.debug(f"Looking for image file: {file_path}")
                             if file_path.exists():
                                 with open(file_path, "rb") as f:
@@ -504,12 +505,12 @@ class LiteLLMProvider(LLMProvider):
                                         "url": f"data:{mime_type};base64,{image_data}"
                                     }
                                 })
-                                logger.debug(f"Added image to message: {file_info.get('filename')}")
+                                logger.debug(f"Added image to message: {file_info.get('original_name') or stored_filename}")
                             else:
                                 logger.warning(f"Image file not found: {file_path}")
                         elif file_info.get("category") == "audio":
                             # Read audio file and convert to base64
-                            file_path = Path(self.upload_dir) / file_info.get("filename", "")
+                            file_path = Path(self.upload_dir) / stored_filename
                             logger.debug(f"Looking for audio file: {file_path}")
                             if file_path.exists():
                                 with open(file_path, "rb") as f:
@@ -524,7 +525,7 @@ class LiteLLMProvider(LLMProvider):
                                         "format": audio_format
                                     }
                                 })
-                                logger.debug(f"Added audio to message: {file_info.get('filename')}")
+                                logger.debug(f"Added audio to message: {file_info.get('original_name') or stored_filename}")
                             else:
                                 logger.warning(f"Audio file not found: {file_path}")
                     

@@ -64,6 +64,7 @@ const SkillsPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'skills' | 'mcp'>('skills');
+  const [skillsView, setSkillsView] = useState<'all' | 'system' | 'custom'>('custom');
   const [selectedSkill, setSelectedSkill] = useState<SkillDetail | null>(null);
   const [editor, setEditor] = useState<SkillEditorState>({
     isOpen: false,
@@ -126,22 +127,43 @@ const SkillsPage: React.FC = () => {
     setTimeout(() => setNotification(null), 3000);
   };
 
+  const systemSkills = useMemo(
+    () => skills.filter((skill) => (skill.source_group ?? (skill.source === 'builtin' ? 'system' : 'custom')) === 'system'),
+    [skills],
+  );
+  const customSkills = useMemo(
+    () => skills.filter((skill) => (skill.source_group ?? (skill.source === 'builtin' ? 'system' : 'custom')) === 'custom'),
+    [skills],
+  );
+  const scopedSkills = useMemo(() => {
+    if (skillsView === 'system') return systemSkills;
+    if (skillsView === 'custom') return customSkills;
+    return skills;
+  }, [customSkills, skills, skillsView, systemSkills]);
   const filteredSkills = useMemo(() => {
-    if (!searchQuery) return skills;
+    if (!searchQuery) return scopedSkills;
     const query = searchQuery.toLowerCase();
-    return skills.filter(skill => 
+    return scopedSkills.filter(skill =>
       skill.name.toLowerCase().includes(query) ||
       skill.description.toLowerCase().includes(query)
     );
-  }, [skills, searchQuery]);
-
-  const systemSkills = useMemo(
-    () => filteredSkills.filter((skill) => (skill.source_group ?? (skill.source === 'builtin' ? 'system' : 'custom')) === 'system'),
-    [filteredSkills],
+  }, [scopedSkills, searchQuery]);
+  const visibleSelectedCount = useMemo(
+    () => filteredSkills.filter((skill) => selectedSkills.has(skill.name)).length,
+    [filteredSkills, selectedSkills],
   );
-  const customSkills = useMemo(
-    () => filteredSkills.filter((skill) => (skill.source_group ?? (skill.source === 'builtin' ? 'system' : 'custom')) === 'custom'),
-    [filteredSkills],
+  const searchPlaceholder = useMemo(() => {
+    if (skillsView === 'system') return t('skills.searchPlaceholderSystem');
+    if (skillsView === 'custom') return t('skills.searchPlaceholderCustom');
+    return t('skills.searchPlaceholderAll');
+  }, [skillsView, t]);
+  const skillViewTabs = useMemo(
+    () => [
+      { id: 'custom', label: t('skills.viewCustom', { count: customSkills.length }) },
+      { id: 'system', label: t('skills.viewSystem', { count: systemSkills.length }) },
+      { id: 'all', label: t('skills.viewAll', { count: skills.length }) },
+    ],
+    [customSkills.length, skills.length, systemSkills.length, t],
   );
 
   const getSkillOriginLabel = (skill: Skill) => {
@@ -152,6 +174,16 @@ const SkillsPage: React.FC = () => {
       return t('skills.badge.agentSource', { agentId: skill.source_origin_agent_id });
     }
     return t('skills.badge.manual');
+  };
+
+  const getSkillPathHint = (skill: SkillDetail) => {
+    if (skill.source === 'builtin' || skill.source_origin_kind === 'builtin') {
+      return t('skills.detail.pathHintSystem');
+    }
+    if (skill.source_origin_kind === 'agent' && skill.source_origin_agent_id) {
+      return t('skills.detail.pathHintAgent', { agentId: skill.source_origin_agent_id });
+    }
+    return t('skills.detail.pathHintCustom');
   };
 
   const renderSkillCards = (skillsToRender: Skill[]) => (
@@ -601,11 +633,14 @@ const SkillsPage: React.FC = () => {
   };
 
   const selectAllSkills = () => {
-    if (selectedSkills.size === filteredSkills.length) {
-      setSelectedSkills(new Set());
+    const visibleSkillNames = filteredSkills.map((skill) => skill.name);
+    const nextSelected = new Set(selectedSkills);
+    if (visibleSelectedCount === filteredSkills.length) {
+      visibleSkillNames.forEach((skillName) => nextSelected.delete(skillName));
     } else {
-      setSelectedSkills(new Set(filteredSkills.map(s => s.name)));
+      visibleSkillNames.forEach((skillName) => nextSelected.add(skillName));
     }
+    setSelectedSkills(nextSelected);
   };
 
   const openMcpEditor = (name?: string, config?: MCPServerConfig) => {
@@ -878,8 +913,21 @@ const SkillsPage: React.FC = () => {
         {activeTab === 'skills' && (
           <div className="space-y-4">
             {skills.length > 0 && (
-              <div className="flex items-center gap-4 p-4 bg-white rounded-xl border border-surface-200 shadow-sm">
-                <div className="relative flex-1 max-w-md">
+              <div className="space-y-4 p-4 bg-white rounded-xl border border-surface-200 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <Tabs
+                    tabs={skillViewTabs}
+                    activeTab={skillsView}
+                    onChange={(id) => setSkillsView(id as 'all' | 'system' | 'custom')}
+                    variant="pills"
+                    className="flex-wrap"
+                  />
+                  <div className="text-sm text-surface-500">
+                    {t('skills.resultsCount', { count: filteredSkills.length, total: scopedSkills.length })}
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="relative flex-1 max-w-md">
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
@@ -887,38 +935,48 @@ const SkillsPage: React.FC = () => {
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder={t('skills.searchPlaceholder')}
+                    placeholder={searchPlaceholder}
                     className="w-full pl-10 pr-4 py-2 bg-surface-50 border border-surface-200 rounded-lg text-surface-900 placeholder-surface-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 transition-all"
                   />
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={selectAllSkills}
-                    className="text-sm text-primary-600 hover:text-primary-700 font-medium"
-                  >
-                    {selectedSkills.size === filteredSkills.length ? t('skills.deselectAll') : t('skills.selectAll')}
-                  </button>
-                  {selectedSkills.size > 0 && (
-                    <>
-                      <span className="text-surface-300">|</span>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => handleBatchToggle(true)}
-                        disabled={saving}
-                      >
-                        {t('skills.batchEnable', { count: selectedSkills.size })}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => handleBatchToggle(false)}
-                        disabled={saving}
-                      >
-                        {t('skills.batchDisable', { count: selectedSkills.size })}
-                      </Button>
-                    </>
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-surface-500 transition-colors hover:text-surface-800"
+                    >
+                      {t('skills.clearSearch')}
+                    </button>
                   )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={selectAllSkills}
+                      className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                    >
+                      {visibleSelectedCount === filteredSkills.length ? t('skills.deselectAll') : t('skills.selectAll')}
+                    </button>
+                    {selectedSkills.size > 0 && (
+                      <>
+                        <span className="text-surface-300">|</span>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleBatchToggle(true)}
+                          disabled={saving}
+                        >
+                          {t('skills.batchEnable', { count: selectedSkills.size })}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleBatchToggle(false)}
+                          disabled={saving}
+                        >
+                          {t('skills.batchDisable', { count: selectedSkills.size })}
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -945,29 +1003,24 @@ const SkillsPage: React.FC = () => {
                 </Button>
               </div>
             ) : (
-              <div className="space-y-8">
-                {systemSkills.length > 0 && (
-                  <section className="space-y-4">
-                    <div className="flex items-end justify-between gap-4">
-                      <div>
-                        <h3 className="text-lg font-semibold text-surface-900">{t('skills.section.system', { count: systemSkills.length })}</h3>
-                        <p className="text-sm text-surface-600">{t('skills.section.systemSubtitle')}</p>
-                      </div>
-                    </div>
-                    {renderSkillCards(systemSkills)}
-                  </section>
-                )}
-                {customSkills.length > 0 && (
-                  <section className="space-y-4">
-                    <div className="flex items-end justify-between gap-4">
-                      <div>
-                        <h3 className="text-lg font-semibold text-surface-900">{t('skills.section.custom', { count: customSkills.length })}</h3>
-                        <p className="text-sm text-surface-600">{t('skills.section.customSubtitle')}</p>
-                      </div>
-                    </div>
-                    {renderSkillCards(customSkills)}
-                  </section>
-                )}
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-surface-900">
+                    {skillsView === 'system'
+                      ? t('skills.section.system', { count: systemSkills.length })
+                      : skillsView === 'custom'
+                        ? t('skills.section.custom', { count: customSkills.length })
+                        : t('skills.section.all', { count: skills.length })}
+                  </h3>
+                  <p className="text-sm text-surface-600">
+                    {skillsView === 'system'
+                      ? t('skills.section.systemSubtitle')
+                      : skillsView === 'custom'
+                        ? t('skills.section.customSubtitle')
+                        : t('skills.section.allSubtitle')}
+                  </p>
+                </div>
+                {renderSkillCards(filteredSkills)}
               </div>
             )}
           </div>
@@ -1158,6 +1211,9 @@ const SkillsPage: React.FC = () => {
                     <code className="block font-mono text-xs text-surface-700 break-all">
                       {selectedSkill.path}
                     </code>
+                    <p className="mt-3 text-xs text-surface-500">
+                      {getSkillPathHint(selectedSkill)}
+                    </p>
                   </div>
                 </div>
 

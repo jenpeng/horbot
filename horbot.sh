@@ -99,7 +99,6 @@ ensure_dirs() {
     mkdir -p "$DATA_ROOT/data/memories"
     mkdir -p "$DATA_ROOT/data/cron"
     mkdir -p "$DATA_ROOT/data/plans"
-    mkdir -p "$MAIN_WORKSPACE_DIR/skills"
     mkdir -p "$MAIN_WORKSPACE_DIR/scripts"
 }
 

@@ -1024,6 +1024,10 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             return None
 
     @staticmethod
+    def _resolve_uploaded_file_storage_name(file_info: dict[str, Any]) -> str:
+        return str(file_info.get("stored_filename") or file_info.get("filename") or "").strip()
+
+    @staticmethod
     def _resolve_document_label(file_info: dict[str, Any]) -> str:
         mime_type = str(file_info.get("mime_type") or "").lower()
         original_name = str(file_info.get("original_name") or file_info.get("filename") or "").lower()
@@ -1082,7 +1086,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 continue
 
             if category in {"image", "audio"}:
-                file_path = self._resolve_uploaded_file_path(str(file_info.get("filename") or ""))
+                file_path = self._resolve_uploaded_file_path(self._resolve_uploaded_file_storage_name(file_info))
                 if file_path and file_path.is_file():
                     try:
                         raw_data = base64.b64encode(file_path.read_bytes()).decode()

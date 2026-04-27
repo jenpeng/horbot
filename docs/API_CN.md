@@ -1208,7 +1208,7 @@ curl -X POST http://localhost:8000/api/skills/import \
 ```json
 {
   "name": "demo-skill",
-  "path": "/abs/path/skills/demo-skill/SKILL.md",
+  "path": "/abs/path/.horbot/agents/main/workspace/.horbot-agent/skills/demo-skill/SKILL.md",
   "message": "Skill 'demo-skill' imported successfully",
   "files": ["SKILL.md", "references/guide.md"],
   "description": "Demo packaged skill",

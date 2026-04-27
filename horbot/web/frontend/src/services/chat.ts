@@ -88,6 +88,7 @@ export interface UploadedFile {
   file_id: string;
   filename: string;
   original_name: string;
+  stored_filename?: string;
   mime_type: string;
   size: number;
   category: string;

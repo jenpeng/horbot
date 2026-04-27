@@ -75,6 +75,7 @@ from horbot.utils.bootstrap import (
     upsert_markdown_section,
 )
 from horbot.security.runtime_guard import inspect_user_input
+from horbot.utils.helpers import ensure_dir, safe_filename
 from pydantic import BaseModel, Field
 from pydantic.alias_generators import to_camel
 from pathlib import Path
@@ -1968,6 +1969,250 @@ def _load_merged_session_messages(session_key: str, managers: list[SessionManage
     return _merge_history_messages(message_groups)
 
 
+DEFAULT_CONVERSATION_HISTORY_LIMIT = 80
+MAX_CONVERSATION_HISTORY_LIMIT = 200
+DEFAULT_CONVERSATION_AROUND_CONTEXT = 20
+MAX_CONVERSATION_AROUND_CONTEXT = 100
+DEFAULT_CONVERSATION_SEARCH_LIMIT = 20
+MAX_CONVERSATION_SEARCH_LIMIT = 100
+
+
+def _clamp_history_limit(limit: int | None) -> int:
+    if limit is None:
+        return DEFAULT_CONVERSATION_HISTORY_LIMIT
+    return max(1, min(int(limit), MAX_CONVERSATION_HISTORY_LIMIT))
+
+
+def _clamp_history_context(value: int | None) -> int:
+    if value is None:
+        return DEFAULT_CONVERSATION_AROUND_CONTEXT
+    return max(0, min(int(value), MAX_CONVERSATION_AROUND_CONTEXT))
+
+
+def _clamp_conversation_search_limit(limit: int | None) -> int:
+    if limit is None:
+        return DEFAULT_CONVERSATION_SEARCH_LIMIT
+    return max(1, min(int(limit), MAX_CONVERSATION_SEARCH_LIMIT))
+
+
+def _find_history_message_position(messages: list[dict[str, Any]], message_id: str | None) -> int | None:
+    if not message_id:
+        return None
+
+    for index, message in enumerate(messages):
+        resolved_message_id = message.get("id") or ensure_history_message_id(message)
+        if resolved_message_id == message_id:
+            return index
+    return None
+
+
+def _slice_history_window(
+    messages: list[dict[str, Any]],
+    *,
+    limit: int,
+    before_id: str | None = None,
+    after_id: str | None = None,
+    around_id: str | None = None,
+    context_before: int | None = None,
+    context_after: int | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    total_messages = len(messages)
+    if total_messages == 0:
+        return [], {
+            "limit": limit,
+            "returned_messages": 0,
+            "total_messages": 0,
+            "has_more_before": False,
+            "has_more_after": False,
+            "oldest_message_id": None,
+            "newest_message_id": None,
+        }
+
+    start = 0
+    end = total_messages
+    anchor_index = None
+
+    if around_id:
+        anchor_index = _find_history_message_position(messages, around_id)
+        if anchor_index is None:
+            start = max(0, total_messages - limit)
+            end = total_messages
+        else:
+            safe_before = _clamp_history_context(context_before)
+            safe_after = _clamp_history_context(context_after)
+            start = max(0, anchor_index - safe_before)
+            end = min(total_messages, anchor_index + safe_after + 1)
+    elif after_id:
+        after_index = _find_history_message_position(messages, after_id)
+        if after_index is None:
+            start = total_messages
+            end = total_messages
+        else:
+            start = min(total_messages, after_index + 1)
+            end = min(total_messages, start + limit)
+    elif before_id:
+        before_index = _find_history_message_position(messages, before_id)
+        end = before_index if before_index is not None else total_messages
+        start = max(0, end - limit)
+    else:
+        end = total_messages
+        start = max(0, end - limit)
+
+    window = messages[start:end]
+    oldest_message_id = ensure_history_message_id(window[0]) if window else None
+    newest_message_id = ensure_history_message_id(window[-1]) if window else None
+
+    return window, {
+        "limit": limit,
+        "returned_messages": len(window),
+        "total_messages": total_messages,
+        "has_more_before": start > 0,
+        "has_more_after": end < total_messages,
+        "oldest_message_id": oldest_message_id,
+        "newest_message_id": newest_message_id,
+        "anchor_message_id": around_id if anchor_index is not None else None,
+    }
+
+
+def _normalize_history_message_for_api(message: dict[str, Any]) -> dict[str, Any]:
+    cleaned_msg = dict(message)
+    cleaned_msg["id"] = ensure_history_message_id(cleaned_msg)
+    if cleaned_msg.get("role") == "assistant":
+        normalized_content, normalized_files = _normalize_saved_assistant_content_and_files(
+            cleaned_msg.get("content"),
+            cleaned_msg.get("files"),
+        )
+        cleaned_msg["content"] = normalized_content
+        if normalized_files:
+            cleaned_msg["files"] = normalized_files
+        else:
+            cleaned_msg.pop("files", None)
+    elif "content" in cleaned_msg and isinstance(cleaned_msg["content"], str):
+        cleaned_msg["content"] = clean_message_content(cleaned_msg["content"])
+    return cleaned_msg
+
+
+def _is_displayable_history_message(message: dict[str, Any]) -> bool:
+    if message.get("_type") == "metadata":
+        return False
+    if message.get("role") == "tool":
+        return False
+
+    content = message.get("content")
+    has_content = isinstance(content, str) and bool(content.strip())
+    has_tool_calls = isinstance(message.get("tool_calls"), list) and bool(message.get("tool_calls"))
+    has_files = isinstance(message.get("files"), list) and bool(message.get("files"))
+    has_execution_steps = isinstance(message.get("execution_steps"), list) and bool(message.get("execution_steps"))
+
+    if not has_content and not has_tool_calls and not has_files and not has_execution_steps:
+        return False
+    if has_content and isinstance(content, str) and content.startswith("Message sent to "):
+        return False
+    return True
+
+
+def _prepare_conversation_history_messages(raw_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    prepared_messages: list[dict[str, Any]] = []
+    for raw_message in raw_messages:
+        normalized_message = _normalize_history_message_for_api(raw_message)
+        if not _is_displayable_history_message(normalized_message):
+            continue
+        prepared_messages.append(normalized_message)
+    return prepared_messages
+
+
+def _build_history_search_preview(content: str, query: str, *, radius: int = 56) -> str:
+    normalized_content = re.sub(r"\s+", " ", content or "").strip()
+    normalized_query = re.sub(r"\s+", " ", query or "").strip()
+    if not normalized_content:
+        return ""
+    if not normalized_query:
+        return normalized_content[: radius * 2]
+
+    content_folded = normalized_content.casefold()
+    query_folded = normalized_query.casefold()
+    match_index = content_folded.find(query_folded)
+    if match_index < 0:
+        return normalized_content[: radius * 2]
+
+    start = max(0, match_index - radius)
+    end = min(len(normalized_content), match_index + len(normalized_query) + radius)
+    preview = normalized_content[start:end].strip()
+    if start > 0:
+        preview = f"...{preview}"
+    if end < len(normalized_content):
+        preview = f"{preview}..."
+    return preview
+
+
+def _parse_optional_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _resolve_conversation_for_history(conv_id: str):
+    from horbot.conversation import get_conversation_manager, ConversationType
+
+    conv_manager = get_conversation_manager()
+    conv = conv_manager.get(conv_id)
+    if conv:
+        return conv
+
+    conv_type, target_id = conv_manager.parse_id(conv_id)
+    if conv_type == ConversationType.DM:
+        from horbot.agent.manager import get_agent_manager
+        from horbot.external_agents.manager import get_external_agent_manager
+
+        agent_manager = get_agent_manager()
+        agent = agent_manager.get_agent(target_id)
+        if agent:
+            return conv_manager.get_or_create_dm(target_id, agent.name)
+
+        external_agent = get_external_agent_manager().get_external_agent(target_id)
+        if external_agent:
+            return conv_manager.get_or_create_dm(target_id, external_agent.name)
+    elif conv_type == ConversationType.TEAM:
+        from horbot.team.manager import get_team_manager
+
+        team_manager = get_team_manager()
+        team = team_manager.get_team(target_id)
+        if team:
+            return conv_manager.get_or_create_team(target_id, team.name, team.members)
+
+    return None
+
+
+def _load_conversation_raw_messages(conv) -> list[dict[str, Any]]:
+    from horbot.conversation import ConversationType
+    from horbot.session.manager import SessionManager
+
+    candidate_managers: list[SessionManager] = []
+    if conv.type == ConversationType.TEAM:
+        candidate_managers = _team_history_session_managers(conv.target_id)
+    elif conv.type == ConversationType.DM:
+        from horbot.agent.manager import get_agent_manager
+
+        agent_manager = get_agent_manager()
+        agent = agent_manager.get_agent(conv.target_id)
+        if agent is not None:
+            session_manager = SessionManager(workspace=agent.get_sessions_dir())
+            candidate_managers = [
+                get_session_manager(),
+                *_legacy_agent_session_managers(agent),
+                session_manager,
+            ]
+        else:
+            candidate_managers = [get_session_manager()]
+    else:
+        candidate_managers = [get_session_manager()]
+
+    return _load_merged_session_messages(f"web:{conv.id}", candidate_managers)
+
+
 def _find_session_message_index(
     session,
     *,
@@ -3573,6 +3818,7 @@ class UploadResponse(BaseModel):
     file_id: str
     filename: str
     original_name: str
+    stored_filename: Optional[str] = None
     mime_type: str
     size: int
     category: str
@@ -3595,6 +3841,92 @@ def _build_preview_url(file_id: str, mime_type: str, category: str) -> Optional[
     return None
 
 
+def _get_upload_metadata_dir() -> Path:
+    return ensure_dir(_get_upload_dir() / ".meta")
+
+
+def _upload_metadata_path(file_id: str) -> Path:
+    return _get_upload_metadata_dir() / f"{file_id}.json"
+
+
+def _resolve_display_filename(name: str | None, fallback_stem: str = "attachment") -> str:
+    candidate = str(name or "").strip()
+    if not candidate:
+        candidate = fallback_stem
+    safe_name = safe_filename(Path(candidate).name) or fallback_stem
+    stem = Path(safe_name).stem.strip() or fallback_stem
+    suffix = Path(safe_name).suffix
+    return f"{stem}{suffix}"
+
+
+def _dedupe_display_filename(name: str, seen_names: set[str]) -> str:
+    candidate = name
+    stem = Path(name).stem or "attachment"
+    suffix = Path(name).suffix
+    index = 2
+    normalized_candidate = candidate.casefold()
+    while normalized_candidate in seen_names:
+        candidate = f"{stem} ({index}){suffix}"
+        normalized_candidate = candidate.casefold()
+        index += 1
+    seen_names.add(normalized_candidate)
+    return candidate
+
+
+def _write_upload_metadata(
+    *,
+    file_id: str,
+    stored_filename: str,
+    original_name: str,
+    mime_type: str,
+    size: int,
+    category: str,
+) -> None:
+    metadata_path = _upload_metadata_path(file_id)
+    metadata = {
+        "file_id": file_id,
+        "stored_filename": stored_filename,
+        "original_name": original_name,
+        "mime_type": mime_type,
+        "size": size,
+        "category": category,
+    }
+    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+
+
+def _read_upload_metadata(file_id: str) -> dict[str, Any] | None:
+    metadata_path = _upload_metadata_path(file_id)
+    if not metadata_path.is_file():
+        return None
+    try:
+        data = json.loads(metadata_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _resolve_uploaded_file_by_id(file_id: str) -> tuple[Path, dict[str, Any] | None]:
+    upload_dir = _get_upload_dir()
+    metadata = _read_upload_metadata(file_id)
+    stored_filename = str((metadata or {}).get("stored_filename") or "").strip()
+    if stored_filename:
+        candidate = upload_dir / stored_filename
+        if candidate.is_file():
+            return candidate, metadata
+
+    matching_files = [
+        path for path in upload_dir.glob(f"{file_id}.*")
+        if path.is_file()
+    ]
+    if not matching_files:
+        raise HTTPException(status_code=404, detail="File not found")
+    return matching_files[0], metadata
+
+
+def _resolve_storage_filename(file_info: dict[str, Any]) -> str:
+    return str(file_info.get("stored_filename") or file_info.get("filename") or "").strip()
+
+
 def _build_upload_response_for_path(
     stored_path: Path,
     *,
@@ -3606,8 +3938,9 @@ def _build_upload_response_for_path(
     extracted_text = _extract_document_content(stored_path, mime_type) if category == "document" else None
     return UploadResponse(
         file_id=file_id,
-        filename=stored_path.name,
+        filename=original_name,
         original_name=original_name,
+        stored_filename=stored_path.name,
         mime_type=mime_type,
         size=stored_path.stat().st_size,
         category=category,
@@ -3637,6 +3970,16 @@ def _import_local_media_files(media: list[str] | None) -> list[dict[str, Any]]:
         file_id = str(uuid.uuid4())
         stored_path = upload_dir / f"{file_id}{source_path.suffix}"
         shutil.copy2(source_path, stored_path)
+        mime_type = mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+        category = _get_file_category(mime_type)
+        _write_upload_metadata(
+            file_id=file_id,
+            stored_filename=stored_path.name,
+            original_name=source_path.name,
+            mime_type=mime_type,
+            size=stored_path.stat().st_size,
+            category=category,
+        )
         response = _build_upload_response_for_path(
             stored_path,
             file_id=file_id,
@@ -3756,6 +4099,7 @@ def _clear_remote_image_cache() -> dict[str, Any]:
         except OSError:
             pass
         path.unlink(missing_ok=True)
+        _upload_metadata_path(path.stem).unlink(missing_ok=True)
         deleted_count += 1
 
     return {
@@ -3816,6 +4160,14 @@ def _cache_remote_image_file(url: str, index: int) -> dict[str, Any] | None:
                     handle.write(chunk)
             temp_path.replace(stored_path)
             original_name = f"{Path(guessed_original_name).stem}{extension}"
+            _write_upload_metadata(
+                file_id=file_id,
+                stored_filename=stored_path.name,
+                original_name=original_name,
+                mime_type=content_type,
+                size=bytes_written,
+                category="image",
+            )
             logger.info("[ChatAPI] Cached remote image {} -> {}", url, stored_path.name)
             return _build_upload_response_for_path(
                 stored_path,
@@ -3859,7 +4211,12 @@ def _strip_standalone_remote_image_url_lines(content: str, urls: list[str]) -> s
     return normalized.strip()
 
 
-def _build_remote_image_files(urls: list[str], existing_files: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+def _build_remote_image_files(
+    urls: list[str],
+    existing_files: list[dict[str, Any]] | None = None,
+    *,
+    cache_remote: bool = True,
+) -> list[dict[str, Any]]:
     files: list[dict[str, Any]] = []
     seen_urls = {
         str((item or {}).get("preview_url") or (item or {}).get("url") or "").strip()
@@ -3873,11 +4230,12 @@ def _build_remote_image_files(urls: list[str], existing_files: list[dict[str, An
         remote_file_id = _remote_image_file_id(url)
         if url in seen_urls or remote_file_id in seen_file_ids:
             continue
-        cached_file = _cache_remote_image_file(url, index)
-        if cached_file:
-            files.append(cached_file)
-            seen_file_ids.add(remote_file_id)
-            continue
+        if cache_remote:
+            cached_file = _cache_remote_image_file(url, index)
+            if cached_file:
+                files.append(cached_file)
+                seen_file_ids.add(remote_file_id)
+                continue
         filename, original_name, mime_type = _guess_remote_image_file_name(url, index)
         files.append({
             "file_id": remote_file_id,
@@ -3913,7 +4271,11 @@ def _normalize_saved_assistant_content_and_files(
     normalized_files = list(files or [])
     remote_image_urls = _extract_remote_image_urls(cleaned_content)
     if remote_image_urls:
-        normalized_files.extend(_build_remote_image_files(remote_image_urls, normalized_files))
+        normalized_files.extend(_build_remote_image_files(
+            remote_image_urls,
+            normalized_files,
+            cache_remote=False,
+        ))
         cleaned_content = _strip_standalone_remote_image_url_lines(cleaned_content, remote_image_urls)
     return cleaned_content, normalized_files
 
@@ -4561,6 +4923,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
     """Upload multiple files."""
     upload_dir = _get_upload_dir()
     results = []
+    seen_display_names: set[str] = set()
     
     for file in files:
         # Validate file size
@@ -4573,13 +4936,17 @@ async def upload_files(files: List[UploadFile] = File(...)):
         
         # Generate file ID and determine mime type
         file_id = str(uuid.uuid4())
-        mime_type = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
+        original_name = _dedupe_display_filename(
+            _resolve_display_filename(file.filename, fallback_stem="uploaded-file"),
+            seen_display_names,
+        )
+        mime_type = file.content_type or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
         category = _get_file_category(mime_type)
         
-        # Generate unique filename
-        ext = Path(file.filename).suffix if file.filename else ""
-        safe_filename = f"{file_id}{ext}"
-        file_path = upload_dir / safe_filename
+        # Keep storage filename opaque/unique, but preserve the original name for UI/history/download.
+        ext = Path(original_name).suffix
+        stored_filename = f"{file_id}{ext}"
+        file_path = upload_dir / stored_filename
         
         # Save file
         with open(file_path, "wb") as f:
@@ -4591,13 +4958,23 @@ async def upload_files(files: List[UploadFile] = File(...)):
             # Extract text content from document
             extracted_text = _extract_document_content(file_path, mime_type)
             if extracted_text:
-                logger.info(f"Extracted {len(extracted_text)} characters from {file.filename}")
+                logger.info(f"Extracted {len(extracted_text)} characters from {original_name}")
+
+        _write_upload_metadata(
+            file_id=file_id,
+            stored_filename=stored_filename,
+            original_name=original_name,
+            mime_type=mime_type,
+            size=len(content),
+            category=category,
+        )
         
         # Create response
         result = UploadResponse(
             file_id=file_id,
-            filename=safe_filename,
-            original_name=file.filename or "unknown",
+            filename=original_name,
+            original_name=original_name,
+            stored_filename=stored_filename,
             mime_type=mime_type,
             size=len(content),
             category=category,
@@ -4607,7 +4984,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
             extracted_text=extracted_text,
         )
         results.append(result)
-        logger.info(f"Uploaded file: {file.filename} -> {safe_filename} ({category})")
+        logger.info(f"Uploaded file: {file.filename} -> {stored_filename} (display={original_name}, {category})")
     
     return results
 
@@ -4615,20 +4992,14 @@ async def upload_files(files: List[UploadFile] = File(...)):
 @router.get("/files/{file_id}")
 async def get_file(file_id: str):
     """Get uploaded file by ID."""
-    upload_dir = _get_upload_dir()
-    
-    # Find file by ID (may have extension)
-    matching_files = list(upload_dir.glob(f"{file_id}.*"))
-    if not matching_files:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    file_path = matching_files[0]
+    file_path, metadata = _resolve_uploaded_file_by_id(file_id)
     mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+    download_name = str((metadata or {}).get("original_name") or file_path.name).strip() or file_path.name
     
     return FileResponse(
         path=file_path,
         media_type=mime_type,
-        filename=file_path.name,
+        filename=download_name,
         content_disposition_type="inline",
     )
 
@@ -4636,28 +5007,24 @@ async def get_file(file_id: str):
 @router.get("/files/{file_id}/preview")
 async def get_file_preview(file_id: str):
     """Get file preview for files that support embedded rendering."""
-    upload_dir = _get_upload_dir()
-    
-    matching_files = list(upload_dir.glob(f"{file_id}.*"))
-    if not matching_files:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    file_path = matching_files[0]
+    file_path, metadata = _resolve_uploaded_file_by_id(file_id)
     mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+    display_name = str((metadata or {}).get("original_name") or file_path.name).strip() or file_path.name
 
     if mime_type.startswith("image/") or mime_type == "application/pdf":
         return FileResponse(
             path=file_path,
             media_type=mime_type,
+            filename=display_name,
             content_disposition_type="inline",
             headers=_INLINE_PREVIEW_HEADERS,
         )
 
     if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        return HTMLResponse(_render_docx_preview_html(file_path, file_path.name), headers=_INLINE_PREVIEW_HEADERS)
+        return HTMLResponse(_render_docx_preview_html(file_path, display_name), headers=_INLINE_PREVIEW_HEADERS)
 
     if mime_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-        return HTMLResponse(_render_pptx_preview_html(file_path, file_path.name), headers=_INLINE_PREVIEW_HEADERS)
+        return HTMLResponse(_render_pptx_preview_html(file_path, display_name), headers=_INLINE_PREVIEW_HEADERS)
 
     raise HTTPException(status_code=400, detail="Preview only available for supported inline file types")
 
@@ -4665,15 +5032,10 @@ async def get_file_preview(file_id: str):
 @router.delete("/files/{file_id}")
 async def delete_file(file_id: str):
     """Delete uploaded file by ID."""
-    upload_dir = _get_upload_dir()
-    
-    matching_files = list(upload_dir.glob(f"{file_id}.*"))
-    if not matching_files:
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    for file_path in matching_files:
-        file_path.unlink()
-        logger.info(f"Deleted file: {file_path}")
+    file_path, _metadata = _resolve_uploaded_file_by_id(file_id)
+    file_path.unlink(missing_ok=True)
+    _upload_metadata_path(file_id).unlink(missing_ok=True)
+    logger.info(f"Deleted file: {file_path}")
     
     return {"status": "success", "message": f"File {file_id} deleted"}
 
@@ -6784,6 +7146,10 @@ async def get_environment_info():
     workspace_path = Path(config.workspace_path)
     workspace_info = {
         "path": str(workspace_path),
+        "label": workspace_path.name or str(workspace_path),
+        "role": "global-workspace-baseline",
+        "metadata_dirname": ".horbot-agent",
+        "note": "This is the global workspace baseline. Agent runtime metadata stays under each workspace in .horbot-agent/.",
         "exists": workspace_path.exists(),
         "files_count": 0,
     }
@@ -8752,86 +9118,118 @@ async def get_conversation(conv_id: str):
 
 
 @router.get("/conversations/{conv_id}/messages")
-async def get_conversation_messages(conv_id: str):
+async def get_conversation_messages(
+    conv_id: str,
+    limit: int = DEFAULT_CONVERSATION_HISTORY_LIMIT,
+    before_id: Optional[str] = None,
+    after_id: Optional[str] = None,
+    around_id: Optional[str] = None,
+    context_before: int = DEFAULT_CONVERSATION_AROUND_CONTEXT,
+    context_after: int = DEFAULT_CONVERSATION_AROUND_CONTEXT,
+):
     """Get messages for a specific conversation."""
-    from horbot.conversation import get_conversation_manager, ConversationType
-    from horbot.session.manager import SessionManager
-    
-    conv_manager = get_conversation_manager()
-    conv = conv_manager.get(conv_id)
-    
-    if not conv:
-        conv_type, target_id = conv_manager.parse_id(conv_id)
-        if conv_type == ConversationType.DM:
-            from horbot.agent.manager import get_agent_manager
-            from horbot.external_agents.manager import get_external_agent_manager
-            agent_manager = get_agent_manager()
-            agent = agent_manager.get_agent(target_id)
-            if agent:
-                conv = conv_manager.get_or_create_dm(target_id, agent.name)
-            else:
-                external_agent = get_external_agent_manager().get_external_agent(target_id)
-                if external_agent:
-                    conv = conv_manager.get_or_create_dm(target_id, external_agent.name)
-        elif conv_type == ConversationType.TEAM:
-            from horbot.team.manager import get_team_manager
-            team_manager = get_team_manager()
-            team = team_manager.get_team(target_id)
-            if team:
-                conv = conv_manager.get_or_create_team(target_id, team.name, team.members)
-    
+    conv = _resolve_conversation_for_history(conv_id)
     if not conv:
         raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
-    
-    session_key = f"web:{conv_id}"
-    
-    candidate_managers: list[SessionManager] = []
-    if conv.type == ConversationType.TEAM:
-        candidate_managers = _team_history_session_managers(conv.target_id)
-    elif conv.type == ConversationType.DM:
-        from horbot.agent.manager import get_agent_manager
+    raw_messages = _load_conversation_raw_messages(conv)
+    prepared_messages = _prepare_conversation_history_messages(raw_messages)
+    window_messages, page = _slice_history_window(
+        prepared_messages,
+        limit=_clamp_history_limit(limit),
+        before_id=before_id,
+        after_id=after_id,
+        around_id=around_id,
+        context_before=context_before,
+        context_after=context_after,
+    )
 
-        agent_manager = get_agent_manager()
-        agent = agent_manager.get_agent(conv.target_id)
-        if agent is not None:
-            session_manager = SessionManager(workspace=agent.get_sessions_dir())
-            candidate_managers = [
-                get_session_manager(),
-                *_legacy_agent_session_managers(agent),
-                session_manager,
-            ]
-        else:
-            session_manager = get_session_manager()
-            candidate_managers = [session_manager]
-    else:
-        session_manager = get_session_manager()
-        candidate_managers = [session_manager]
-
-    raw_messages = _load_merged_session_messages(session_key, candidate_managers)
-    
-    # Clean message content to remove XML wrapper from LLM history format
-    cleaned_messages = []
-    for msg in raw_messages:
-        cleaned_msg = dict(msg)  # Create a copy
-        cleaned_msg["id"] = ensure_history_message_id(cleaned_msg)
-        if cleaned_msg.get("role") == "assistant":
-            normalized_content, normalized_files = _normalize_saved_assistant_content_and_files(
-                cleaned_msg.get("content"),
-                cleaned_msg.get("files"),
-            )
-            cleaned_msg["content"] = normalized_content
-            if normalized_files:
-                cleaned_msg["files"] = normalized_files
-            else:
-                cleaned_msg.pop("files", None)
-        elif "content" in cleaned_msg and isinstance(cleaned_msg["content"], str):
-            cleaned_msg["content"] = clean_message_content(cleaned_msg["content"])
-        cleaned_messages.append(cleaned_msg)
-    
     return {
         "conversation_id": conv_id,
         "conversation": conv.to_dict(),
-        "messages": cleaned_messages,
+        "messages": window_messages,
+        "page": page,
+    }
+
+
+@router.get("/conversations/{conv_id}/search")
+async def search_conversation_messages(
+    conv_id: str,
+    q: str,
+    limit: int = DEFAULT_CONVERSATION_SEARCH_LIMIT,
+    offset: int = 0,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+):
+    """Search a specific conversation across the full persisted history."""
+    conv = _resolve_conversation_for_history(conv_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail=f"Conversation '{conv_id}' not found")
+
+    query = re.sub(r"\s+", " ", q or "").strip()
+    if not query:
+        return {
+            "conversation_id": conv_id,
+            "conversation": conv.to_dict(),
+            "query": "",
+            "matches": [],
+            "total_matches": 0,
+            "has_more": False,
+            "limit": _clamp_conversation_search_limit(limit),
+        }
+
+    safe_limit = _clamp_conversation_search_limit(limit)
+    safe_offset = max(0, int(offset))
+    normalized_query = query.casefold()
+    since_dt = _parse_optional_iso_datetime(since)
+    until_dt = _parse_optional_iso_datetime(until)
+    raw_messages = _load_conversation_raw_messages(conv)
+
+    all_matches: list[dict[str, Any]] = []
+    for raw_message in reversed(raw_messages):
+        normalized_message = _normalize_history_message_for_api(raw_message)
+        role = normalized_message.get("role")
+        if role not in {"user", "assistant"}:
+            continue
+
+        content = normalized_message.get("content")
+        if not isinstance(content, str):
+            continue
+
+        searchable_content = re.sub(r"\s+", " ", content).strip()
+        if not searchable_content or normalized_query not in searchable_content.casefold():
+            continue
+
+        message_timestamp = normalized_message.get("timestamp")
+        message_datetime = _parse_optional_iso_datetime(str(message_timestamp)) if message_timestamp else None
+        if since_dt is not None and (message_datetime is None or message_datetime < since_dt):
+            continue
+        if until_dt is not None and (message_datetime is None or message_datetime > until_dt):
+            continue
+
+        metadata = normalized_message.get("metadata") or {}
+        all_matches.append({
+            "message_id": normalized_message["id"],
+            "turn_id": metadata.get("turn_id"),
+            "request_id": metadata.get("request_id"),
+            "role": role,
+            "preview": _build_history_search_preview(searchable_content, query),
+            "timestamp": normalized_message.get("timestamp"),
+            "agent_id": metadata.get("agent_id"),
+            "agent_name": metadata.get("agent_name"),
+        })
+
+    return {
+        "conversation_id": conv_id,
+        "conversation": conv.to_dict(),
+        "query": query,
+        "matches": all_matches[safe_offset:safe_offset + safe_limit],
+        "total_matches": len(all_matches),
+        "has_more": safe_offset + safe_limit < len(all_matches),
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "next_offset": safe_offset + safe_limit if safe_offset + safe_limit < len(all_matches) else None,
+        "since": since_dt.isoformat() if since_dt else None,
+        "until": until_dt.isoformat() if until_dt else None,
     }
 
 
@@ -8983,7 +9381,7 @@ def _get_provider_models(provider_id: str) -> list[dict]:
 async def get_agent_workspace(agent_id: str):
     """Get workspace information for a specific agent."""
     from horbot.agent.manager import get_agent_manager
-    from pathlib import Path
+    from horbot.workspace.manager import AGENT_METADATA_DIRNAME
     
     agent_manager = get_agent_manager()
     agent = agent_manager.get_agent(agent_id)
@@ -8995,6 +9393,7 @@ async def get_agent_workspace(agent_id: str):
     memory_path = agent.get_memory_dir()
     sessions_path = agent.get_sessions_dir()
     skills_path = agent.get_skills_dir()
+    workspace_override = bool(getattr(agent.config, "workspace", "").strip())
     
     workspace_info = {
         "agent_id": agent_id,
@@ -9002,6 +9401,30 @@ async def get_agent_workspace(agent_id: str):
         "memory_path": str(memory_path),
         "sessions_path": str(sessions_path),
         "skills_path": str(skills_path),
+        "workspace": {
+            "path": str(workspace_path),
+            "label": workspace_path.name or str(workspace_path),
+            "role": "agent-workspace-override" if workspace_override else "agent-default-workspace",
+            "metadata_dirname": AGENT_METADATA_DIRNAME,
+            "note": "Agent runtime metadata is stored under this workspace in .horbot-agent/.",
+        },
+        "runtime_paths": {
+            "memory": {
+                "path": str(memory_path),
+                "label": memory_path.name or str(memory_path),
+                "role": "agent-memory",
+            },
+            "sessions": {
+                "path": str(sessions_path),
+                "label": sessions_path.name or str(sessions_path),
+                "role": "agent-sessions",
+            },
+            "skills": {
+                "path": str(skills_path),
+                "label": skills_path.name or str(skills_path),
+                "role": "agent-skills",
+            },
+        },
         "exists": workspace_path.exists(),
     }
     
@@ -9698,6 +10121,7 @@ async def get_team_members(team_id: str):
 async def get_team_workspace(team_id: str):
     """Get workspace information for a specific team."""
     from horbot.team.manager import get_team_manager
+    from horbot.workspace.manager import TEAM_METADATA_DIRNAME
     
     team_manager = get_team_manager()
     team = team_manager.get_team(team_id)
@@ -9706,10 +10130,18 @@ async def get_team_workspace(team_id: str):
         raise HTTPException(status_code=404, detail=f"Team '{team_id}' not found")
     
     workspace_path = team.get_workspace()
+    workspace_override = bool(getattr(team.config, "workspace", "").strip())
     
     workspace_info = {
         "team_id": team_id,
         "workspace_path": str(workspace_path),
+        "workspace": {
+            "path": str(workspace_path),
+            "label": workspace_path.name or str(workspace_path),
+            "role": "team-workspace-override" if workspace_override else "team-default-workspace",
+            "metadata_dirname": TEAM_METADATA_DIRNAME,
+            "note": "Team collaboration metadata is stored under this workspace in .horbot-team/.",
+        },
         "exists": workspace_path.exists(),
     }
     

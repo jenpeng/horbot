@@ -1,11 +1,11 @@
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowUpRight, BookMarked, ChevronDown, Copy, FileAudio2, FileImage, FileText, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
 import { useI18n } from '../contexts/I18nContext';
-import MarkdownRenderer from './MarkdownRenderer';
 import { Modal, ModalFooter } from './ui';
 import type { MemoryRecall, MemorySource, Message, MessageFile } from '../types/conversation';
+import { lazyWithReload } from '../utils/lazyWithReload';
 
 interface MessageGroupProps {
   messages: Message[];
@@ -28,6 +28,11 @@ const AVATAR_COLORS = [
   'from-fuchsia-500 to-pink-500',
   'from-indigo-500 to-violet-500',
 ];
+
+const MarkdownRenderer = lazyWithReload(
+  'MarkdownRenderer',
+  () => import('./MarkdownRenderer'),
+);
 
 const getAvatarColor = (id: string): string => {
   const index = Math.abs(
@@ -1029,11 +1034,13 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                   </div>
                 )}
                 {shouldRenderMarkdown ? (
-                  <MarkdownRenderer
-                    content={cleanedContent}
-                    theme="light"
-                    className="[&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-                  />
+                  <Suspense fallback={cleanedContent}>
+                    <MarkdownRenderer
+                      content={cleanedContent}
+                      theme="light"
+                      className="[&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                    />
+                  </Suspense>
                 ) : (
                   cleanedContent
                 )}

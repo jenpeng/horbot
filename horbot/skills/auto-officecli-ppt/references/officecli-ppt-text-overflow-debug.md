@@ -1,37 +1,49 @@
-# OfficeCLI PPT Text Overflow Debugging
+# OfficeCLI PPT Text Overflow Debug
 
 ## When to use
-- Generated PowerPoint slides still show text overflow after increasing text box height/width.
-- Font sizes appear unexpectedly small (e.g., 18pt–23pt) on slides with long content.
-- `normAutofit` is enabled and overriding manual dimension adjustments.
 
-## Steps
+Use this workflow when a `.pptx` already shows overflow symptoms and you need to debug why the text box is failing, not just detect that it is risky.
 
-1. **Identify overflow slides**
-   - Inspect each slide's text box font size.
-   - Flag slides where the font size is smaller than the intended/target size (common threshold: < 24pt).
+This is most useful after the structural detector has already flagged suspicious slides.
 
-2. **Confirm root cause**
-   - Verify that `normAutofit` is active on the text body properties.
-   - Recognize that PowerPoint autofit reduces font size to fit the text box; increasing box dimensions alone may not help if the content volume is too large.
+## Debug sequence
 
-3. **Choose a fix strategy**
-   - **Reduce content volume**: Shorten text, remove less critical lines, or trim examples.
-   - **Split content**: Distribute long text across multiple text boxes on the same slide, or split into multiple slides.
-   - **Disable normAutofit** (if design allows): Switch to `noAutofit` so the font stays fixed, then manually ensure the box is large enough.
-   - **Decrease target font size globally** (last resort): If the design permits, lower the base font size so more content fits naturally.
+1. Inspect the target slide structure first.
+2. Confirm which shape actually owns the overflowing body text.
+3. Check the text box geometry and body insets.
+4. Check the text runs and paragraph settings.
+5. Check the autofit mode.
+6. Make one minimal change at a time and re-check.
 
-4. **Validate after fix**
-   - Re-inspect the flagged slides and confirm font sizes are at or above the target threshold.
-   - Check that no text is visually clipped or overlapping.
+## What to inspect
+
+- the body text shape rather than the title placeholder
+- `a:bodyPr` settings and whether `noAutofit`, `normAutofit`, or `spAutoFit` is present
+- run font sizes in `a:rPr`
+- paragraph line spacing and explicit line breaks
+- whether the generated content is too long for the intended layout
+- whether the text should actually be split across multiple slides
+
+## Practical pattern
+
+Start with the structural detector:
+
+```bash
+python scripts/pptx_overflow_detector.py path/to/deck.pptx --json
+```
+
+Then focus your XML or OfficeCLI inspection on the highest-risk slide and text box only.
+
+## Fix options
+
+- reduce body font size slightly
+- reduce line spacing
+- enlarge the body text box
+- switch away from `noAutofit` when that matches the desired layout behavior
+- shorten or split copy across multiple slides
 
 ## Pitfalls
-- Increasing text box height without reducing content or disabling autofit often has no effect because `normAutofit` will still shrink the font.
-- Do not assume overflow is only a width issue; long vertical content triggers the same autofit behavior.
-- Always verify on a slide-by-slide basis—some slides may look fine while others silently overflow.
 
-## Checks
-- [ ] List of overflow slides identified with actual vs. target font sizes.
-- [ ] Root cause confirmed as autofit behavior, not just insufficient box size.
-- [ ] Fix applied (content reduction, split, or autofit disabled).
-- [ ] Post-fix validation shows font sizes restored and no clipping.
+- a deck can be XML-valid and still overflow visually
+- repeated blind edits to a damaged deck can make the XML harder to reason about
+- if validation starts failing repeatedly after many mutations, rebuild the problematic slide or deck from a fresh output path

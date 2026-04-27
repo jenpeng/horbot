@@ -36,6 +36,12 @@ const toneBadgeClass: Record<NonNullable<ConfigurationValidationSummary>['tone']
   error: 'bg-accent-red/15 text-accent-red',
 };
 
+const formatWorkspaceLabel = (workspacePath?: string) => {
+  if (!workspacePath) return '.horbot/agents/default/workspace';
+  const segments = workspacePath.split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) || workspacePath;
+};
+
 const ConfigurationOverview: React.FC<ConfigurationOverviewProps> = ({
   configuredProviders,
   totalProviders,
@@ -201,14 +207,38 @@ const ConfigurationOverview: React.FC<ConfigurationOverviewProps> = ({
         <div className="rounded-2xl border border-white/60 bg-white/70 px-4 py-3 text-sm text-surface-600">
           <div>
             <span className="font-semibold text-surface-900">{t('config.overview.globalWorkspace')}</span>
-            <span className="break-all"> {workspacePath || '.horbot/agents/default/workspace'}</span>
+            <span> {formatWorkspaceLabel(workspacePath)}</span>
           </div>
           {mainAgent && (
             <div className="mt-2">
               <span className="font-semibold text-surface-900">{t('config.overview.effectiveWorkspace')}</span>
-              <span className="break-all"> {mainAgent.effectiveWorkspace || workspacePath || '.horbot/agents/default/workspace'}</span>
+              <span> {formatWorkspaceLabel(mainAgent.effectiveWorkspace || workspacePath)}</span>
             </div>
           )}
+          <p className="mt-2 text-xs text-surface-500">
+            {t('config.overview.workspaceHint')}
+          </p>
+          <details className="mt-2 rounded-xl border border-surface-200 bg-white/70 px-3 py-2">
+            <summary className="cursor-pointer list-none text-xs font-medium text-surface-500 marker:hidden">
+              查看完整路径
+            </summary>
+            <div className="mt-2 space-y-2">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-surface-400">Global</div>
+                <code className="mt-1 block break-all font-mono text-xs text-surface-700">
+                  {workspacePath || '.horbot/agents/default/workspace'}
+                </code>
+              </div>
+              {mainAgent && (
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-surface-400">Agent</div>
+                  <code className="mt-1 block break-all font-mono text-xs text-surface-700">
+                    {mainAgent.effectiveWorkspace || workspacePath || '.horbot/agents/default/workspace'}
+                  </code>
+                </div>
+              )}
+            </div>
+          </details>
         </div>
         <div className="flex items-stretch">
           <Link

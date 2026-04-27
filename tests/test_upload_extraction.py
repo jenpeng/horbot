@@ -291,7 +291,42 @@ class UploadApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 200)
             payload = response.json()
             self.assertEqual(len(payload), 1)
+            self.assertEqual(payload[0]["filename"], "sample.docx")
+            self.assertEqual(payload[0]["original_name"], "sample.docx")
+            self.assertNotEqual(payload[0]["stored_filename"], "sample.docx")
+            self.assertTrue(payload[0]["stored_filename"].endswith(".docx"))
             self.assertIsNone(payload[0]["minimax_file_id"])
+
+    async def test_upload_duplicate_names_preserves_user_name_with_suffix_conflict_resolution(self):
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with TemporaryDirectory() as tmpdir:
+            upload_dir = Path(tmpdir)
+            first_content = b"first duplicate payload"
+            second_content = b"second duplicate payload"
+
+            with patch("horbot.web.api._get_upload_dir", return_value=upload_dir):
+                async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                    response = await client.post(
+                        "/api/upload",
+                        files=[
+                            ("files", ("report final.pdf", io.BytesIO(first_content), "application/pdf")),
+                            ("files", ("report final.pdf", io.BytesIO(second_content), "application/pdf")),
+                        ],
+                    )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(len(payload), 2)
+            self.assertEqual(payload[0]["filename"], "report final.pdf")
+            self.assertEqual(payload[1]["filename"], "report final (2).pdf")
+            self.assertEqual(payload[0]["original_name"], "report final.pdf")
+            self.assertEqual(payload[1]["original_name"], "report final (2).pdf")
+            self.assertNotEqual(payload[0]["stored_filename"], payload[1]["stored_filename"])
+            self.assertTrue((upload_dir / payload[0]["stored_filename"]).is_file())
+            self.assertTrue((upload_dir / payload[1]["stored_filename"]).is_file())
 
 
 if __name__ == "__main__":

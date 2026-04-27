@@ -14,7 +14,7 @@ horbot 的技能系统允许扩展 AI 的能力。每个技能是一个包含 `S
 ### 目录结构
 
 ```
-skills/
+.horbot/agents/<agent-id>/workspace/.horbot-agent/skills/
 ├── {skill_name}/
 │   ├── SKILL.md          # 必需：技能定义文件
 │   ├── agents/           # 可选：UI/Agent 元数据
@@ -216,7 +216,7 @@ AI 自主改进能力，包括代码审查、能力评估、错误分析。
 
 1. 创建技能目录：
 ```bash
-mkdir -p skills/my-skill
+mkdir -p .horbot/agents/main/workspace/.horbot-agent/skills/my-skill
 ```
 
 2. 创建 SKILL.md 文件：

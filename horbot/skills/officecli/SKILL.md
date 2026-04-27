@@ -80,6 +80,7 @@ For simple spreadsheet table writes, `mcp_excel_*` is still acceptable. Prefer O
 - A robust creation flow is: `create` -> `add slide` -> `add textbox` -> `add textbox` -> `view outline`.
 - After structural `.pptx` edits, run `validate`. If validation reports schema errors, do not claim the presentation is fully correct.
 - If `validate` fails after multiple edits, prefer recreating the deck from a fresh file path and reapplying the content.
+- For overflow-heavy PPT debugging, open the `auto-officecli-ppt` skill family and start with the structural detector before doing manual XML surgery.
 
 ## Failure Handling
 

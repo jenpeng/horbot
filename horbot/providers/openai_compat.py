@@ -93,7 +93,7 @@ def _build_file_parts(files: list[dict[str, Any]], upload_dir: str | None) -> li
         if str(file_info.get("category") or "").strip().lower() != "document":
             continue
 
-        filename = str(file_info.get("filename") or "").strip()
+        filename = str(file_info.get("stored_filename") or file_info.get("filename") or "").strip()
         if not filename:
             continue
 

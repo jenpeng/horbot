@@ -84,6 +84,7 @@ export interface MessageFile {
   fileId: string;
   filename: string;
   originalName: string;
+  storedFilename?: string;
   mimeType: string;
   size: number;
   category: string;
