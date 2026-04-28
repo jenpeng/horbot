@@ -27,6 +27,7 @@ Horbot keeps the runtime intentionally small:
 - `SessionManager` for conversation persistence
 - `MemoryStore` for agent-scoped memory
 - `SkillsLoader` for built-in and user skills
+- Live Artifact renderer for converting structured render specs into temporary sandboxed HTML runtime files
 
 ### Multi-Agent Layer
 
@@ -73,6 +74,7 @@ Horbot keeps the runtime intentionally small:
 - `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`
 - `.horbot/data/*` for uploads, plans, sessions, and cron data
 - remote image cards can also be materialized into `.horbot/data/uploads` so later history loads still render as normal file attachments
+- temporary Live Artifact runtime files are written to `.horbot/runtime/rendered-artifacts` and can be regenerated from saved message specs
 
 The workspace root may also contain runtime-owned directories such as `.audit`, `.checkpoints`, and `.state`. These are active runtime artifacts, not duplicate legacy storage.
 
@@ -115,6 +117,7 @@ The Web UI currently covers:
 - baton-aware relay navigation between direct chat and team chat during DM-initiated team dispatch flows
 - richer attachment preview UX, including inline previews and a bottom thumbnail strip for multi-image preview modals
 - assistant history normalization that upgrades standalone remote image URLs into image-card attachments when possible
+- Live Artifact cards that render structured agent output into sandboxed temporary dashboards, chart stories, map stories, process views, or reports on demand
 - a Configuration-page remote-image cache panel with runtime stats and a manual clear action
 - skills import/edit/compatibility, custom-vs-system grouping, generated-skill consolidation, and promote-to-builtin actions
 - channels and runtime status, including WeCom endpoint testing

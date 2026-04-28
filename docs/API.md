@@ -42,6 +42,12 @@
 - `GET /api/files/cache/remote-images`
 - `DELETE /api/files/cache/remote-images`
 
+### Live Artifacts
+
+- `POST /api/artifacts/render`
+- `GET /api/artifacts/runtime/{artifact_id}/index.html`
+- `DELETE /api/artifacts/runtime/expired`
+
 ### Agents And Teams
 
 - `GET /api/agents`
@@ -140,6 +146,45 @@ Routing rules:
 - `allow_from` restricts accepted `sender_id` values when configured.
 
 Use this endpoint when you are defining an external message entrance. Use External Agent `inbound-bot` when you are defining an external member that can appear in DMs or teams.
+
+## Live Artifact Rendering
+
+`POST /api/artifacts/render` creates a temporary sandbox render from a structured spec. The backend does not store arbitrary agent HTML as durable chat history; it stores temporary runtime files under `.horbot/runtime/rendered-artifacts`.
+
+```http
+POST /api/artifacts/render
+Content-Type: application/json
+
+{
+  "ttl_seconds": 1800,
+  "spec": {
+    "title": "Sales Dashboard",
+    "summary": "Revenue, growth, and regional signals.",
+    "template": "dashboard",
+    "items": [
+      {"label": "Revenue", "value": "$1.28M"}
+    ],
+    "points": [
+      {"label": "Jan", "value": 42}
+    ]
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "artifact_id": "66256c9ce7af4ed89a6f6eb6abf85888",
+  "title": "Sales Dashboard",
+  "template": "dashboard",
+  "render_url": "/api/artifacts/runtime/66256c9ce7af4ed89a6f6eb6abf85888/index.html",
+  "expires_at": "2026-04-28T09:07:12.858170+00:00",
+  "ttl_seconds": 1800
+}
+```
+
+Supported templates are `dashboard`, `chart-story`, `data-workbench`, `map-story`, `process-map`, and `interactive-report`.
 
 ## Notes
 

@@ -119,6 +119,23 @@
 - Assistant 消息泡和 Markdown 排版更紧凑，长回复不会再留出过多空白
 - 团队接力等待态会直接显示交棒来源、目标以及“继续讨论 / 返回总结”的状态
 
+## 1.1.1 Live Artifact 交互渲染
+
+当 Agent 判断某个回复更适合用交互视图表达，而不是只用 Markdown 时，可以在回复中附带结构化的 `horbot-renderable` 数据块。聊天气泡会显示一个 `可渲染内容` 卡片，用户点击 `渲染` 后才会生成临时交互页面。
+
+当前支持的模板包括：
+
+- `dashboard`
+- `chart-story`
+- `data-workbench`
+- `map-story`
+- `process-map`
+- `interactive-report`
+
+Horbot 长期保留的是文字摘要、结构化渲染规格和数据；真正的 HTML 运行文件是临时产物，只在点击渲染后生成，显示在 sandbox iframe 中，并写入 `.horbot/runtime/rendered-artifacts`，过期后可清理。刷新历史后仍会显示渲染卡片，需要时可以再次点击重新生成。
+
+内置 `live-artifact-studio` 技能会指导 Agent 判断什么时候继续用 Markdown，什么时候输出可渲染结构化数据。
+
 ## Skills 页面当前可做什么
 
 Skills 页面现在不只是查看和导入技能，还支持以下操作：
@@ -147,7 +164,7 @@ Skills 页面现在不只是查看和导入技能，还支持以下操作：
 - 自动沉淀技能也写入同一目录，只是通常以 `auto-*` 开头命名
 - 旧的 `.horbot/agents/<agent-id>/skills` 与 `workspace/skills` 只作为兼容迁移来源，不应再作为新的写入位置
 
-## 1.1.1 团队接力当前的运行方式
+## 1.1.2 团队接力当前的运行方式
 
 当前团队接力仍然是“有序串行”而不是并行乱序：
 
@@ -169,7 +186,7 @@ Skills 页面现在不只是查看和导入技能，还支持以下操作：
 - 如果远程图片链接能成功缓存，历史回刷后会继续显示本地图片卡片，并保留文件名、大小与统一预览弹窗
 - 如果远程图片暂时无法缓存，前端也会回退为远程图片附件卡片，而不是只剩下正文里的 URL
 
-## 1.1.2 Configuration 页中的联网搜索与远程图片缓存
+## 1.1.3 Configuration 页中的联网搜索与远程图片缓存
 
 Configuration 页面当前除基础 Provider / 模型配置外，还支持：
 

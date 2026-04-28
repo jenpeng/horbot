@@ -13,6 +13,7 @@ Horbot is a lightweight multi-agent assistant stack with:
 - Web UI for operations and configuration
 - browser-persisted UI locale switching for English, Simplified Chinese, and Thai
 - chat, attachments, and relay-style team conversations
+- chat-side Live Artifacts for temporary interactive dashboards, charts, maps, process views, and reports
 - compact chat layout plus baton-aware relay status in team conversations
 - automatic DM -> team -> DM baton navigation in Web Chat, with a temporary top banner so relay-driven view changes are explicit
 - promoted remote image links that render as normal image-card attachments, plus a manual remote-image cache clear entry in Configuration

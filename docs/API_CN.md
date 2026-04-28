@@ -107,6 +107,55 @@ Content-Type: application/json
 
 ---
 
+### Live Artifact 渲染
+
+```http
+POST /api/artifacts/render
+GET /api/artifacts/runtime/{artifact_id}/index.html
+DELETE /api/artifacts/runtime/expired
+```
+
+`POST /api/artifacts/render` 用结构化渲染规格生成临时 sandbox 页面。后端不会把 Agent 任意生成的 HTML 作为长期聊天历史保存；长期保留的是消息文本、渲染规格和数据，临时运行文件统一写入 `.horbot/runtime/rendered-artifacts`。
+
+示例：
+
+```http
+POST /api/artifacts/render
+Content-Type: application/json
+
+{
+  "ttl_seconds": 1800,
+  "spec": {
+    "title": "销售看板",
+    "summary": "展示收入、增长率与区域信号。",
+    "template": "dashboard",
+    "items": [
+      {"label": "收入", "value": "128 万"}
+    ],
+    "points": [
+      {"label": "1 月", "value": 42}
+    ]
+  }
+}
+```
+
+响应：
+
+```json
+{
+  "artifact_id": "66256c9ce7af4ed89a6f6eb6abf85888",
+  "title": "销售看板",
+  "template": "dashboard",
+  "render_url": "/api/artifacts/runtime/66256c9ce7af4ed89a6f6eb6abf85888/index.html",
+  "expires_at": "2026-04-28T09:07:12.858170+00:00",
+  "ttl_seconds": 1800
+}
+```
+
+当前支持模板：`dashboard`、`chart-story`、`data-workbench`、`map-story`、`process-map`、`interactive-report`。
+
+---
+
 ### 渠道实例与 Horbot 入站机器人
 
 ```http

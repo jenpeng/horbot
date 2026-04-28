@@ -72,6 +72,7 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 ### Chat And Attachments
 
 - Markdown rendering for assistant messages
+- Live Artifact cards for structured agent output such as dashboards, chart stories, map stories, process views, and interactive reports
 - Denser chat bubbles and tighter Markdown spacing to reduce blank space in long conversations
 - Inline preview for image, audio, PDF, Office, and text attachments
 - Office document operations via OfficeCLI MCP, including structure-aware create/edit/view/validate flows for `.docx`, `.xlsx`, and `.pptx`

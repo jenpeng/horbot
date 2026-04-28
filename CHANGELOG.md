@@ -2,6 +2,15 @@
 
 This file summarizes notable Horbot product and documentation changes. For fine-grained code history, use Git directly.
 
+## 2026-04-28
+
+### Live Artifacts
+
+- Added chat-side Live Artifact cards for structured agent output such as dashboards, chart stories, data workbenches, map stories, process maps, and interactive reports
+- Added `POST /api/artifacts/render` plus temporary runtime file serving under `.horbot/runtime/rendered-artifacts`
+- Added the built-in `live-artifact-studio` skill so agents can decide when to use Markdown versus structured renderable output
+- Added an `auto-officecli-ppt` reference for using Live Artifact previews before generating PowerPoint decks
+
 ## 2026-04-27
 
 ### External Agent Adapter Runtime

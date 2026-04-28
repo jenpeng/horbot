@@ -2,6 +2,15 @@
 
 本记录用于概览 Horbot 的关键功能和文档演进。更细粒度的代码改动请直接查看 Git 历史。
 
+## 2026-04-28
+
+### Live Artifact 交互渲染
+
+- 新增聊天气泡内的 Live Artifact 卡片，支持看板、图表故事、数据工作台、地图故事、流程视图和交互报告等结构化 Agent 输出
+- 新增 `POST /api/artifacts/render`，临时运行文件统一写入 `.horbot/runtime/rendered-artifacts`
+- 新增内置 `live-artifact-studio` 技能，指导 Agent 判断何时使用 Markdown，何时输出结构化可渲染数据
+- 为 `auto-officecli-ppt` 技能家族补充 Live Artifact 到 PPT 预览/生成的参考技巧
+
 ## 2026-04-27
 
 ### External Agent Adapter 架构

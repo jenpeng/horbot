@@ -65,6 +65,23 @@ Uploads are stored under `.horbot/data/uploads`.
 
 If a remote image link can be cached successfully, later history loads use a local attachment preview URL and preserve filename plus file size in the card. If caching fails, the chat still falls back to a remote image attachment instead of showing only a bare link.
 
+## Live Artifacts
+
+Agents can include a structured `horbot-renderable` block when a reply is better as an interactive view instead of plain Markdown. The chat bubble then shows a Live Artifact card with a `Render` button.
+
+Current supported templates include:
+
+- `dashboard`
+- `chart-story`
+- `data-workbench`
+- `map-story`
+- `process-map`
+- `interactive-report`
+
+Horbot persists the reusable source as message text plus structured render spec/data. The generated HTML runtime is temporary: it is created only after clicking `Render`, displayed in a sandboxed iframe, and written under `.horbot/runtime/rendered-artifacts` with a TTL. Refreshing history shows the card again, and you can re-render from the saved spec.
+
+The built-in `live-artifact-studio` skill guides agents to decide when Markdown is enough and when structured renderable output is appropriate.
+
 ## Configuration: Web Search And Remote Image Cache
 
 The `Configuration` page now also exposes runtime web-search controls:
