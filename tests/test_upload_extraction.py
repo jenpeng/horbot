@@ -14,7 +14,9 @@ from reportlab.pdfgen import canvas
 
 from horbot.web.api import (
     _build_preview_url,
+    _cleanup_pptx_pdf_preview,
     _extract_document_content,
+    _render_pptx_pdf_preview_path,
     _render_docx_preview_html,
     _render_pptx_preview_html,
     router as api_router,
@@ -110,6 +112,73 @@ def create_simple_pptx(path: Path, text: str) -> None:
         <p:txBody>
           <a:p>
             <a:r><a:t>{escaped}</a:t></a:r>
+          </a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>
+"""
+    with ZipFile(path, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", content_types)
+        archive.writestr("_rels/.rels", rels)
+        archive.writestr("ppt/presentation.xml", presentation)
+        archive.writestr("ppt/_rels/presentation.xml.rels", presentation_rels)
+        archive.writestr("ppt/slides/slide1.xml", slide)
+
+
+def create_styled_pptx(path: Path, text: str) -> None:
+    content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+  <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>
+"""
+    rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>
+"""
+    presentation = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:sldSz cx="9144000" cy="5143500"/>
+  <p:sldIdLst>
+    <p:sldId id="256" r:id="rId1"/>
+  </p:sldIdLst>
+</p:presentation>
+"""
+    presentation_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>
+"""
+    escaped = (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    slide = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld>
+    <p:bg>
+      <p:bgPr><a:solidFill><a:srgbClr val="0F172A"/></a:solidFill></p:bgPr>
+    </p:bg>
+    <p:spTree>
+      <p:sp>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="914400" y="685800"/>
+            <a:ext cx="7315200" cy="1143000"/>
+          </a:xfrm>
+          <a:prstGeom prst="roundRect"/>
+          <a:solidFill><a:srgbClr val="2563EB"/></a:solidFill>
+          <a:ln><a:solidFill><a:srgbClr val="93C5FD"/></a:solidFill></a:ln>
+        </p:spPr>
+        <p:txBody>
+          <a:p>
+            <a:r><a:rPr sz="3200" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:rPr><a:t>{escaped}</a:t></a:r>
           </a:p>
         </p:txBody>
       </p:sp>
@@ -231,11 +300,76 @@ class UploadExtractionTests(unittest.TestCase):
             pptx_path = Path(tmpdir) / "preview.pptx"
             create_simple_pptx(pptx_path, "Preview slide body")
 
-            rendered = _render_pptx_preview_html(pptx_path, "preview.pptx")
+            with patch("horbot.web.api._pptx_visual_preview_plan", return_value=("text-fallback", 0)):
+                rendered = _render_pptx_preview_html("file-pptx", pptx_path, "preview.pptx")
 
-            self.assertIn("Slide 1", rendered)
+            self.assertIn("A reliable PPT renderer is not configured", rendered)
             self.assertIn("Preview slide body", rendered)
             self.assertIn("<html", rendered)
+
+    def test_pptx_preview_html_renders_libreoffice_slide_images(self):
+        with TemporaryDirectory() as tmpdir:
+            pptx_path = Path(tmpdir) / "styled.pptx"
+            create_styled_pptx(pptx_path, "Styled preview title")
+            image_path = Path(tmpdir) / "slide-001.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+            with patch("horbot.web.api._pptx_visual_preview_plan", return_value=("libreoffice-pdf-images", 1)):
+                rendered = _render_pptx_preview_html("file-pptx", pptx_path, "styled.pptx")
+
+            self.assertNotIn("ppt-slide-stage", rendered)
+            self.assertNotIn('class="thumb', rendered)
+            self.assertIn("LibreOffice slide preview", rendered)
+            self.assertIn("encodeURIComponent(fileId)", rendered)
+            self.assertIn("/preview/slides/", rendered)
+            self.assertIn("LibreOffice PDF images", rendered)
+            self.assertIn("Go to slide", rendered)
+
+    def test_pptx_pdf_preview_uses_libreoffice_export_cache(self):
+        with TemporaryDirectory() as tmpdir:
+            upload_dir = Path(tmpdir)
+            pptx_path = upload_dir / "styled.pptx"
+            create_styled_pptx(pptx_path, "Styled preview title")
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--outdir") + 1])
+                (output_dir / "input.pdf").write_bytes(b"%PDF-1.3\n% preview\n")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with (
+                patch("horbot.web.api._get_upload_dir", return_value=upload_dir),
+                patch("horbot.web.api._find_soffice_command", return_value="/usr/local/bin/soffice"),
+                patch("horbot.web.api.subprocess.run", side_effect=fake_run) as run_mock,
+            ):
+                first = _render_pptx_pdf_preview_path(pptx_path)
+                second = _render_pptx_pdf_preview_path(pptx_path)
+
+            self.assertIsNotNone(first)
+            self.assertEqual(first, second)
+            self.assertTrue(first.is_file())
+            self.assertEqual(run_mock.call_count, 1)
+
+    def test_pptx_preview_cleanup_removes_intermediate_pdf(self):
+        with TemporaryDirectory() as tmpdir:
+            upload_dir = Path(tmpdir)
+            pptx_path = upload_dir / "styled.pptx"
+            create_styled_pptx(pptx_path, "Styled preview title")
+
+            def fake_run(command, **kwargs):
+                output_dir = Path(command[command.index("--outdir") + 1])
+                (output_dir / "input.pdf").write_bytes(b"%PDF-1.3\n% preview\n")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with (
+                patch("horbot.web.api._get_upload_dir", return_value=upload_dir),
+                patch("horbot.web.api._find_soffice_command", return_value="/usr/local/bin/soffice"),
+                patch("horbot.web.api.subprocess.run", side_effect=fake_run),
+            ):
+                pdf_path = _render_pptx_pdf_preview_path(pptx_path)
+                self.assertIsNotNone(pdf_path)
+                self.assertTrue(pdf_path.is_file())
+                self.assertTrue(_cleanup_pptx_pdf_preview(pptx_path))
+                self.assertFalse(pdf_path.exists())
 
     def test_build_preview_url_for_inline_office_documents(self):
         self.assertEqual(
@@ -296,6 +430,48 @@ class UploadApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(payload[0]["stored_filename"], "sample.docx")
             self.assertTrue(payload[0]["stored_filename"].endswith(".docx"))
             self.assertIsNone(payload[0]["minimax_file_id"])
+
+    async def test_upload_pptx_with_generic_content_type_still_has_inline_preview(self):
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with TemporaryDirectory() as tmpdir:
+            upload_dir = Path(tmpdir)
+            pptx_path = upload_dir / "sales-deck.pptx"
+            create_simple_pptx(pptx_path, "Generic content type PPTX preview")
+
+            with (
+                patch("horbot.web.api._get_upload_dir", return_value=upload_dir),
+                patch("horbot.web.api._find_soffice_command", return_value=None),
+                patch("horbot.web.api.shutil.which", return_value=None),
+                patch("horbot.web.api._pptx_visual_preview_plan", return_value=("text-fallback", 0)),
+            ):
+                async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                    upload_response = await client.post(
+                        "/api/upload",
+                        files={
+                            "files": (
+                                "sales-deck.pptx",
+                                io.BytesIO(pptx_path.read_bytes()),
+                                "application/octet-stream",
+                            )
+                        },
+                    )
+
+                    payload = upload_response.json()
+                    preview_response = await client.get(payload[0]["preview_url"])
+                    capabilities_response = await client.get(f"/api/files/{payload[0]['file_id']}/preview-capabilities")
+
+            self.assertEqual(upload_response.status_code, 200)
+            self.assertEqual(payload[0]["mime_type"], "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+            self.assertEqual(payload[0]["category"], "document")
+            self.assertTrue(payload[0]["preview_url"].endswith("/preview"))
+            self.assertIn("Generic content type PPTX preview", payload[0]["extracted_text"])
+            self.assertEqual(preview_response.status_code, 200)
+            self.assertIn("A reliable PPT renderer is not configured", preview_response.text)
+            self.assertEqual(capabilities_response.status_code, 200)
+            self.assertEqual(capabilities_response.json()["renderer"], "text-fallback")
 
     async def test_upload_duplicate_names_preserves_user_name_with_suffix_conflict_resolution(self):
         app = FastAPI()

@@ -55,8 +55,16 @@ class LiveArtifactTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["template"], "dashboard")
 
     def test_rejects_unsupported_template(self):
-        with self.assertRaises(ArtifactValidationError):
+        with self.assertRaisesRegex(ArtifactValidationError, "Supported templates"):
             normalize_renderable_spec({"title": "Unsafe", "template": "raw-html"})
+
+    def test_rejects_template_object_with_actionable_error(self):
+        with self.assertRaisesRegex(ArtifactValidationError, "must be a string"):
+            normalize_renderable_spec({
+                "title": "Unsafe",
+                "template": {"type": "html-dashboard"},
+                "items": [{"label": "Revenue", "value": "$1.2M"}],
+            })
 
     def test_cleanup_removes_expired_artifacts(self):
         with TemporaryDirectory() as tmpdir:

@@ -14,11 +14,14 @@ import mimetypes
 import re
 import secrets
 import shutil
+import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
 from loguru import logger
+from urllib.parse import unquote, urlparse
 
 from horbot.config.loader import get_cached_config, save_config
 from horbot.config.normalizer import (
@@ -87,7 +90,6 @@ from horbot.utils.helpers import ensure_dir, safe_filename
 from pydantic import BaseModel, Field
 from pydantic.alias_generators import to_camel
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 router = APIRouter()
 
@@ -4003,6 +4005,20 @@ INLINE_PREVIEW_MIME_TYPES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
+GENERIC_UPLOAD_MIME_TYPES = {
+    "",
+    "application/octet-stream",
+    "binary/octet-stream",
+}
+
+
+def _resolve_upload_mime_type(*, filename: str, declared_mime_type: str | None = None) -> str:
+    """Resolve a stable upload MIME type, falling back to the user-visible extension."""
+    declared = str(declared_mime_type or "").strip().lower()
+    guessed = mimetypes.guess_type(filename)[0] or ""
+    if guessed and (declared in GENERIC_UPLOAD_MIME_TYPES or declared not in ALLOWED_DOC_TYPES | ALLOWED_IMAGE_TYPES | ALLOWED_VIDEO_TYPES | ALLOWED_AUDIO_TYPES):
+        return guessed
+    return declared or guessed or "application/octet-stream"
 
 
 def _build_preview_url(file_id: str, mime_type: str, category: str) -> Optional[str]:
@@ -4013,6 +4029,10 @@ def _build_preview_url(file_id: str, mime_type: str, category: str) -> Optional[
 
 def _get_upload_metadata_dir() -> Path:
     return ensure_dir(_get_upload_dir() / ".meta")
+
+
+def _get_upload_preview_cache_dir() -> Path:
+    return ensure_dir(_get_upload_dir() / ".previews")
 
 
 def _upload_metadata_path(file_id: str) -> Path:
@@ -4103,7 +4123,7 @@ def _build_upload_response_for_path(
     file_id: str,
     original_name: str,
 ) -> UploadResponse:
-    mime_type = mimetypes.guess_type(stored_path.name)[0] or "application/octet-stream"
+    mime_type = _resolve_upload_mime_type(filename=original_name or stored_path.name)
     category = _get_file_category(mime_type)
     extracted_text = _extract_document_content(stored_path, mime_type) if category == "document" else None
     return UploadResponse(
@@ -5040,52 +5060,552 @@ def _render_docx_preview_html_from_xml(file_path: Path, title: str) -> str:
     return _render_preview_shell(title, f'<article class="doc-card">{"".join(rendered_blocks)}</article>')
 
 
-def _render_pptx_preview_html(file_path: Path, title: str) -> str:
+def _pptx_slide_paths(archive: Any) -> list[str]:
+    return sorted(
+        (
+            name
+            for name in archive.namelist()
+            if name.startswith("ppt/slides/slide") and name.endswith(".xml")
+        ),
+        key=_office_archive_sort_key,
+    )
+
+
+def _pptx_slide_count(file_path: Path) -> int:
     try:
-        import xml.etree.ElementTree as ET
         from zipfile import ZipFile
 
-        slide_cards: list[str] = []
         with ZipFile(file_path) as archive:
-            slide_paths = sorted(
-                (
-                    name
-                    for name in archive.namelist()
-                    if name.startswith("ppt/slides/slide") and name.endswith(".xml")
-                ),
-                key=_office_archive_sort_key,
+            return len(_pptx_slide_paths(archive))
+    except Exception as exc:
+        logger.warning("Failed to count PPTX slides for {}: {}", file_path, exc)
+        return 0
+
+
+def _find_soffice_command() -> str | None:
+    command = shutil.which("soffice") or shutil.which("libreoffice")
+    if command:
+        return command
+    mac_command = Path("/Applications/LibreOffice.app/Contents/MacOS/soffice")
+    if mac_command.is_file():
+        return str(mac_command)
+    return None
+
+
+def _pptx_preview_cache_key(file_path: Path) -> str:
+    stat = file_path.stat()
+    return hashlib.sha256(
+        f"{file_path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}".encode("utf-8", errors="ignore")
+    ).hexdigest()[:32]
+
+
+def _pptx_pdf_preview_cache_path(file_path: Path) -> Path:
+    digest = _pptx_preview_cache_key(file_path)
+    return _get_upload_preview_cache_dir() / f"{digest}.pdf"
+
+
+def _pptx_slide_image_cache_dir(file_path: Path) -> Path:
+    digest = _pptx_preview_cache_key(file_path)
+    return ensure_dir(_get_upload_preview_cache_dir() / f"{digest}-slides")
+
+
+def _pptx_slide_image_paths(file_path: Path) -> list[Path]:
+    image_dir = _pptx_slide_image_cache_dir(file_path)
+    return sorted(image_dir.glob("slide-*.png"))
+
+
+def _export_pptx_pdf_with_libreoffice(file_path: Path, output_path: Path) -> bool:
+    command = _find_soffice_command()
+    if not command:
+        return False
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="pptx-preview-", dir=str(_get_upload_preview_cache_dir())) as tmpdir:
+            tmp_root = Path(tmpdir)
+            profile_dir = tmp_root / "profile"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            safe_input = tmp_root / "input.pptx"
+            shutil.copy2(file_path, safe_input)
+            result = subprocess.run(
+                [
+                    command,
+                    "--headless",
+                    "--nologo",
+                    "--nodefault",
+                    "--nolockcheck",
+                    "--norestore",
+                    "--nofirststartwizard",
+                    f"-env:UserInstallation={profile_dir.as_uri()}",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    str(tmp_root),
+                    str(safe_input),
+                ],
+                timeout=300,
+                capture_output=True,
+                text=True,
+                check=False,
             )
-
-            for index, slide_path in enumerate(slide_paths, start=1):
-                root = ET.fromstring(archive.read(slide_path))
-                slide_texts = [
-                    node.text.strip()
-                    for node in root.iter()
-                    if node.tag.rsplit("}", 1)[-1] == "t" and node.text and node.text.strip()
-                ]
-                if not slide_texts:
-                    continue
-                lines_html = "".join(
-                    f'<p class="doc-list-item">{html.escape(line)}</p>'
-                    for line in slide_texts
+            if result.returncode != 0:
+                logger.warning(
+                    "LibreOffice PPTX preview export failed: code={}, stderr={}",
+                    result.returncode,
+                    (result.stderr or result.stdout or "").strip()[:500],
                 )
-                slide_cards.append(
-                    '<section class="slide-card">'
-                    f'<div class="slide-header">Slide {index}</div>'
-                    f'<div class="slide-body"><div class="slide-lines">{lines_html}</div></div>'
-                    '</section>'
-                )
+                return False
+            generated = tmp_root / "input.pdf"
+            if not generated.is_file() or generated.stat().st_size <= 0:
+                logger.warning("LibreOffice PPTX preview export produced no PDF: {}", generated)
+                return False
+            generated.replace(output_path)
+            return True
+    except subprocess.TimeoutExpired:
+        logger.warning("LibreOffice PPTX preview export timed out for {}", file_path)
+        return False
+    except Exception as exc:
+        logger.warning("LibreOffice PPTX preview export unavailable: {}", exc)
+        return False
 
-        if not slide_cards:
-            return _render_text_fallback_preview(
-                title,
-                _extract_text_from_pptx(file_path),
-            )
 
-        return _render_preview_shell(title, "".join(slide_cards))
-    except Exception as e:
-        logger.error(f"PPTX preview render error: {e}")
-        return _render_text_fallback_preview(title, _extract_text_from_pptx(file_path))
+def _render_pptx_pdf_preview_path(file_path: Path) -> Path | None:
+    """Render PPTX to PDF with a headless converter when available."""
+    try:
+        cache_path = _pptx_pdf_preview_cache_path(file_path)
+    except OSError as exc:
+        logger.warning("PPTX preview cache path unavailable: {}", exc)
+        return None
+
+    if cache_path.is_file() and cache_path.stat().st_size > 0:
+        return cache_path
+
+    tmp_path = cache_path.with_name(f"{cache_path.stem}.tmp.pdf")
+    try:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        if not _export_pptx_pdf_with_libreoffice(file_path, tmp_path):
+            return None
+        tmp_path.replace(cache_path)
+        return cache_path
+    except Exception as exc:
+        logger.warning("PPTX preview PDF export unavailable: {}", exc)
+        return None
+    finally:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
+
+
+def _cleanup_pptx_pdf_preview(file_path: Path) -> bool:
+    """Remove the intermediate LibreOffice PDF while keeping per-slide PNG caches."""
+    try:
+        cache_path = _pptx_pdf_preview_cache_path(file_path)
+        if cache_path.is_file():
+            cache_path.unlink()
+            return True
+    except Exception as exc:
+        logger.warning("Failed to clean PPTX preview PDF for {}: {}", file_path, exc)
+    return False
+
+
+def _render_pdf_pages_to_png(pdf_path: Path, output_dir: Path) -> list[Path]:
+    try:
+        import fitz
+
+        with fitz.open(pdf_path) as pdf:
+            rendered: list[Path] = []
+            for index, page in enumerate(pdf, start=1):
+                width = float(page.rect.width or 1)
+                zoom = max(1.0, min(3.0, 1920.0 / width))
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                output_path = output_dir / f"slide-{index:03d}.png"
+                pixmap.save(output_path)
+                rendered.append(output_path)
+            return rendered
+    except Exception as exc:
+        logger.warning("Failed to render PPTX PDF preview pages to PNG: {}", exc)
+        return []
+
+
+def _render_pdf_page_to_png(pdf_path: Path, output_path: Path, page: int) -> Path | None:
+    try:
+        import fitz
+
+        with fitz.open(pdf_path) as pdf:
+            if page < 1 or page > len(pdf):
+                return None
+            pdf_page = pdf[page - 1]
+            width = float(pdf_page.rect.width or 1)
+            zoom = max(1.0, min(3.0, 1920.0 / width))
+            pixmap = pdf_page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+            pixmap.save(output_path)
+            return output_path
+    except Exception as exc:
+        logger.warning("Failed to render PPTX PDF preview page {} to PNG: {}", page, exc)
+        return None
+
+
+def _pptx_visual_preview_plan(file_path: Path) -> tuple[str, int]:
+    """Return the visual renderer and the number of pages it can expose."""
+    if _pptx_pdf_preview_cache_path(file_path).is_file() or _find_soffice_command():
+        return "libreoffice-pdf-images", max(_pptx_slide_count(file_path), 1)
+    return "text-fallback", 0
+
+
+def _render_pptx_slide_image(file_path: Path, page: int) -> tuple[Path | None, str]:
+    """Render one PPTX slide image on demand from the LibreOffice PDF preview."""
+    if page < 1:
+        return None, "text-fallback"
+
+    output_dir = _pptx_slide_image_cache_dir(file_path)
+    output_path = output_dir / f"slide-{page:03d}.png"
+    if output_path.is_file() and output_path.stat().st_size > 0:
+        engine_path = output_dir / "engine.txt"
+        engine = engine_path.read_text(encoding="utf-8").strip() if engine_path.is_file() else "cached"
+        if engine == "libreoffice-pdf-images":
+            return output_path, engine
+
+    pdf_path = _render_pptx_pdf_preview_path(file_path)
+    if pdf_path and pdf_path.is_file():
+        rendered = _render_pdf_page_to_png(pdf_path, output_path, page)
+        if rendered:
+            (output_dir / "engine.txt").write_text("libreoffice-pdf-images", encoding="utf-8")
+            return rendered, "libreoffice-pdf-images"
+
+    return None, "text-fallback"
+
+
+def _render_pptx_text_fallback_html(file_path: Path, title: str) -> str:
+    """Show an honest fallback when no reliable visual PPTX renderer exists."""
+    safe_title = html.escape(title)
+    slide_count = _pptx_slide_count(file_path)
+    extracted_text = (_extract_text_from_pptx(file_path) or "").strip()
+    text_block = (
+        f'<pre class="text-fallback">{html.escape(extracted_text)}</pre>'
+        if extracted_text
+        else '<div class="empty">No extracted slide text is available.</div>'
+    )
+    body_html = f"""
+      <section class="doc-card">
+        <p class="eyebrow">PowerPoint Preview</p>
+        <h2 class="doc-heading">A reliable PPT renderer is not configured</h2>
+        <p class="doc-paragraph">
+          Horbot uses LibreOffice to convert PPTX files into PDF and then renders each page as a fixed slide image.
+          This avoids inaccurate browser-side PPTX layout reconstruction.
+        </p>
+        <p class="doc-paragraph">
+          Install LibreOffice with <code>./horbot.sh install libreoffice</code> to enable high-fidelity preview for {safe_title}.
+          {f"Detected slides: {slide_count}." if slide_count else ""}
+        </p>
+      </section>
+      <section class="doc-card">
+        <p class="eyebrow">Extracted Text</p>
+        {text_block}
+      </section>
+    """
+    return _render_preview_shell(title, body_html)
+
+
+def _render_pptx_preview_html(file_id: str, file_path: Path, title: str) -> str:
+    engine, visual_pages = _pptx_visual_preview_plan(file_path)
+    if visual_pages <= 0:
+        return _render_pptx_text_fallback_html(file_path, title)
+
+    safe_title = html.escape(title)
+    slide_count = _pptx_slide_count(file_path)
+    engine_label = {
+        "libreoffice-pdf-images": "LibreOffice PDF images",
+    }.get(engine, engine)
+    note_html = ""
+    js_file_id = json.dumps(file_id)
+    return f"""<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{safe_title}</title>
+    <style>
+      :root {{
+        color-scheme: light;
+        --bg: #0b1120;
+        --panel: rgba(15, 23, 42, 0.82);
+        --line: rgba(148, 163, 184, 0.28);
+        --text: #e5eefc;
+        --muted: #94a3b8;
+        --accent: #38bdf8;
+      }}
+      * {{ box-sizing: border-box; }}
+      html, body {{ margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }}
+      body {{
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background:
+          radial-gradient(circle at 18% 14%, rgba(56, 189, 248, 0.22), transparent 34%),
+          radial-gradient(circle at 82% 18%, rgba(251, 146, 60, 0.15), transparent 30%),
+          linear-gradient(180deg, #0b1120 0%, #111827 100%);
+      }}
+      .viewer {{
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        gap: 14px;
+        padding: 16px;
+      }}
+      .toolbar {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        background: var(--panel);
+        backdrop-filter: blur(16px);
+      }}
+      .title {{ min-width: 0; }}
+      .eyebrow {{
+        margin: 0 0 4px;
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }}
+      h1 {{
+        margin: 0;
+        max-width: min(72vw, 980px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 17px;
+        line-height: 1.35;
+      }}
+      .meta {{
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 12px;
+      }}
+      .pill {{
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 5px 9px;
+        background: rgba(15, 23, 42, 0.55);
+      }}
+      .stage-wrap {{
+        display: grid;
+        place-items: center;
+        min-height: 0;
+      }}
+      .stage {{
+        position: relative;
+        width: min(100%, calc((100vh - 154px) * 16 / 9));
+        aspect-ratio: 16 / 9;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: #020617;
+        box-shadow: 0 28px 70px rgba(0, 0, 0, 0.38);
+        overflow: hidden;
+      }}
+      .slide {{
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: #fff;
+      }}
+      .slide img {{
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        background: #fff;
+      }}
+      .slide.loading::after {{
+        content: "Loading slide...";
+        position: absolute;
+        inset: auto 16px 16px auto;
+        border-radius: 999px;
+        padding: 7px 11px;
+        background: rgba(15, 23, 42, 0.78);
+        color: white;
+        font-size: 12px;
+      }}
+      .slide.error {{
+        color: #0f172a;
+        padding: 24px;
+        text-align: center;
+      }}
+      .nav {{
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 10px 0 0;
+      }}
+      .nav button {{
+        min-width: 44px;
+        min-height: 36px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.72);
+        color: var(--text);
+        cursor: pointer;
+      }}
+      .nav button:disabled {{ opacity: 0.35; cursor: not-allowed; }}
+      .counter {{ color: var(--muted); font-size: 13px; min-width: 78px; text-align: center; }}
+      .pager {{
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 4px 2px 2px;
+        color: var(--muted);
+        font-size: 13px;
+      }}
+      .pager input {{
+        width: 88px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 8px 10px;
+        background: rgba(15, 23, 42, 0.72);
+        color: var(--text);
+        text-align: center;
+      }}
+      .notice {{
+        margin-top: 10px;
+        border: 1px solid rgba(251, 191, 36, 0.35);
+        border-radius: 16px;
+        padding: 10px 12px;
+        background: rgba(251, 191, 36, 0.12);
+        color: #fde68a;
+        font-size: 13px;
+        line-height: 1.55;
+      }}
+      @media (max-width: 700px) {{
+        .viewer {{ padding: 10px; gap: 10px; }}
+        .toolbar {{ align-items: flex-start; flex-direction: column; }}
+        h1 {{ max-width: 100%; white-space: normal; }}
+        .stage {{ width: 100%; }}
+      }}
+    </style>
+  </head>
+  <body>
+    <main class="viewer">
+      <header class="toolbar">
+        <div class="title">
+          <p class="eyebrow">LibreOffice slide preview</p>
+          <h1>{safe_title}</h1>
+          {note_html}
+        </div>
+        <div class="meta">
+          <span class="pill" id="counter-pill">1 / {visual_pages}</span>
+          <span class="pill">{html.escape(engine_label)}</span>
+          {f'<span class="pill">PPTX slides: {slide_count}</span>' if slide_count else ''}
+        </div>
+      </header>
+      <section>
+        <div class="stage-wrap">
+          <div class="stage" id="stage">
+            <section class="slide loading" id="slide">
+              <img id="slide-image" alt="Slide 1">
+            </section>
+          </div>
+        </div>
+        <div class="nav">
+          <button type="button" id="prev" aria-label="Previous slide">←</button>
+          <span class="counter" id="counter">1 / {visual_pages}</span>
+          <button type="button" id="next" aria-label="Next slide">→</button>
+        </div>
+      </section>
+      <footer class="pager">
+        <label for="page-input">Go to slide</label>
+        <input id="page-input" type="number" min="1" max="{visual_pages}" value="1" inputmode="numeric">
+        <span>of {visual_pages}</span>
+      </footer>
+    </main>
+    <script>
+      const totalSlides = {visual_pages};
+      const slide = document.getElementById('slide');
+      const slideImage = document.getElementById('slide-image');
+      const counter = document.getElementById('counter');
+      const counterPill = document.getElementById('counter-pill');
+      const prev = document.getElementById('prev');
+      const next = document.getElementById('next');
+      const pageInput = document.getElementById('page-input');
+      const fileId = {js_file_id};
+      const loaded = new Map();
+      let current = 1;
+
+      function slideUrl(page) {{
+        return `/api/files/${{encodeURIComponent(fileId)}}/preview/slides/${{page}}`;
+      }}
+
+      function cleanupPreviewPdf() {{
+        const url = `/api/files/${{encodeURIComponent(fileId)}}/preview/cleanup`;
+        if (navigator.sendBeacon) {{
+          navigator.sendBeacon(url);
+          return;
+        }}
+        fetch(url, {{ method: 'POST', keepalive: true }}).catch(() => {{}});
+      }}
+
+      function preload(page) {{
+        if (page < 1 || page > totalSlides || loaded.has(page)) return;
+        const image = new Image();
+        image.src = slideUrl(page);
+        loaded.set(page, image);
+      }}
+
+      function show(page) {{
+        current = Math.max(1, Math.min(page, totalSlides));
+        const label = `${{current}} / ${{totalSlides}}`;
+        if (counter) counter.textContent = label;
+        if (counterPill) counterPill.textContent = label;
+        if (pageInput) pageInput.value = String(current);
+        if (prev) prev.disabled = current === 1;
+        if (next) next.disabled = current === totalSlides;
+        if (slide) {{
+          slide.classList.add('loading');
+          slide.classList.remove('error');
+        }}
+        if (slideImage) {{
+          slideImage.onload = () => slide?.classList.remove('loading');
+          slideImage.onerror = () => {{
+            slide?.classList.remove('loading');
+            slide?.classList.add('error');
+            slideImage.removeAttribute('src');
+          }};
+          slideImage.alt = `Slide ${{current}}`;
+          slideImage.src = slideUrl(current);
+        }}
+        preload(current - 1);
+        preload(current + 1);
+      }}
+
+      prev?.addEventListener('click', () => show(current - 1));
+      next?.addEventListener('click', () => show(current + 1));
+      pageInput?.addEventListener('change', () => show(Number(pageInput.value || current)));
+      window.addEventListener('pagehide', cleanupPreviewPdf);
+      document.addEventListener('keydown', (event) => {{
+        if (event.key === 'ArrowRight' || event.key === ' ' || event.key === 'PageDown') {{
+          event.preventDefault();
+          show(current + 1);
+        }}
+        if (event.key === 'ArrowLeft' || event.key === 'PageUp') {{
+          event.preventDefault();
+          show(current - 1);
+        }}
+        if (event.key === 'Home') show(1);
+        if (event.key === 'End') show(totalSlides);
+      }});
+      show(1);
+    </script>
+  </body>
+</html>
+"""
 
 
 @router.post("/upload", response_model=List[UploadResponse])
@@ -5110,7 +5630,10 @@ async def upload_files(files: List[UploadFile] = File(...)):
             _resolve_display_filename(file.filename, fallback_stem="uploaded-file"),
             seen_display_names,
         )
-        mime_type = file.content_type or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
+        mime_type = _resolve_upload_mime_type(
+            filename=original_name,
+            declared_mime_type=file.content_type,
+        )
         category = _get_file_category(mime_type)
         
         # Keep storage filename opaque/unique, but preserve the original name for UI/history/download.
@@ -5163,8 +5686,11 @@ async def upload_files(files: List[UploadFile] = File(...)):
 async def get_file(file_id: str):
     """Get uploaded file by ID."""
     file_path, metadata = _resolve_uploaded_file_by_id(file_id)
-    mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
     download_name = str((metadata or {}).get("original_name") or file_path.name).strip() or file_path.name
+    mime_type = _resolve_upload_mime_type(
+        filename=download_name,
+        declared_mime_type=str((metadata or {}).get("mime_type") or ""),
+    )
     
     return FileResponse(
         path=file_path,
@@ -5178,8 +5704,11 @@ async def get_file(file_id: str):
 async def get_file_preview(file_id: str):
     """Get file preview for files that support embedded rendering."""
     file_path, metadata = _resolve_uploaded_file_by_id(file_id)
-    mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
     display_name = str((metadata or {}).get("original_name") or file_path.name).strip() or file_path.name
+    mime_type = _resolve_upload_mime_type(
+        filename=display_name,
+        declared_mime_type=str((metadata or {}).get("mime_type") or ""),
+    )
 
     if mime_type.startswith("image/") or mime_type == "application/pdf":
         return FileResponse(
@@ -5194,9 +5723,118 @@ async def get_file_preview(file_id: str):
         return HTMLResponse(_render_docx_preview_html(file_path, display_name), headers=_INLINE_PREVIEW_HEADERS)
 
     if mime_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-        return HTMLResponse(_render_pptx_preview_html(file_path, display_name), headers=_INLINE_PREVIEW_HEADERS)
+        return HTMLResponse(_render_pptx_preview_html(file_id, file_path, display_name), headers=_INLINE_PREVIEW_HEADERS)
 
     raise HTTPException(status_code=400, detail="Preview only available for supported inline file types")
+
+
+@router.post("/files/{file_id}/preview/cleanup")
+async def cleanup_pptx_preview(file_id: str):
+    """Cleanup transient intermediate files for a PPTX preview session."""
+    file_path, metadata = _resolve_uploaded_file_by_id(file_id)
+    display_name = str((metadata or {}).get("original_name") or file_path.name).strip() or file_path.name
+    mime_type = _resolve_upload_mime_type(
+        filename=display_name,
+        declared_mime_type=str((metadata or {}).get("mime_type") or ""),
+    )
+    if mime_type != "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        raise HTTPException(status_code=400, detail="Preview cleanup is only available for PowerPoint files")
+    return {"ok": True, "removed_pdf": _cleanup_pptx_pdf_preview(file_path)}
+
+
+@router.get("/files/{file_id}/preview/slides/{page}")
+async def get_pptx_preview_slide_image(file_id: str, page: int):
+    """Serve a rendered PPTX slide image from the LibreOffice PDF preview."""
+    file_path, metadata = _resolve_uploaded_file_by_id(file_id)
+    display_name = str((metadata or {}).get("original_name") or file_path.name).strip() or file_path.name
+    mime_type = _resolve_upload_mime_type(
+        filename=display_name,
+        declared_mime_type=str((metadata or {}).get("mime_type") or ""),
+    )
+    if mime_type != "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        raise HTTPException(status_code=400, detail="Slide image preview is only available for PowerPoint files")
+
+    image_path, _engine = _render_pptx_slide_image(file_path, page)
+    if not image_path:
+        raise HTTPException(status_code=404, detail="Slide image not found")
+
+    return FileResponse(
+        path=image_path,
+        media_type="image/png",
+        filename=f"{Path(display_name).stem}-slide-{page:03d}.png",
+        content_disposition_type="inline",
+        headers=_INLINE_PREVIEW_HEADERS,
+    )
+
+
+@router.get("/files/{file_id}/preview-capabilities")
+async def get_file_preview_capabilities(file_id: str):
+    """Describe which document preview renderer will be used for this file."""
+    file_path, metadata = _resolve_uploaded_file_by_id(file_id)
+    display_name = str((metadata or {}).get("original_name") or file_path.name).strip() or file_path.name
+    mime_type = _resolve_upload_mime_type(
+        filename=display_name,
+        declared_mime_type=str((metadata or {}).get("mime_type") or ""),
+    )
+    preview_url = _build_preview_url(file_id, mime_type, _get_file_category(mime_type))
+
+    if mime_type.startswith("image/"):
+        return {
+            "file_id": file_id,
+            "filename": display_name,
+            "mime_type": mime_type,
+            "supported": True,
+            "renderer": "image",
+            "preview_url": preview_url,
+        }
+    if mime_type == "application/pdf":
+        return {
+            "file_id": file_id,
+            "filename": display_name,
+            "mime_type": mime_type,
+            "supported": True,
+            "renderer": "pdf",
+            "preview_url": preview_url,
+        }
+    if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return {
+            "file_id": file_id,
+            "filename": display_name,
+            "mime_type": mime_type,
+            "supported": True,
+            "renderer": "html-docx",
+            "preview_url": preview_url,
+        }
+    if mime_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        cached_images = _pptx_slide_image_paths(file_path)
+        renderer, visual_pages = _pptx_visual_preview_plan(file_path)
+        libreoffice_command = _find_soffice_command()
+        return {
+            "file_id": file_id,
+            "filename": display_name,
+            "mime_type": mime_type,
+            "supported": True,
+            "renderer": renderer,
+            "preview_url": preview_url,
+            "slide_count": _pptx_slide_count(file_path),
+            "visual_pages": visual_pages,
+            "rendered_pages": len(cached_images),
+            "engines": [
+                {
+                    "id": "libreoffice",
+                    "available": bool(libreoffice_command),
+                    "command": libreoffice_command,
+                }
+            ],
+        }
+    return {
+        "file_id": file_id,
+        "filename": display_name,
+        "mime_type": mime_type,
+        "supported": False,
+        "renderer": "download",
+        "preview_url": None,
+    }
 
 
 @router.post("/artifacts/render")
@@ -5225,7 +5863,9 @@ async def serve_live_artifact_runtime_file(artifact_id: str, filename: str):
         media_type="text/html; charset=utf-8",
         headers={
             "Cache-Control": "no-store, max-age=0",
-            "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-ancestors 'self';",
+            # The iframe is sandboxed without allow-same-origin, so the artifact document
+            # gets an opaque origin. A frame-ancestors 'self' policy blocks that in Chrome.
+            "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none';",
         },
     )
 

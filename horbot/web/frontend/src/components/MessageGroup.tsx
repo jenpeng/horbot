@@ -22,6 +22,7 @@ interface MessageGroupProps {
 
 type AttachmentFile = MessageFile;
 type TranslateFn = (key: string, values?: Record<string, string | number>) => string;
+type FilePreviewRenderer = 'image' | 'audio' | 'pdf' | 'office-html' | 'text' | 'unsupported';
 
 const AVATAR_COLORS = [
   'from-blue-500 to-cyan-500',
@@ -362,11 +363,22 @@ const isTextLikeFile = (file: AttachmentFile): boolean =>
   || file.originalName.toLowerCase().endsWith('.md')
   || file.originalName.toLowerCase().endsWith('.txt');
 
+const getFilePreviewRenderer = (file: AttachmentFile): FilePreviewRenderer => {
+  if (file.category === 'image') return 'image';
+  if (file.category === 'audio') return 'audio';
+  if (isPdfFile(file)) return 'pdf';
+  if (isInlineOfficePreviewFile(file)) return 'office-html';
+  if (isOfficeFile(file) && file.extractedText?.trim()) return 'text';
+  if (isTextLikeFile(file)) return 'text';
+  return 'unsupported';
+};
+
 const getFilePreviewModalSize = (file: AttachmentFile | null): 'lg' | 'full' => {
   if (!file) {
     return 'lg';
   }
-  return file.category === 'image' || isPdfFile(file) || isInlineOfficePreviewFile(file) ? 'full' : 'lg';
+  const renderer = getFilePreviewRenderer(file);
+  return renderer === 'image' || renderer === 'pdf' || renderer === 'office-html' ? 'full' : 'lg';
 };
 
 const renderFilePreviewContent = (
@@ -377,8 +389,9 @@ const renderFilePreviewContent = (
   const previewUrl = getFilePreviewUrl(file);
   const iframePreviewUrl = appendPreviewNonce(previewUrl, previewNonce);
   const extractedText = file.extractedText?.trim();
+  const renderer = getFilePreviewRenderer(file);
 
-  if (file.category === 'image' && previewUrl) {
+  if (renderer === 'image' && previewUrl) {
     return (
       <div className="flex justify-center rounded-3xl bg-slate-100 p-3">
         <img
@@ -390,7 +403,7 @@ const renderFilePreviewContent = (
     );
   }
 
-  if (file.category === 'audio' && previewUrl) {
+  if (renderer === 'audio' && previewUrl) {
     return (
       <div className="space-y-4">
         <div className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-4">
@@ -414,7 +427,7 @@ const renderFilePreviewContent = (
     );
   }
 
-  if (isPdfFile(file) && previewUrl) {
+  if ((renderer === 'pdf' || renderer === 'office-html') && previewUrl) {
     return (
       <iframe
         key={`${file.fileId}-preview-${previewNonce}`}
@@ -425,18 +438,7 @@ const renderFilePreviewContent = (
     );
   }
 
-  if (isInlineOfficePreviewFile(file) && previewUrl) {
-    return (
-      <iframe
-        key={`${file.fileId}-preview-${previewNonce}`}
-        src={iframePreviewUrl}
-        title={file.originalName}
-        className="h-[72vh] w-full rounded-2xl border border-slate-200 bg-white"
-      />
-    );
-  }
-
-  if ((isOfficeFile(file) || isTextLikeFile(file)) && extractedText) {
+  if (renderer === 'text' && extractedText) {
     return (
       <div className="space-y-3">
         {isOfficeFile(file) && (
@@ -451,7 +453,7 @@ const renderFilePreviewContent = (
     );
   }
 
-  if (isTextLikeFile(file) && previewUrl) {
+  if (renderer === 'text' && previewUrl) {
     return (
       <iframe
         key={`${file.fileId}-preview-${previewNonce}`}
@@ -547,6 +549,10 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
     }
     window.open(targetUrl, '_blank', 'noopener,noreferrer');
   }, [previewedFile, t, toast]);
+
+  const handleCloseFilePreview = useCallback(() => {
+    setPreviewedFile(null);
+  }, []);
 
   const handlePreviewPreviousImage = useCallback(() => {
     if (!canPreviewPreviousImage) {
@@ -1460,7 +1466,7 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
       </Modal>
       <Modal
         isOpen={!!previewedFile}
-        onClose={() => setPreviewedFile(null)}
+        onClose={handleCloseFilePreview}
         title={previewedFile?.originalName || t('messageGroup.filePreviewTitle')}
         size={getFilePreviewModalSize(previewedFile)}
       >

@@ -146,6 +146,56 @@ def _build_loop(
 
 
 class AgentLoopWebEnforcementTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_agent_loop_keeps_explicit_no_web_renderable_local(self):
+        renderable = """```horbot-renderable
+{
+  "title": "销售漏斗实时看板",
+  "summary": "本地结构化数据渲染，无需联网核实。",
+  "template": "dashboard",
+  "items": [{"label": "新增线索", "value": "1,284", "note": "+18.6%"}],
+  "points": [{"label": "09:00", "value": 18}],
+  "sections": [{"title": "洞察", "body": "报价到成交阶段需要关注。"}]
+}
+```"""
+        provider = SequencedProvider([
+            LLMResponse(content=renderable),
+        ])
+        statuses: list[str] = []
+
+        async def collect_status(status: str) -> None:
+            statuses.append(status)
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            loop = _build_loop(provider, tempdir)
+            final_content, tools_used, messages, _, _ = await loop._run_agent_loop(
+                [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {
+                        "role": "user",
+                        "content": (
+                            "不需要联网，也不要打开浏览器或搜索资料。"
+                            "请生成一个可在 Horbot 聊天气泡中点击渲染的 HTML 效果：销售漏斗实时看板。"
+                            "只输出 horbot-renderable fenced code block，template 必须是 dashboard。"
+                        ),
+                    },
+                ],
+                session_key="web:dm_main",
+                web_search=True,
+                on_status=collect_status,
+            )
+
+            self.assertEqual(final_content, renderable)
+            self.assertEqual(provider.calls, 1)
+            self.assertNotIn("browser", tools_used)
+            self.assertNotIn("web_search", tools_used)
+            self.assertFalse(any("强制补做浏览器/搜索步骤" in status for status in statuses))
+            self.assertFalse(
+                any(
+                    m.get("role") == "user" and loop.WEB_ENFORCEMENT_PROMPT in str(m.get("content", ""))
+                    for m in messages
+                )
+            )
+
     async def test_previous_turn_web_fetch_does_not_satisfy_current_browser_request(self):
         provider = SequencedProvider([
             LLMResponse(content="我来在浏览器里打开新浪首页。"),

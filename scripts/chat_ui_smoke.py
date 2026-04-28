@@ -1585,6 +1585,8 @@ async def run_office_attachment_smoke(
         "user_group_contains_attachment_names": False,
         "assistant_contains_xlsx_token": False,
         "assistant_contains_pptx_token": False,
+        "pptx_preview_visible": False,
+        "pptx_preview_has_iframe": False,
         "tail_groups": [],
         "errors": [],
     }
@@ -1644,10 +1646,22 @@ async def run_office_attachment_smoke(
             result["assistant_contains_xlsx_token"] = xlsx_token in agent_text
             result["assistant_contains_pptx_token"] = pptx_token in agent_text
 
+        pptx_preview = await open_message_file_preview(
+            page,
+            message_text=prompt,
+            file_name="chat-office-smoke.pptx",
+        )
+        result["pptx_preview_visible"] = bool(pptx_preview.get("visible"))
+        result["pptx_preview_has_iframe"] = bool(pptx_preview.get("has_iframe"))
+
         if not result["xlsx_attachment_visible"]:
             result["errors"].append("xlsx_attachment_not_visible")
         if not result["pptx_attachment_visible"]:
             result["errors"].append("pptx_attachment_not_visible")
+        if not result["pptx_preview_visible"]:
+            result["errors"].append("pptx_preview_not_visible")
+        if not result["pptx_preview_has_iframe"]:
+            result["errors"].append("pptx_preview_iframe_not_visible")
         if not result["user_group_contains_attachment_names"]:
             result["errors"].append("user_group_missing_office_attachment_names")
         if not result["assistant_contains_xlsx_token"]:

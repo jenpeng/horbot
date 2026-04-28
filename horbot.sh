@@ -69,6 +69,44 @@ detect_npm_command() {
     return 1
 }
 
+detect_brew_command() {
+    if command -v brew >/dev/null 2>&1; then
+        command -v brew
+        return 0
+    fi
+
+    if [ -x "/opt/homebrew/bin/brew" ]; then
+        echo "/opt/homebrew/bin/brew"
+        return 0
+    fi
+
+    if [ -x "/usr/local/bin/brew" ]; then
+        echo "/usr/local/bin/brew"
+        return 0
+    fi
+
+    return 1
+}
+
+detect_libreoffice_command() {
+    if command -v soffice >/dev/null 2>&1; then
+        command -v soffice
+        return 0
+    fi
+
+    if command -v libreoffice >/dev/null 2>&1; then
+        command -v libreoffice
+        return 0
+    fi
+
+    if [ -x "/Applications/LibreOffice.app/Contents/MacOS/soffice" ]; then
+        echo "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+        return 0
+    fi
+
+    return 1
+}
+
 ensure_path_prefix() {
     local dir="$1"
     if [ -z "$dir" ]; then
@@ -132,6 +170,26 @@ check_frontend() {
     fi
 }
 
+check_libreoffice() {
+    print_info "检查 LibreOffice..."
+
+    local libreoffice_cmd
+    libreoffice_cmd="$(detect_libreoffice_command || true)"
+    if [ -n "$libreoffice_cmd" ]; then
+        local version
+        version="$("$libreoffice_cmd" --version 2>/dev/null | head -n 1 || true)"
+        if [ -n "$version" ]; then
+            print_success "LibreOffice 已安装: $version"
+        else
+            print_success "LibreOffice 已安装: $libreoffice_cmd"
+        fi
+        return 0
+    fi
+
+    print_warning "LibreOffice 未安装，PPTX 高保真预览不可用"
+    return 1
+}
+
 # 安装后端依赖
 install_backend() {
     print_info "安装后端依赖..."
@@ -147,6 +205,34 @@ install_backend() {
     pip install -e "$PROJECT_ROOT"
     
     print_success "后端依赖安装完成"
+}
+
+install_libreoffice() {
+    print_info "检查 LibreOffice..."
+
+    if check_libreoffice >/dev/null 2>&1; then
+        check_libreoffice
+        return 0
+    fi
+
+    local brew_cmd
+    brew_cmd="$(detect_brew_command || true)"
+    if [ -z "$brew_cmd" ]; then
+        print_error "未找到 Homebrew，无法自动安装 LibreOffice"
+        print_info "请先安装 Homebrew，或手动安装 LibreOffice: https://www.libreoffice.org/download/download-libreoffice/"
+        return 1
+    fi
+
+    print_info "通过 Homebrew 安装 LibreOffice..."
+    "$brew_cmd" install --cask libreoffice
+
+    if check_libreoffice; then
+        print_success "LibreOffice 安装完成，PPTX 预览将使用 LibreOffice 转 PDF/PNG"
+        return 0
+    fi
+
+    print_error "LibreOffice 安装后仍未检测到 soffice"
+    return 1
 }
 
 detect_officecli_command() {
@@ -316,6 +402,7 @@ install_frontend() {
 install_all() {
     install_backend
     install_frontend
+    install_libreoffice
     install_officecli
     create_default_config
     print_success "所有依赖安装完成"
@@ -777,12 +864,14 @@ USER_EOF
 check_all() {
     local backend_ok=true
     local frontend_ok=true
+    local libreoffice_ok=true
     
     check_backend || backend_ok=false
     check_frontend || frontend_ok=false
+    check_libreoffice || libreoffice_ok=false
     
     echo ""
-    if $backend_ok && $frontend_ok; then
+    if $backend_ok && $frontend_ok && $libreoffice_ok; then
         print_success "所有依赖已就绪"
         return 0
     else
@@ -1656,6 +1745,28 @@ smoke_dm_team_dispatch() {
     PLAYWRIGHT_BROWSERS_PATH="$browser_path" "$python_cmd" "$script" --scenario dm-team-dispatch "$@"
 }
 
+smoke_live_artifact() {
+    ensure_dirs
+
+    local script="$PROJECT_ROOT/scripts/live_artifact_smoke.py"
+    if [ ! -f "$script" ]; then
+        print_error "Live Artifact 烟测脚本不存在: $script"
+        return 1
+    fi
+
+    local python_cmd="python3"
+    if [ -x "$VENV_DIR/bin/python" ]; then
+        python_cmd="$VENV_DIR/bin/python"
+    fi
+
+    local browser_path="$PROJECT_ROOT/.playwright-browsers"
+
+    ensure_browser_services_ready
+
+    print_info "运行 Live Artifact 真实浏览器烟雾测试..."
+    PLAYWRIGHT_BROWSERS_PATH="$browser_path" "$python_cmd" "$script" "$@"
+}
+
 smoke_team_chat() {
     smoke_chat_ui "$@"
 }
@@ -2081,6 +2192,7 @@ smoke_browser_e2e() {
     smoke_dashboard "$@" || exit_code=$?
     smoke_skills "$@" || exit_code=$?
     smoke_performance "$@" || exit_code=$?
+    smoke_live_artifact "$@" || exit_code=$?
     smoke_chat_error_retry "$@" || exit_code=$?
     smoke_chat_memory_trace "$@" || exit_code=$?
     smoke_chat_interrupt "$@" || exit_code=$?
@@ -2117,6 +2229,9 @@ smoke_test() {
             ;;
         officecli)
             smoke_officecli "$@"
+            ;;
+        live-artifact)
+            smoke_live_artifact "$@"
             ;;
         browser-e2e)
             smoke_browser_e2e "$@"
@@ -2193,10 +2308,12 @@ show_help() {
     echo "  check              检查所有依赖"
     echo "  check backend      检查后端依赖"
     echo "  check frontend     检查前端依赖"
+    echo "  check libreoffice  检查 LibreOffice（PPTX 预览转换依赖）"
     echo ""
     echo "  install            安装所有依赖并创建默认配置"
     echo "  install backend    安装后端依赖"
     echo "  install frontend   安装前端依赖"
+    echo "  install libreoffice 安装 LibreOffice（PPTX 高保真预览转换依赖）"
     echo "  install officecli  安装或升级 OfficeCLI，并补齐默认 MCP 配置"
     echo ""
     echo "  config             创建默认配置文件"
@@ -2221,7 +2338,8 @@ show_help() {
     echo "  smoke external-inbound-memory  运行外部入站 -> agent 执行 -> 来源记忆元数据回查烟雾测试"
     echo "  smoke bound-channel-dispatch  运行单聊 -> Agent 工具调用 -> 绑定外部渠道路由烟雾测试"
     echo "  smoke officecli    运行 OfficeCLI 的 docx/xlsx/pptx 直接烟雾测试"
-    echo "  smoke browser-e2e  运行真实浏览器端到端回归（Configuration + Agent 资产 + Dashboard + Skills + Performance + 失败重试 + 记忆引用 + 接力中断 + 附件上传 + 办公附件上传 + 图片/音频识别 + 粘贴上传 + 拖拽上传 + 附件重试 + 附件顺序 + 单聊 + 团队接力）"
+    echo "  smoke live-artifact  运行聊天 Live Artifact 渲染真实浏览器烟雾测试"
+    echo "  smoke browser-e2e  运行真实浏览器端到端回归（Configuration + Agent 资产 + Dashboard + Skills + Performance + Live Artifact + 失败重试 + 记忆引用 + 接力中断 + 附件上传 + 办公附件上传 + 图片/音频识别 + 粘贴上传 + 拖拽上传 + 附件重试 + 附件顺序 + 单聊 + 团队接力）"
     echo "  smoke config       运行 Configuration 页面烟雾测试"
     echo "  smoke agent-assets 运行多 Agent 页面资产管理烟雾测试"
     echo "  smoke dashboard    运行 Dashboard 页面烟雾测试"
@@ -2315,6 +2433,7 @@ main() {
                 all) check_all ;;
                 backend) check_backend ;;
                 frontend) check_frontend ;;
+                libreoffice) check_libreoffice ;;
                 *) print_error "未知参数: $2"; show_help; exit 1 ;;
             esac
             ;;
@@ -2323,6 +2442,7 @@ main() {
                 all) install_all ;;
                 backend) install_backend ;;
                 frontend) install_frontend ;;
+                libreoffice) install_libreoffice ;;
                 officecli) install_officecli; create_default_config ;;
                 *) print_error "未知参数: $2"; show_help; exit 1 ;;
             esac

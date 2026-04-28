@@ -28,4 +28,31 @@ describe('parseRenderableArtifacts', () => {
     expect(parsed.artifacts).toHaveLength(1);
     expect(parsed.artifacts[0].template).toBe('map-story');
   });
+
+  it('keeps invalid renderable blocks visible instead of creating a broken render card', () => {
+    const content = `错误示例
+
+\`\`\`horbot-renderable
+{"title":"销售看板","template":{"type":"html-dashboard"},"items":[{"label":"收入","value":"128万"}]}
+\`\`\`
+`;
+
+    const parsed = parseRenderableArtifacts(content);
+
+    expect(parsed.artifacts).toHaveLength(0);
+    expect(parsed.content).toContain('```horbot-renderable');
+    expect(parsed.content).toContain('"type":"html-dashboard"');
+  });
+
+  it('rejects unsupported template strings before hitting the render API', () => {
+    const parsed = parseRenderableArtifacts(`摘要说明
+
+\`\`\`horbot-renderable
+{"title":"销售看板","template":"raw-html","items":[{"label":"收入","value":"128万"}]}
+\`\`\`
+`);
+
+    expect(parsed.artifacts).toHaveLength(0);
+    expect(parsed.content).toContain('"template":"raw-html"');
+  });
 });

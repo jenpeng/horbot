@@ -233,6 +233,12 @@ class ToolRegistry:
             return WebRequirement()
 
         msg_lower = normalized.lower()
+        if ToolRegistry._has_negated_web_intent(msg_lower):
+            return WebRequirement(
+                category="none",
+                requires_web_access=False,
+                reason="user explicitly disabled web access",
+            )
 
         direct_web_hints = (
             "http://",
@@ -254,8 +260,22 @@ class ToolRegistry:
             "页面标题",
             "截图",
             "screenshot",
-            "click",
-            "点击",
+        )
+        browser_action_hints = ("click", "点击")
+        browser_action_context_hints = (
+            "browser",
+            "浏览器",
+            "网页",
+            "网站",
+            "页面",
+            "page",
+            "website",
+            "url",
+            "link",
+            "链接",
+            "http://",
+            "https://",
+            "www.",
         )
         freshness_hints = (
             "最新",
@@ -350,7 +370,10 @@ class ToolRegistry:
             "wiki",
         )
 
-        has_direct_web = any(token in msg_lower for token in direct_web_hints)
+        has_direct_web = any(token in msg_lower for token in direct_web_hints) or (
+            any(token in msg_lower for token in browser_action_hints)
+            and any(token in msg_lower for token in browser_action_context_hints)
+        )
         has_lookup_verb = any(token in msg_lower for token in lookup_verbs)
         has_source_hint = any(token in msg_lower for token in source_hints)
         has_freshness_hint = any(token in msg_lower for token in freshness_hints)
@@ -378,6 +401,27 @@ class ToolRegistry:
             )
 
         return WebRequirement()
+
+    @staticmethod
+    def _has_negated_web_intent(msg_lower: str) -> bool:
+        return any(
+            phrase in msg_lower
+            for phrase in (
+                "不需要联网",
+                "不用联网",
+                "不要联网",
+                "无需联网",
+                "不联网",
+                "无需搜索",
+                "不用搜索",
+                "不要搜索",
+                "不需要搜索",
+                "no web",
+                "without web",
+                "no search",
+                "without search",
+            )
+        )
     
     def get_definitions_smart(self, user_message: Any = None, max_tools: int = 50, include_web_search: bool = False) -> list[dict[str, Any]]:
         """
@@ -418,6 +462,10 @@ class ToolRegistry:
             "powerpoint": {"mcp_office-powerpoint"},
             "演示": {"mcp_office-powerpoint"},
             "幻灯片": {"mcp_office-powerpoint"},
+            "horbot-renderable": {"message"},
+            "live artifact": {"message"},
+            "可点击渲染": {"message"},
+            "点击渲染": {"message"},
             "word": {"mcp_office-word", "mcp_officecli"},
             "docx": {"mcp_office-word", "mcp_officecli"},
             "文档": {"mcp_office-word", "mcp_officecli", "write_file", "read_file"},
@@ -445,8 +493,6 @@ class ToolRegistry:
             "https://": {"browser", "browser_", "mcp_browser", "web_fetch"},
             "screenshot": {"browser", "browser_", "mcp_browser"},
             "截图": {"browser", "browser_", "mcp_browser"},
-            "click": {"browser", "browser_", "mcp_browser"},
-            "点击": {"browser", "browser_", "mcp_browser"},
             "搜索": {"web_search"},
             "搜一下": {"web_search"},
             "检索": {"web_search"},
@@ -510,6 +556,8 @@ class ToolRegistry:
         if normalized_user_message:
             msg_lower = normalized_user_message.lower()
             for keyword, tool_prefixes in KEYWORD_TOOL_MAP.items():
+                if keyword in {"联网", "搜索", "搜一下", "search"} and self._has_negated_web_intent(msg_lower):
+                    continue
                 if keyword in msg_lower:
                     keyword_matched = True
                     for prefix in tool_prefixes:

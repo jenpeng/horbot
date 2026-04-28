@@ -25,6 +25,7 @@ ALLOWED_TEMPLATES = {
     "process-map",
     "interactive-report",
 }
+ALLOWED_TEMPLATES_LABEL = ", ".join(sorted(ALLOWED_TEMPLATES))
 
 
 class ArtifactValidationError(ValueError):
@@ -76,9 +77,18 @@ def normalize_renderable_spec(value: Any) -> dict[str, Any]:
                 merged[key] = spec[key]
         spec = merged
 
-    template = str(spec.get("template") or "dashboard").strip().lower()
+    raw_template = spec.get("template") or "dashboard"
+    if not isinstance(raw_template, str):
+        raise ArtifactValidationError(
+            "Renderable template must be a string from the supported whitelist "
+            f"({ALLOWED_TEMPLATES_LABEL}). Do not use a template object, raw HTML, or CSS."
+        )
+
+    template = raw_template.strip().lower()
     if template not in ALLOWED_TEMPLATES:
-        raise ArtifactValidationError(f"Unsupported renderable template: {template}")
+        raise ArtifactValidationError(
+            f"Unsupported renderable template: {template}. Supported templates: {ALLOWED_TEMPLATES_LABEL}."
+        )
 
     title = _clean_text(spec.get("title") or spec.get("name") or "Live Artifact", 120)
     summary = _clean_text(spec.get("summary") or spec.get("description") or "", 600)

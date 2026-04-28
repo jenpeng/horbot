@@ -20,4 +20,6 @@ Use this note when a PPT workflow benefits from a chat-side interactive preview 
 ## Constraints
 - Do not paste raw generated HTML into the PPT workflow.
 - Treat the renderable JSON as the source of truth.
+- Keep `template` as a string from the supported Horbot whitelist: `dashboard`, `chart-story`, `data-workbench`, `map-story`, `process-map`, or `interactive-report`.
+- Do not place HTML, CSS, JavaScript, or a custom template object inside the renderable spec. Use `items`, `points`, `sections`, and `rows` as the reusable data contract.
 - If the user wants the live view preserved, export it separately or recreate it from the JSON spec; otherwise runtime HTML is temporary.

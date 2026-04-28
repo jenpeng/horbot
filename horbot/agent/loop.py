@@ -442,6 +442,55 @@ class AgentLoop:
         return False
 
     @staticmethod
+    def _is_local_renderable_request(user_message: Any) -> bool:
+        normalized = ToolRegistry._normalize_user_message_for_matching(user_message).lower()
+        if not normalized:
+            return False
+        renderable_hints = (
+            "horbot-renderable",
+            "live artifact",
+            "可点击渲染",
+            "点击渲染",
+            "聊天气泡中点击渲染",
+        )
+        return any(hint in normalized for hint in renderable_hints)
+
+    @classmethod
+    def _resolve_web_requirement(cls, user_message: Any, tools: ToolRegistry) -> WebRequirement:
+        normalized = ToolRegistry._normalize_user_message_for_matching(user_message).lower()
+        if normalized and ToolRegistry._has_negated_web_intent(normalized):
+            return WebRequirement(
+                category="none",
+                requires_web_access=False,
+                reason="user explicitly disabled web access",
+            )
+
+        requirement = tools.classify_web_requirement(user_message)
+        if requirement.requires_web_access and cls._is_local_renderable_request(user_message):
+            has_external_target = any(
+                token in normalized
+                for token in (
+                    "http://",
+                    "https://",
+                    "www.",
+                    "网页",
+                    "网站",
+                    "url",
+                    "链接",
+                    "官网",
+                    "官方文档",
+                    "github",
+                )
+            )
+            if not has_external_target:
+                return WebRequirement(
+                    category="none",
+                    requires_web_access=False,
+                    reason="local renderable artifact generation does not require web access",
+                )
+        return requirement
+
+    @staticmethod
     def _has_any_tool_result(messages: list[dict[str, Any]], tool_name: str) -> bool:
         return any(
             message.get("role") == "tool" and message.get("name") == tool_name
@@ -1454,7 +1503,7 @@ class AgentLoop:
         self.tools.set_web_search_enabled(bool(web_search) and bool(self._get_web_search_config().get("enabled", True)))
         
         user_message = self._find_latest_real_user_message(initial_messages)
-        web_requirement = self.tools.classify_web_requirement(user_message)
+        web_requirement = self._resolve_web_requirement(user_message, self.tools)
         messages = self._inject_web_requirement_guidance(messages, web_requirement)
         current_request_start = self._find_latest_real_user_message_index(messages)
 

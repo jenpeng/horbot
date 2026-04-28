@@ -144,6 +144,40 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertFalse(requirement.requires_web_access)
         self.assertEqual(requirement.category, "none")
 
+    def test_classify_web_requirement_keeps_click_to_render_artifacts_local(self):
+        requirement = ToolRegistry.classify_web_requirement(
+            "请生成一个可在 Horbot 聊天气泡中点击渲染的 HTML 效果，输出 horbot-renderable JSON。"
+        )
+
+        self.assertFalse(requirement.requires_web_access)
+        self.assertEqual(requirement.category, "none")
+
+    def test_classify_web_requirement_honors_explicit_no_web_for_renderables(self):
+        requirement = ToolRegistry.classify_web_requirement(
+            "不需要联网，也不要打开浏览器或搜索资料。请生成一个可点击渲染的 horbot-renderable 销售看板。"
+        )
+
+        self.assertFalse(requirement.requires_web_access)
+        self.assertEqual(requirement.category, "none")
+
+    def test_get_definitions_smart_does_not_add_browser_for_local_render_click(self):
+        registry = ToolRegistry(PermissionManager(profile="full"))
+        registry.register(DummyTool("message"))
+        registry.register(DummyTool("browser"))
+        registry.register(DummyTool("web_search"))
+        registry.register(DummyTool("web_fetch"))
+
+        definitions = registry.get_definitions_smart(
+            "不需要联网。请生成一个可点击渲染的销售漏斗实时看板，按当前 Horbot Live Artifact 协议输出。",
+            include_web_search=True,
+        )
+        names = {definition["function"]["name"] for definition in definitions}
+
+        self.assertIn("message", names)
+        self.assertNotIn("browser", names)
+        self.assertNotIn("web_search", names)
+        self.assertNotIn("web_fetch", names)
+
     def test_get_definitions_smart_selects_officecli_tools_for_docx_requests(self):
         registry = ToolRegistry(PermissionManager(profile="full", allow=["mcp_officecli_get", "mcp_officecli_set", "read_file", "message"]))
         registry.register(DummyTool("message"))

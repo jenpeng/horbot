@@ -7,6 +7,18 @@ export interface ParsedRenderableArtifacts {
 
 const RENDERABLE_BLOCK_RE = /```(?:json\s+)?horbot-renderable\s*\n([\s\S]*?)```|```horbot-renderable\s*\n([\s\S]*?)```/gi;
 const JSON_RENDERABLE_BLOCK_RE = /```json\s*\n([\s\S]*?)```/gi;
+const SUPPORTED_RENDERABLE_TEMPLATES = new Set([
+  'dashboard',
+  'chart-story',
+  'data-workbench',
+  'map-story',
+  'process-map',
+  'interactive-report',
+]);
+
+const isSupportedTemplate = (value: unknown): value is string => (
+  typeof value === 'string' && SUPPORTED_RENDERABLE_TEMPLATES.has(value.trim().toLowerCase())
+);
 
 const isRenderableSpec = (value: unknown): value is RenderableArtifactSpec => {
   if (!value || typeof value !== 'object') {
@@ -14,10 +26,10 @@ const isRenderableSpec = (value: unknown): value is RenderableArtifactSpec => {
   }
   const item = value as Record<string, unknown>;
   if (item.response_mode === 'renderable_spec' && typeof item.artifact === 'object') {
-    return true;
+    return isRenderableSpec(item.artifact);
   }
   return (
-    typeof item.template === 'string'
+    isSupportedTemplate(item.template)
     && (
       Array.isArray(item.items)
       || Array.isArray(item.cards)
