@@ -65,6 +65,19 @@ Uploads are stored under `.horbot/data/uploads`.
 
 If a remote image link can be cached successfully, later history loads use a local attachment preview URL and preserve filename plus file size in the card. If caching fails, the chat still falls back to a remote image attachment instead of showing only a bare link.
 
+### PPTX Preview
+
+PPTX files use a LibreOffice-based high-fidelity preview path when `soffice` is available. Horbot converts the deck to an intermediate PDF with an isolated LibreOffice profile, then renders slide PNGs lazily as you open or navigate pages. This avoids browser-side PPTX reconstruction, which often loses layout, fonts, and positioning.
+
+The preview iframe loads only the current slide and nearby slides. Closing or unloading the preview asks the backend to remove the intermediate PDF; already rendered slide PNGs may remain in the upload preview cache so reopening the same file is faster.
+
+Install or verify the dependency with:
+
+```bash
+./horbot.sh install libreoffice
+./horbot.sh check libreoffice
+```
+
 ## Live Artifacts
 
 Agents can include a structured `horbot-renderable` block when a reply is better as an interactive view instead of plain Markdown. The chat bubble then shows a Live Artifact card with a `Render` button.

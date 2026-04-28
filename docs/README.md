@@ -14,6 +14,7 @@ Horbot is a lightweight multi-agent assistant stack with:
 - browser-persisted UI locale switching for English, Simplified Chinese, and Thai
 - chat, attachments, and relay-style team conversations
 - chat-side Live Artifacts for temporary interactive dashboards, charts, maps, process views, and reports
+- high-fidelity PPTX previews through LibreOffice PDF export and lazy per-slide PNG rendering
 - compact chat layout plus baton-aware relay status in team conversations
 - automatic DM -> team -> DM baton navigation in Web Chat, with a temporary top banner so relay-driven view changes are explicit
 - promoted remote image links that render as normal image-card attachments, plus a manual remote-image cache clear entry in Configuration
@@ -73,5 +74,6 @@ Current web runtime notes:
 - the agent now uses `browser`, `web_search`, and `web_fetch` as the standard web/search tools
 - `./horbot.sh install` now also bootstraps `OfficeCLI`, injects a default `officecli mcp` server into `.horbot/config.json`, and appends the detected OfficeCLI bin directory to `tools.exec.pathAppend`
 - `./horbot.sh install officecli` can be used to install or refresh only the OfficeCLI dependency and default MCP wiring
+- `./horbot.sh install libreoffice` installs LibreOffice for PPTX preview; `./horbot.sh check libreoffice` verifies the detected `soffice` command
 - `./horbot.sh smoke officecli` validates direct `officecli` document operations for `.docx`, `.xlsx`, and `.pptx`
 - Configuration now exposes a remote-image cache status panel and manual clear action for chat image-card materialization

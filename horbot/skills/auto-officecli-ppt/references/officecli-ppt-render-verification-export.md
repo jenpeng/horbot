@@ -6,7 +6,7 @@ Use this after the structural overflow detector has already flagged suspicious s
 
 This workflow is for:
 
-- exporting a review PDF through PowerPoint, Keynote, or LibreOffice
+- exporting a review PDF through LibreOffice
 - handing suspicious slides to a human reviewer
 - preparing a later OCR or vision-model stage
 
@@ -16,21 +16,17 @@ This workflow is for:
 python scripts/pptx_overflow_detector.py path/to/deck.pptx --json --verify-render
 ```
 
-If you want to force the renderer:
+Force LibreOffice for the current Horbot workflow:
 
 ```bash
-python scripts/pptx_overflow_detector.py path/to/deck.pptx --json --verify-render --renderer powerpoint
+python scripts/pptx_overflow_detector.py path/to/deck.pptx --json --verify-render --renderer libreoffice
 ```
 
-## Renderer priority
+## Renderer policy
 
-The current implementation prefers:
+Horbot's Web PPTX preview uses LibreOffice only: PPTX is converted to PDF, then pages are rendered to PNG lazily.
 
-1. `powerpoint`
-2. `keynote`
-3. `libreoffice`
-
-That order matches the practical goal of verifying against the delivery renderer when possible.
+If an older local detector still exposes other renderer options, do not use them for the Horbot preview path. Prefer `--renderer libreoffice` so review output matches the Web UI pipeline.
 
 ## What the export gives you
 
@@ -51,5 +47,5 @@ That order matches the practical goal of verifying against the delivery renderer
 ## Pitfalls
 
 - This stage currently exports rendered review assets; it does not yet auto-decide overflow from pixels.
-- PowerPoint or Keynote automation can be slower than XML inspection and may fail if the local app cannot be scripted.
-- If no renderer is available, install or enable PowerPoint, Keynote, or LibreOffice and rerun.
+- LibreOffice conversion is slower than XML inspection, especially for very large decks.
+- If no renderer is available, run `./horbot.sh install libreoffice` or install LibreOffice manually, then rerun.

@@ -75,6 +75,7 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 - Live Artifact cards for structured agent output such as dashboards, chart stories, map stories, process views, and interactive reports
 - Denser chat bubbles and tighter Markdown spacing to reduce blank space in long conversations
 - Inline preview for image, audio, PDF, Office, and text attachments
+- High-fidelity PPTX preview through LibreOffice PDF export plus lazy per-slide PNG rendering
 - Office document operations via OfficeCLI MCP, including structure-aware create/edit/view/validate flows for `.docx`, `.xlsx`, and `.pptx`
 - Standalone remote image URLs in assistant history are promoted into normal image-card attachments when possible, instead of degrading to bare links
 - Multi-image preview modals now include a bottom thumbnail strip for faster visual switching
@@ -112,7 +113,7 @@ cd horbot
 ./horbot.sh start
 ```
 
-`./horbot.sh install` now also installs `OfficeCLI`, writes a default `officecli mcp` server into `./.horbot/config.json`, and appends the detected OfficeCLI bin directory to `tools.exec.pathAppend` so the agent can use Office document tools immediately after setup.
+`./horbot.sh install` now also installs `OfficeCLI` and checks LibreOffice. OfficeCLI is wired into `./.horbot/config.json` for document operations; LibreOffice is used by the Web UI for high-fidelity PPTX preview.
 
 To validate the Office document toolchain end to end, run `./horbot.sh smoke officecli`. It directly checks `.docx`, `.xlsx`, and `.pptx` create/edit/view/validate flows with the locally installed `officecli`.
 
@@ -127,6 +128,8 @@ Common commands:
 ./horbot.sh status
 ./horbot.sh restart
 ./horbot.sh install officecli
+./horbot.sh install libreoffice
+./horbot.sh check libreoffice
 ./horbot.sh smoke officecli
 ./horbot.sh logs backend
 ./horbot.sh smoke browser-e2e

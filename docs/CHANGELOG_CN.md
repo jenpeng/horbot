@@ -11,6 +11,13 @@
 - 新增内置 `live-artifact-studio` 技能，指导 Agent 判断何时使用 Markdown，何时输出结构化可渲染数据
 - 为 `auto-officecli-ppt` 技能家族补充 Live Artifact 到 PPT 预览/生成的参考技巧
 
+### PPTX 高保真预览
+
+- PPTX 预览从浏览器侧重建版式改为 LibreOffice 优先链路：PPTX -> PDF -> 按页懒加载 PNG
+- 新增 `GET /api/files/{file_id}/preview-capabilities`、`GET /api/files/{file_id}/preview/slides/{page}`、`POST /api/files/{file_id}/preview/cleanup`
+- `horbot.sh` 新增 `install libreoffice` 与 `check libreoffice`
+- 新增 PyMuPDF 作为页面栅格化依赖，并补充 LibreOffice 导出缓存与清理相关测试
+
 ## 2026-04-27
 
 ### External Agent Adapter 架构

@@ -27,6 +27,8 @@ horbot 采用模块化设计，核心组件包括：
 - Agent 默认使用 `browser` / `web_search` / `web_fetch` 处理联网搜索、网页抓取与基础网页交互
 - 浏览器 MCP 默认走 Playwright，不再依赖 `horbot.sh` 托管的内置 `web-access` 服务
 - 聊天历史层会尽量把 assistant 正文中的独立远程图片链接提升为 `files` 附件，并将可缓存的远程图片落盘到 `.horbot/data/uploads`，这样前端在刷新历史后仍能保持统一图片卡片与预览体验
+- PPTX 预览链路使用 LibreOffice 无头导出 PDF，再通过 PyMuPDF 按页渲染 PNG，避免浏览器侧重建 PPTX 版式造成布局失真
+- PPTX 中间 PDF 属于临时预览文件，关闭预览时会清理；按页生成的 PNG 可继续保留在 `.horbot/data/uploads/.previews` 作为缓存
 - Live Artifact 能力会把 Agent 输出的结构化渲染规格临时转换成 sandbox HTML 视图，运行文件统一落在 `.horbot/runtime/rendered-artifacts`，刷新历史后可从消息中的规格重新生成
 - Configuration 页面新增“远程图片缓存”状态区块，直接读取后端缓存统计，并支持手动清理自动落盘的远程图片缓存
 - Skills 页面当前支持系统技能/自定义技能分组展示、自动技能手动整理，以及把自定义技能转为系统技能

@@ -645,12 +645,47 @@ Content-Type: multipart/form-data
 
 ```http
 GET /api/files/{file_id}
+GET /api/files/{file_id}/preview
 ```
 
 说明：
 
 - 当前接口默认使用 `inline` 返回，浏览器会优先尝试图片、音频、PDF、文本等内联预览
 - 前端聊天历史会基于该接口打开统一预览弹窗
+
+#### PPTX 高保真预览能力
+
+```http
+GET /api/files/{file_id}/preview-capabilities
+GET /api/files/{file_id}/preview/slides/{page}
+POST /api/files/{file_id}/preview/cleanup
+```
+
+说明：
+
+- PPTX 预览优先使用 LibreOffice：先把 PPTX 无头导出为中间 PDF，再用 PyMuPDF 按页渲染 PNG
+- `preview-capabilities` 返回当前文件使用的 renderer、页数、已渲染页数和检测到的 `soffice` 路径
+- `preview/slides/{page}` 只返回指定页 PNG；首次请求可能触发 LibreOffice 转 PDF，后续页面会复用 PDF 或 PNG 缓存
+- `preview/cleanup` 删除该 PPTX 的中间 PDF；前端预览 iframe 卸载时会自动调用，已生成的 PNG 页缓存可继续用于再次打开加速
+
+响应示例：
+
+```json
+{
+  "file_id": "6389fc95-22cc-491f-b051-95f4d2233ef5",
+  "filename": "deck.pptx",
+  "mime_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "supported": true,
+  "renderer": "libreoffice-pdf-images",
+  "preview_url": "/api/files/6389fc95-22cc-491f-b051-95f4d2233ef5/preview",
+  "slide_count": 42,
+  "visual_pages": 42,
+  "rendered_pages": 3,
+  "engines": [
+    {"id": "libreoffice", "available": true, "command": "/opt/homebrew/bin/soffice"}
+  ]
+}
+```
 
 #### 远程图片缓存统计
 

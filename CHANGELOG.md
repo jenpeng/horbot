@@ -11,6 +11,13 @@ This file summarizes notable Horbot product and documentation changes. For fine-
 - Added the built-in `live-artifact-studio` skill so agents can decide when to use Markdown versus structured renderable output
 - Added an `auto-officecli-ppt` reference for using Live Artifact previews before generating PowerPoint decks
 
+### PPTX Preview
+
+- Replaced browser-side PPTX layout reconstruction with a LibreOffice-first preview path: PPTX -> PDF -> lazy per-slide PNG
+- Added `GET /api/files/{file_id}/preview-capabilities`, `GET /api/files/{file_id}/preview/slides/{page}`, and `POST /api/files/{file_id}/preview/cleanup`
+- Added `./horbot.sh install libreoffice` and `./horbot.sh check libreoffice`
+- Added PyMuPDF as the page rasterization dependency and upload preview tests for LibreOffice export caching and cleanup
+
 ## 2026-04-27
 
 ### External Agent Adapter Runtime

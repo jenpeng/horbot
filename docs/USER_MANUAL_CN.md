@@ -114,6 +114,19 @@
 - Word / Excel / PowerPoint / 文本会展示可读预览或原文件入口
 - 对于 assistant 正文里独立出现的远程图片链接，后端会尽量自动提升成统一图片卡片，而不是只显示裸链接
 
+### PPTX 高保真预览
+
+当本机可用 `soffice` 时，PPTX 附件会走 LibreOffice 高保真预览链路。Horbot 会使用隔离的 LibreOffice profile 先把 PPTX 转成中间 PDF，再在用户打开或翻页时按页渲染 PNG。这样不会再依赖浏览器侧重建 PPTX 版式，能更好保留原始布局、字体和元素位置。
+
+预览页默认只加载当前页和相邻页，不会一次性生成几百上千个页面 DOM。关闭或卸载预览时，前端会通知后端删除中间 PDF；已经渲染出的 PNG 页缓存可以保留，用于再次打开时加速。
+
+安装或检查 LibreOffice：
+
+```bash
+./horbot.sh install libreoffice
+./horbot.sh check libreoffice
+```
+
 聊天区当前还有两项默认交互：
 
 - Assistant 消息泡和 Markdown 排版更紧凑，长回复不会再留出过多空白

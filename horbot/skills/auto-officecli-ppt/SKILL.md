@@ -26,6 +26,6 @@ Reusable OfficeCLI/OpenXML workflows for PowerPoint generation, layout debugging
 
 ## Reference Library
 - [OfficeCLI PPT Structural Overflow Detector](references/officecli-ppt-structural-overflow-detector.md) - Run a structural pre-screen on `.pptx` slides to flag likely overflow before visual verification.
-- [OfficeCLI PPT Render Verification Export](references/officecli-ppt-render-verification-export.md) - Export a rendered review PDF through PowerPoint, Keynote, or LibreOffice after the structural pass flags suspicious slides.
+- [OfficeCLI PPT Render Verification Export](references/officecli-ppt-render-verification-export.md) - Export rendered review material with LibreOffice after the structural pass flags suspicious slides.
 - [OfficeCLI PPT Text Overflow Debug](references/officecli-ppt-text-overflow-debug.md) - Diagnose persistent overflow in OfficeCLI-generated decks by checking text boxes, autofit behavior, and slide XML.
 - [Live Artifact To PPT](references/live-artifact-to-ppt.md) - Use chat-side renderable previews to validate data dashboards, chart stories, map stories, or report layouts before producing the final PPT.

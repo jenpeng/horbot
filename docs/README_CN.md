@@ -34,6 +34,7 @@
 
 ## 📢 最新动态
 
+- **2026-04-28** 📎 PPTX 预览已改为 LibreOffice 高保真链路：先无头导出 PDF，再按页懒加载 PNG，关闭预览时会清理中间 PDF。
 - **2026-04-27** 🔌 External Agent 已调整为入站 Bot 优先的可插拔 adapter 架构；Channels 也新增 Horbot 入站机器人通道实例，Horbot 可生成 App ID、Token 与 Inbound URL，WorkBuddy 或其他平台像飞书/Discord 机器人一样推送消息进来；`generic-agent-api` 仅保留为兼容旧 URL 调用模式。
 - **2026-04-15** 🌐 Agent 联网能力已改回默认使用 Playwright 浏览器链路，并以 `browser` / `web_search` / `web_fetch` 作为标准联网工具；`horbot.sh` 不再托管 `web-access` 服务。
 - **2026-04-14** 🛡️ 新增外部 Agent 接入管理、`AGENTS.md` 治理文件、工具审计摘要与聊天 `request_id` 诊断增强；并修复一类前端误报 provider timeout 的假超时场景。
@@ -64,7 +65,7 @@
 | 📝 **Markdown 聊天** | Assistant 回复支持标题、列表、表格、引用、代码块与高亮 |
 | 📊 **Live Artifact** | Agent 可在聊天气泡中生成临时交互式看板、图表故事、地图故事、流程视图与报告 |
 | 📎 **多模态附件** | 支持图片、音频、PDF、Word、Excel、PowerPoint、文本上传、拖拽与粘贴 |
-| 👀 **历史预览** | 历史消息中的图片、音频、PDF、Office、文本附件可直接内联预览；远程图片链接会尽量自动转成统一图片卡片；多图弹窗支持底部缩略条快速切换 |
+| 👀 **历史预览** | 历史消息中的图片、音频、PDF、Office、文本附件可直接内联预览；PPTX 使用 LibreOffice 转 PDF 后按页渲染；远程图片链接会尽量自动转成统一图片卡片；多图弹窗支持底部缩略条快速切换 |
 | 🌐 **浏览器与联网工具** | Agent 默认使用 `browser` / `web_search` / `web_fetch` 处理网页交互、搜索与抓取，浏览器 MCP 默认走 Playwright |
 | 🔁 **团队接力可视化** | 聊天区会直接显示接力棒次、交棒来源、继续讨论/返回总结状态 |
 | 🌐 **外部 Agent 接入** | 支持 adapter 化接入、连接探测、团队成员编排和 capability tags 管理 |
@@ -180,18 +181,21 @@ pip install horbot-ai
 > 在 `./.horbot/config.json` 中设置您的 API 密钥。
 > 获取 API 密钥：[OpenRouter](https://openrouter.ai/keys)（全球）· [Brave Search](https://brave.com/search/api/)（可选，用于网页搜索）
 
-如果使用仓库自带的 `./horbot.sh install` 初始化项目，现在会额外自动完成三件事：
+如果使用仓库自带的 `./horbot.sh install` 初始化项目，现在会额外自动完成这些事：
 
 - 安装 `OfficeCLI`
+- 检查并尝试安装 LibreOffice，用于 PPTX 高保真预览
 - 在 `./.horbot/config.json` 中默认补上 `officecli` MCP server
 - 把检测到的 OfficeCLI 安装目录补到 `tools.exec.pathAppend`
 
-这样安装完成后，Agent 就能直接调用 Word / Excel / PowerPoint 相关 OfficeCLI MCP 工具。
+这样安装完成后，Agent 就能直接调用 Word / Excel / PowerPoint 相关 OfficeCLI MCP 工具，Web UI 也能使用 LibreOffice 预览 PPTX。
 
-如果只想单独安装或升级 OfficeCLI，可以执行：
+如果只想单独安装或检查 Office 相关依赖，可以执行：
 
 ```bash
 ./horbot.sh install officecli
+./horbot.sh install libreoffice
+./horbot.sh check libreoffice
 ```
 
 如果想验证这条能力链是否已经打通，可以执行：

@@ -28,6 +28,7 @@ Horbot keeps the runtime intentionally small:
 - `MemoryStore` for agent-scoped memory
 - `SkillsLoader` for built-in and user skills
 - Live Artifact renderer for converting structured render specs into temporary sandboxed HTML runtime files
+- PPTX preview renderer that uses LibreOffice headless export plus PyMuPDF page rasterization instead of browser-side PPTX layout reconstruction
 
 ### Multi-Agent Layer
 
@@ -74,6 +75,7 @@ Horbot keeps the runtime intentionally small:
 - `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`
 - `.horbot/data/*` for uploads, plans, sessions, and cron data
 - remote image cards can also be materialized into `.horbot/data/uploads` so later history loads still render as normal file attachments
+- upload preview cache files live under `.horbot/data/uploads/.previews`; PPTX intermediate PDFs are transient and are removed on preview cleanup while rendered slide PNGs may be reused
 - temporary Live Artifact runtime files are written to `.horbot/runtime/rendered-artifacts` and can be regenerated from saved message specs
 
 The workspace root may also contain runtime-owned directories such as `.audit`, `.checkpoints`, and `.state`. These are active runtime artifacts, not duplicate legacy storage.
@@ -117,6 +119,7 @@ The Web UI currently covers:
 - baton-aware relay navigation between direct chat and team chat during DM-initiated team dispatch flows
 - richer attachment preview UX, including inline previews and a bottom thumbnail strip for multi-image preview modals
 - assistant history normalization that upgrades standalone remote image URLs into image-card attachments when possible
+- LibreOffice-backed PPTX previews with lazy single-slide rendering, page-number navigation, and cleanup of intermediate PDFs when the preview closes
 - Live Artifact cards that render structured agent output into sandboxed temporary dashboards, chart stories, map stories, process views, or reports on demand
 - a Configuration-page remote-image cache panel with runtime stats and a manual clear action
 - skills import/edit/compatibility, custom-vs-system grouping, generated-skill consolidation, and promote-to-builtin actions

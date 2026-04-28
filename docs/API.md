@@ -39,6 +39,9 @@
 - `POST /api/upload`
 - `GET /api/files/{file_id}`
 - `GET /api/files/{file_id}/preview`
+- `GET /api/files/{file_id}/preview/slides/{page}`
+- `POST /api/files/{file_id}/preview/cleanup`
+- `GET /api/files/{file_id}/preview-capabilities`
 - `GET /api/files/cache/remote-images`
 - `DELETE /api/files/cache/remote-images`
 
@@ -146,6 +149,35 @@ Routing rules:
 - `allow_from` restricts accepted `sender_id` values when configured.
 
 Use this endpoint when you are defining an external message entrance. Use External Agent `inbound-bot` when you are defining an external member that can appear in DMs or teams.
+
+## File Preview
+
+`GET /api/files/{file_id}/preview` returns an inline preview for supported uploads. Images and PDFs are served directly; DOCX and PPTX are wrapped in an HTML preview.
+
+PPTX previews use LibreOffice when available:
+
+- `GET /api/files/{file_id}/preview-capabilities` reports the selected renderer, slide count, rendered page count, and detected LibreOffice command.
+- `GET /api/files/{file_id}/preview/slides/{page}` returns one rendered slide PNG. The first request may trigger LibreOffice PDF export; later page requests reuse the cached PDF or PNG.
+- `POST /api/files/{file_id}/preview/cleanup` removes the intermediate LibreOffice PDF for that upload. The Web UI calls this when the preview iframe unloads. Already rendered slide PNGs may remain cached for faster reopening.
+
+Example capabilities response:
+
+```json
+{
+  "file_id": "6389fc95-22cc-491f-b051-95f4d2233ef5",
+  "filename": "deck.pptx",
+  "mime_type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "supported": true,
+  "renderer": "libreoffice-pdf-images",
+  "preview_url": "/api/files/6389fc95-22cc-491f-b051-95f4d2233ef5/preview",
+  "slide_count": 42,
+  "visual_pages": 42,
+  "rendered_pages": 3,
+  "engines": [
+    {"id": "libreoffice", "available": true, "command": "/opt/homebrew/bin/soffice"}
+  ]
+}
+```
 
 ## Live Artifact Rendering
 
