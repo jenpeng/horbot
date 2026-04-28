@@ -23,6 +23,11 @@ const ExternalAgentDetailView = ({
   testFeedback,
 }: ExternalAgentDetailViewProps) => {
   const { t } = useI18n();
+  const inbound = externalAgent.inbound || null;
+  const inboundBotAdapter = ['inbound-bot', 'channel-backed-agent', 'web-ui-bridge'].includes(externalAgent.adapter || '');
+  const inboundUrl = inbound?.url_path && typeof window !== 'undefined'
+    ? `${window.location.origin.replace(/:3000$/, ':8000')}${inbound.url_path}`
+    : inbound?.url_path || '';
 
   return (
     <div className="space-y-6" data-testid="external-agent-detail-view" data-external-agent-id={externalAgent.id}>
@@ -31,12 +36,13 @@ const ExternalAgentDetailView = ({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-2xl font-semibold text-surface-900">{externalAgent.name}</h2>
-              <span className={getBadgeClassName('primary', 'sm')}>{externalAgent.transport}</span>
+              <span className={getBadgeClassName('neutral', 'sm')}>{externalAgent.adapter || 'generic-agent-api'}</span>
+              {!inboundBotAdapter && <span className={getBadgeClassName('primary', 'sm')}>{externalAgent.transport}</span>}
               {externalAgent.dm_enabled && <span className={getBadgeClassName('success', 'sm')}>{t('teams.external.badge.dm')}</span>}
               {externalAgent.team_enabled && <span className={getBadgeClassName('neutral', 'sm')}>{t('teams.external.badge.team')}</span>}
             </div>
             <p className="mt-2 text-sm text-surface-600">{externalAgent.description || t('teams.external.emptyDescription')}</p>
-            <p className="mt-3 break-all text-sm text-surface-500">{externalAgent.endpoint}</p>
+            <p className="mt-3 break-all text-sm text-surface-500">{inboundBotAdapter ? inboundUrl : (externalAgent.endpoint || t('common.notAvailable'))}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -76,9 +82,17 @@ const ExternalAgentDetailView = ({
           <h3 className="text-base font-semibold text-surface-900">{t('teams.external.sections.connection')}</h3>
           <dl className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-surface-500">{t('teams.external.fields.transport')}</dt>
-              <dd className="mt-1 text-sm text-surface-900">{externalAgent.transport}</dd>
+              <dt className="text-xs font-medium uppercase tracking-wide text-surface-500">{t('teams.external.fields.adapter')}</dt>
+              <dd className="mt-1 text-sm text-surface-900">{externalAgent.adapter || 'generic-agent-api'}</dd>
             </div>
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wide text-surface-500">{t('teams.external.fields.transport')}</dt>
+              <dd className="mt-1 text-sm text-surface-900">
+                {inboundBotAdapter ? t('teams.external.adapter.inboundBot') : externalAgent.transport}
+              </dd>
+            </div>
+            {!inboundBotAdapter && (
+            <>
             <div>
               <dt className="text-xs font-medium uppercase tracking-wide text-surface-500">{t('teams.external.fields.authType')}</dt>
               <dd className="mt-1 text-sm text-surface-900">{externalAgent.auth_type}</dd>
@@ -93,6 +107,8 @@ const ExternalAgentDetailView = ({
                 {externalAgent.auth_secret_configured ? t('teams.external.status.secretConfigured') : t('teams.external.status.secretNotConfigured')}
               </dd>
             </div>
+            </>
+            )}
             <div>
               <dt className="text-xs font-medium uppercase tracking-wide text-surface-500">{t('teams.external.fields.timeout')}</dt>
               <dd className="mt-1 text-sm text-surface-900">{t('teams.external.value.seconds', { count: externalAgent.timeout_s })}</dd>
@@ -102,6 +118,26 @@ const ExternalAgentDetailView = ({
               <dd className="mt-1 text-sm text-surface-900">{externalAgent.max_turn_chars}</dd>
             </div>
           </dl>
+          {inbound && (
+            <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4">
+              <div className="text-sm font-semibold text-emerald-900">{t('teams.external.form.inboundBotTitle')}</div>
+              <p className="mt-1 text-xs text-emerald-800">{t('teams.external.form.inboundBotHint')}</p>
+              <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">App ID</div>
+                  <div className="mt-1 break-all rounded-lg bg-white px-3 py-2 font-mono text-xs text-surface-800 ring-1 ring-emerald-100">{inbound.app_id}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Token</div>
+                  <div className="mt-1 break-all rounded-lg bg-white px-3 py-2 font-mono text-xs text-surface-800 ring-1 ring-emerald-100">{inbound.token}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Inbound URL</div>
+                  <div className="mt-1 break-all rounded-lg bg-white px-3 py-2 font-mono text-xs text-surface-800 ring-1 ring-emerald-100">{inboundUrl}</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="rounded-2xl border border-surface-200 bg-white p-5 shadow-sm">

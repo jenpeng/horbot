@@ -86,6 +86,7 @@ export const useTeamsMutations = ({ onRefresh }: UseTeamsMutationsOptions = {}) 
     name: form.name,
     description: form.description,
     avatar: form.avatar,
+    adapter: form.adapter,
     transport: form.transport,
     endpoint: form.endpoint,
     auth_type: form.auth_type,
@@ -100,6 +101,7 @@ export const useTeamsMutations = ({ onRefresh }: UseTeamsMutationsOptions = {}) 
     context_scope: form.context_scope,
     memory_access: form.memory_access,
     file_access: form.file_access,
+    adapter_config: form.adapter_config,
     metadata: form.metadata,
   }), []);
 

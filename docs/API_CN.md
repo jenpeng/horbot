@@ -107,6 +107,55 @@ Content-Type: application/json
 
 ---
 
+### 渠道实例与 Horbot 入站机器人
+
+```http
+GET /api/channels/catalog
+GET /api/channels/endpoints
+POST /api/channels/endpoints
+PUT /api/channels/endpoints/{endpoint_id}
+DELETE /api/channels/endpoints/{endpoint_id}
+POST /api/channels/draft-test
+POST /api/channels/endpoints/{endpoint_id}/test
+POST /api/channels/inbound/{app_id}/messages
+```
+
+当通道类型选择 `horbot-inbound-bot` 时，Horbot 会为这个通道实例生成：
+
+- `bot_app_id`
+- `bot_token`
+- `inbound_url_path`: `/api/channels/inbound/{app_id}/messages`
+
+这个入口适合 WorkBuddy 或其他厂商/本地 Agent 平台像飞书、Discord 机器人一样把消息推送进 Horbot，再由通道实例绑定的内部 Agent 接手处理。
+
+示例：
+
+```http
+POST /api/channels/inbound/hbot_ch_workbuddy_xxx/messages
+Authorization: Bearer <bot_token>
+Content-Type: application/json
+
+{
+  "content": "来自 WorkBuddy 的任务消息",
+  "chat_id": "workbuddy-room-1",
+  "sender_id": "workbuddy",
+  "target_agent_id": "main",
+  "message_id": "msg-001",
+  "metadata": {
+    "vendor": "workbuddy"
+  }
+}
+```
+
+边界说明：
+
+- Channels 的 `horbot-inbound-bot` 负责“外部消息入口”和路由到内部 Agent
+- External Agent 的 `inbound-bot` 负责“外部成员身份”，用于单聊或团队成员编排
+- 如果只是给 WorkBuddy 一个 Horbot 机器人入口，让它推送消息进某个内部 Agent，优先在 Channels 创建 `horbot-inbound-bot`
+- `horbot-inbound-bot` 可以固定绑定某个内部 Agent；如果不绑定，入站请求可以通过顶层 `target_agent_id` / `agent_id` 或 `metadata.target_agent_id` / `metadata.agent_id` 指定目标，后端会在当前运行实例的 Agent 配置中校验后再路由
+
+---
+
 ### 多 Agent 管理与治理
 
 #### 外部 Agent 列表
@@ -121,12 +170,18 @@ GET /api/external-agents
 {
   "external_agents": [
     {
-      "id": "partner-agent",
-      "name": "Partner Agent",
-      "transport": "http_sse",
+      "id": "workbuddy-agent",
+      "name": "WorkBuddy Agent",
+      "adapter": "inbound-bot",
+      "transport": "http",
+      "inbound": {
+        "app_id": "hbot_workbuddy_xxx",
+        "token": "generated-token",
+        "url_path": "/api/external-agents/inbound/hbot_workbuddy_xxx/messages"
+      },
       "dm_enabled": true,
       "team_enabled": true,
-      "capability_tags": ["research", "analysis"]
+      "capabilities": ["research", "analysis"]
     }
   ],
   "count": 1
@@ -141,22 +196,29 @@ PUT /api/external-agents/{external_agent_id}
 Content-Type: application/json
 
 {
-  "id": "partner-agent",
-  "name": "Partner Agent",
-  "endpoint": "https://example.com/agent/sse",
-  "transport": "http_sse",
-  "auth_type": "bearer",
-  "auth_secret": "token-value",
-  "capability_tags": ["research", "analysis"],
+  "id": "workbuddy-agent",
+  "name": "WorkBuddy Agent",
+  "adapter": "inbound-bot",
+  "endpoint": "",
+  "transport": "http",
+  "auth_type": "none",
+  "auth_secret": "",
+  "capabilities": ["research", "analysis"],
   "dm_enabled": true,
   "team_enabled": true,
-  "mention_required": false
+  "mention_required": false,
+  "adapter_config": {}
 }
 ```
 
 说明：
 
 - 当前支持独立的外部 Agent CRUD 与连接探测，不需要把外部 Agent 混入内部 `agents.instances`
+- `adapter` 是开放 slug；推荐主路径是 `inbound-bot`，旧配置不带 `adapter` 时会按 `generic-agent-api` 兼容处理
+- `inbound-bot` 会由 Horbot 生成 `adapter_config.bot_app_id` 和 `adapter_config.bot_token`，并提供 `/api/external-agents/inbound/{app_id}/messages` 给 WorkBuddy 或其他平台推送消息
+- `endpoint` 只对 `generic-agent-api` 与 `openai-compatible` 强制填写；`inbound-bot` 不需要外部 URL
+- `adapter_config` 用于保存厂商或本地 Agent 协议的专属配置，例如 `openai-compatible` 的 `model`、`chat_completions_endpoint` 等
+- 旧配置不带 `adapter` 时会自动按 `generic-agent-api` 兼容处理
 - 如果更新后将 `team_enabled` 关闭，后端会自动清理相关 team member 引用
 
 #### 测试外部 Agent 连接
@@ -165,7 +227,27 @@ Content-Type: application/json
 POST /api/external-agents/{external_agent_id}/test
 ```
 
-该接口返回轻量探测结果，用于管理页中的 “Test Connection”。
+该接口返回轻量探测结果，用于管理页中的 “Test Connection”。对 `inbound-bot`，该接口验证 Horbot 侧 App ID、Token 与入站 URL 是否已生成，不会主动调用外部平台。
+
+#### 外部平台推送消息到 Horbot
+
+```http
+POST /api/external-agents/inbound/{app_id}/messages
+Authorization: Bearer <bot_token>
+Content-Type: application/json
+
+{
+  "content": "WorkBuddy 已完成任务",
+  "chat_id": "dm_workbuddy-agent",
+  "sender_id": "workbuddy",
+  "message_id": "msg-001",
+  "metadata": {
+    "vendor": "workbuddy"
+  }
+}
+```
+
+也可以通过 `X-Horbot-Bot-Token` header 或 JSON body 里的 `token` 传入 Token。服务端会把消息保存到对应 Web 会话历史中。
 
 #### 获取团队成员明细
 

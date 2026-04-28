@@ -17,6 +17,8 @@ Horbot is a lightweight multi-agent assistant stack with:
 - automatic DM -> team -> DM baton navigation in Web Chat, with a temporary top banner so relay-driven view changes are explicit
 - promoted remote image links that render as normal image-card attachments, plus a manual remote-image cache clear entry in Configuration
 - MCP and external channel integration
+- External Agent inbound-bot adapters for Feishu/Discord-style vendor or local agent platforms, plus compatibility adapters for OpenAI-compatible and generic HTTP/SSE/WebSocket services
+- Channels-managed Horbot inbound bot endpoints that provide App ID, Token, and an Inbound URL for platforms such as WorkBuddy to push messages into a fixed or request-specified internal Agent
 - Playwright-backed browser tooling with `browser`, `web_search`, and `web_fetch` as the standard web tool path
 - background skill distillation from reusable work into skill families plus `references/` notes
 - validated `.skill` / `.zip` imports with compatibility checks

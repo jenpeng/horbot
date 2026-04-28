@@ -90,6 +90,7 @@ export interface ExternalAgentInfo {
   name: string;
   description: string;
   avatar?: string;
+  adapter?: string;
   transport: 'http' | 'http_sse' | 'websocket';
   endpoint: string;
   auth_type: 'none' | 'bearer' | 'header';
@@ -104,6 +105,12 @@ export interface ExternalAgentInfo {
   context_scope: 'message_only' | 'recent_turns' | 'dm_summary';
   memory_access: 'none' | 'summary_only';
   file_access: 'none' | 'referenced_only';
+  adapter_config?: Record<string, unknown>;
+  inbound?: {
+    app_id: string;
+    token: string;
+    url_path: string;
+  } | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -138,6 +145,7 @@ export interface ExternalAgentFormState {
   name: string;
   description: string;
   avatar: string;
+  adapter?: ExternalAgentInfo['adapter'];
   transport: 'http' | 'http_sse' | 'websocket';
   endpoint: string;
   auth_type: 'none' | 'bearer' | 'header';
@@ -153,6 +161,7 @@ export interface ExternalAgentFormState {
   context_scope: 'message_only' | 'recent_turns' | 'dm_summary';
   memory_access: 'none' | 'summary_only';
   file_access: 'none' | 'referenced_only';
+  adapter_config?: Record<string, unknown>;
   metadata: Record<string, unknown>;
 }
 

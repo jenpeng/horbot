@@ -37,6 +37,47 @@ const normalizeCapabilities = (values: string[]): string[] => {
   return Array.from(deduped.values());
 };
 
+const formatAdapterConfig = (value: ExternalAgentFormState['adapter_config']): string => {
+  const config = value || {};
+  return Object.keys(config).length > 0 ? JSON.stringify(config, null, 2) : '';
+};
+
+const normalizeAdapterId = (value?: string): string => value || 'inbound-bot';
+
+const adapterRequiresEndpoint = (adapterId: string): boolean => (
+  adapterId === 'generic-agent-api' || adapterId === 'openai-compatible'
+);
+
+const adapterUsesTransport = (adapterId: string): boolean => adapterId === 'generic-agent-api';
+
+const adapterIsInboundBot = (adapterId: string): boolean => (
+  adapterId === 'inbound-bot' || adapterId === 'channel-backed-agent' || adapterId === 'web-ui-bridge'
+);
+
+const randomHex = (bytes: number): string => {
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const buffer = new Uint8Array(bytes);
+    crypto.getRandomValues(buffer);
+    return Array.from(buffer, (item) => item.toString(16).padStart(2, '0')).join('');
+  }
+  return Array.from({ length: bytes }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('');
+};
+
+const buildInboundBotConfig = (
+  currentConfig: ExternalAgentFormState['adapter_config'],
+  externalAgentId: string,
+): Record<string, unknown> => {
+  const nextConfig = { ...(currentConfig || {}) };
+  const safeId = externalAgentId.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'external';
+  if (!nextConfig.bot_app_id) {
+    nextConfig.bot_app_id = `hbot_${safeId}_${randomHex(4)}`;
+  }
+  if (!nextConfig.bot_token) {
+    nextConfig.bot_token = randomHex(24);
+  }
+  return nextConfig;
+};
+
 const getExternalCapabilityPresets = (t: (key: string) => string) => ([
   {
     id: 'research',
@@ -170,7 +211,33 @@ const ExternalAgentFormModal = ({
   const [customCapabilityInput, setCustomCapabilityInput] = useState('');
   const [manualCapabilityOpen, setManualCapabilityOpen] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
+  const [advancedAdapterOpen, setAdvancedAdapterOpen] = useState(() => !adapterIsInboundBot(normalizeAdapterId(form.adapter)));
+  const [adapterConfigDraft, setAdapterConfigDraft] = useState(() => formatAdapterConfig(form.adapter_config));
+  const [adapterConfigError, setAdapterConfigError] = useState('');
+  const adapterId = normalizeAdapterId(form.adapter);
+  const endpointRequired = adapterRequiresEndpoint(adapterId);
+  const transportVisible = adapterUsesTransport(adapterId);
+  const inboundBotAdapter = adapterIsInboundBot(adapterId);
+  const botAppId = typeof form.adapter_config?.bot_app_id === 'string' ? form.adapter_config.bot_app_id : '';
+  const botToken = typeof form.adapter_config?.bot_token === 'string' ? form.adapter_config.bot_token : '';
+  const inboundUrlPath = botAppId ? `/api/external-agents/inbound/${botAppId}/messages` : '';
+  const inboundUrl = inboundUrlPath && typeof window !== 'undefined'
+    ? `${window.location.origin.replace(/:3000$/, ':8000')}${inboundUrlPath}`
+    : inboundUrlPath;
   const capabilityPresets = useMemo(() => getExternalCapabilityPresets(t), [t]);
+  const adapterOptions = useMemo(() => ([
+    { id: 'inbound-bot', label: t('teams.external.adapter.inboundBot'), description: t('teams.external.adapterDescription.inboundBot') },
+    { id: 'generic-agent-api', label: t('teams.external.adapter.genericAgentApi'), description: t('teams.external.adapterDescription.genericAgentApi') },
+    { id: 'openai-compatible', label: t('teams.external.adapter.openaiCompatible'), description: t('teams.external.adapterDescription.openaiCompatible') },
+    { id: 'dify', label: 'Dify', description: t('teams.external.adapterDescription.futureVendor') },
+    { id: 'coze', label: 'Coze', description: t('teams.external.adapterDescription.futureVendor') },
+    { id: 'langgraph', label: 'LangGraph', description: t('teams.external.adapterDescription.futureLocal') },
+    { id: 'mcp-agent', label: 'MCP Agent', description: t('teams.external.adapterDescription.futureLocal') },
+  ]), [t]);
+  const selectedAdapter = adapterOptions.find((option) => option.id === adapterId) || adapterOptions[0];
+  const visibleAdapterOptions = advancedAdapterOpen
+    ? adapterOptions
+    : [selectedAdapter.id === 'inbound-bot' ? selectedAdapter : adapterOptions[0], ...(selectedAdapter.id === 'inbound-bot' ? [] : [selectedAdapter])];
   const stepItems = useMemo(() => ([
     {
       id: 0 as const,
@@ -193,12 +260,12 @@ const ExternalAgentFormModal = ({
     [capabilityOptions],
   );
   const connectionRecommendation = useMemo(
-    () => buildConnectionRecommendation({
+    () => (adapterId === 'generic-agent-api' ? buildConnectionRecommendation({
       endpoint: form.endpoint,
       name: form.name,
       description: form.description,
-    }),
-    [form.description, form.endpoint, form.name],
+    }) : null),
+    [adapterId, form.description, form.endpoint, form.name],
   );
   const recommendedPresetId = useMemo(
     () => recommendCapabilityPresetId(
@@ -210,7 +277,7 @@ const ExternalAgentFormModal = ({
   const recommendedPreset = capabilityPresets.find((preset) => preset.id === recommendedPresetId) || null;
   const canProceedToBehaviorStep = Boolean(
     form.name.trim()
-    && form.endpoint.trim()
+    && (!endpointRequired || form.endpoint.trim())
     && (!isCreateMode || form.id.trim()),
   );
 
@@ -219,7 +286,22 @@ const ExternalAgentFormModal = ({
     setCurrentStep(0);
     setManualCapabilityOpen(false);
     setRuntimeOpen(false);
+    setAdvancedAdapterOpen(!adapterIsInboundBot(normalizeAdapterId(form.adapter)));
+    setAdapterConfigDraft(formatAdapterConfig(form.adapter_config));
+    setAdapterConfigError('');
   }, [mode, form.id]);
+
+  useEffect(() => {
+    if (!inboundBotAdapter || (botAppId && botToken)) {
+      return;
+    }
+    if (!form.id.trim()) {
+      return;
+    }
+    const nextAdapterConfig = buildInboundBotConfig(form.adapter_config, form.id);
+    setAdapterConfigDraft(formatAdapterConfig(nextAdapterConfig));
+    setForm({ ...form, adapter_config: nextAdapterConfig });
+  }, [botAppId, botToken, form, inboundBotAdapter, setForm]);
 
   const updateCapabilities = (nextCapabilities: string[]) => {
     setForm({ ...form, capabilities: normalizeCapabilities(nextCapabilities) });
@@ -261,6 +343,41 @@ const ExternalAgentFormModal = ({
       return;
     }
     setForm({ ...form, ...connectionRecommendation.updates });
+  };
+
+  const handleAdapterChange = (nextAdapter: string) => {
+    const nextAdapterConfig = adapterIsInboundBot(nextAdapter)
+      ? buildInboundBotConfig(form.adapter_config, form.id)
+      : { ...(form.adapter_config || {}) };
+    setAdapterConfigDraft(formatAdapterConfig(nextAdapterConfig));
+    setAdapterConfigError('');
+    setForm({
+      ...form,
+      adapter: nextAdapter,
+      transport: adapterUsesTransport(nextAdapter) ? form.transport : 'http',
+      adapter_config: nextAdapterConfig,
+    });
+  };
+
+  const handleAdapterConfigChange = (value: string) => {
+    setAdapterConfigDraft(value);
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setAdapterConfigError('');
+      setForm({ ...form, adapter_config: {} });
+      return;
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+        setAdapterConfigError(t('teams.external.form.adapterConfigInvalid'));
+        return;
+      }
+      setAdapterConfigError('');
+      setForm({ ...form, adapter_config: parsed as Record<string, unknown> });
+    } catch {
+      setAdapterConfigError(t('teams.external.form.adapterConfigInvalid'));
+    }
   };
 
   return (
@@ -357,9 +474,62 @@ const ExternalAgentFormModal = ({
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="md:col-span-2 rounded-2xl border border-primary-200 bg-primary-50/70 p-4">
+                  <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <label htmlFor="external-agent-adapter" className="block text-sm font-semibold text-surface-800">
+                      {t('teams.external.form.integrationMode')}
+                    </label>
+                    <button
+                      type="button"
+                      data-testid="toggle-external-advanced-adapters"
+                      onClick={() => setAdvancedAdapterOpen((value) => !value)}
+                      className="self-start rounded-lg border border-primary-200 bg-white px-3 py-1.5 text-xs font-medium text-primary-700 transition-colors hover:bg-primary-100 sm:self-auto"
+                    >
+                      {advancedAdapterOpen ? t('teams.external.form.hideCompatibilityAdapters') : t('teams.external.form.showCompatibilityAdapters')}
+                    </button>
+                  </div>
+                  {advancedAdapterOpen ? (
+                    <select
+                      id="external-agent-adapter"
+                      value={adapterId}
+                      onChange={(event) => handleAdapterChange(event.target.value)}
+                      className="w-full rounded-lg border border-primary-200 bg-white px-3 py-2 focus:border-primary-500 focus:ring-2 focus:ring-primary-500"
+                    >
+                      {visibleAdapterOptions.map((option) => (
+                        <option key={option.id} value={option.id}>{option.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div
+                      id="external-agent-adapter"
+                      className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-semibold text-emerald-800"
+                    >
+                      {selectedAdapter.label}
+                    </div>
+                  )}
+                  <div className="mt-3 rounded-xl border border-white/80 bg-white/70 p-3">
+                    <div className="text-sm font-medium text-surface-900">{selectedAdapter.label}</div>
+                    <p className="mt-1 text-xs leading-5 text-surface-600">{selectedAdapter.description}</p>
+                    <p className="mt-2 text-xs text-primary-700">{t('teams.external.form.adapterHint')}</p>
+                    {!advancedAdapterOpen && (
+                      <p className="mt-2 text-xs text-emerald-700">{t('teams.external.form.compatibilityAdaptersHint')}</p>
+                    )}
+                  </div>
+                </div>
+
+                {!inboundBotAdapter && (
                 <div className="md:col-span-2">
-                  <label htmlFor="external-agent-endpoint" className="mb-1 block text-sm font-medium text-surface-700">
-                    {t('teams.external.form.endpoint')}
+                  <label htmlFor="external-agent-endpoint" className="mb-1 flex items-center gap-2 text-sm font-medium text-surface-700">
+                    <span>
+                      {adapterId === 'openai-compatible'
+                        ? t('teams.external.form.chatCompletionsEndpoint')
+                        : t('teams.external.form.endpoint')}
+                    </span>
+                    {!endpointRequired && (
+                      <span className="rounded-full bg-surface-100 px-2 py-0.5 text-[11px] font-medium text-surface-500">
+                        {t('common.optional')}
+                      </span>
+                    )}
                   </label>
                   <input
                     id="external-agent-endpoint"
@@ -369,13 +539,24 @@ const ExternalAgentFormModal = ({
                     className={`w-full rounded-lg border px-3 py-2 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 ${
                       createEndpointError ? 'border-red-300 bg-red-50/40' : 'border-surface-300'
                     }`}
-                    placeholder={t('teams.external.form.endpointPlaceholder')}
+                    placeholder={
+                      adapterId === 'openai-compatible'
+                        ? 'https://example.com/v1/chat/completions'
+                        : endpointRequired
+                          ? t('teams.external.form.endpointPlaceholder')
+                          : t('teams.external.form.endpointOptionalPlaceholder')
+                    }
                     aria-invalid={Boolean(createEndpointError)}
                   />
                   {createEndpointError
                     ? <p className="mt-1 text-xs text-red-600">{createEndpointError}</p>
-                    : <p className="mt-1 text-xs text-surface-500">{t('teams.external.form.endpointHint')}</p>}
+                    : (
+                      <p className="mt-1 text-xs text-surface-500">
+                        {endpointRequired ? t('teams.external.form.endpointHint') : t('teams.external.form.endpointOptionalHint')}
+                      </p>
+                  )}
                 </div>
+                )}
 
                 {connectionRecommendation && (
                   <div className="md:col-span-2 rounded-2xl border border-sky-200 bg-sky-50/80 p-4" data-testid="external-connection-recommendation">
@@ -448,21 +629,45 @@ const ExternalAgentFormModal = ({
                   </div>
                 )}
 
-                <div>
-                  <label htmlFor="external-agent-transport" className="mb-1 block text-sm font-medium text-surface-700">
-                    {t('teams.external.form.transport')}
-                  </label>
-                  <select
-                    id="external-agent-transport"
-                    value={form.transport}
-                    onChange={(event) => setForm({ ...form, transport: event.target.value as ExternalAgentFormState['transport'] })}
-                    className="w-full rounded-lg border border-surface-300 px-3 py-2 focus:border-primary-500 focus:ring-2 focus:ring-primary-500"
-                  >
-                    <option value="http_sse">{t('teams.external.transport.httpSse')}</option>
-                    <option value="http">{t('teams.external.transport.http')}</option>
-                    <option value="websocket">{t('teams.external.transport.websocket')}</option>
-                  </select>
-                </div>
+                {inboundBotAdapter && botAppId && (
+                  <div className="md:col-span-2 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4">
+                    <div className="text-sm font-semibold text-emerald-900">{t('teams.external.form.inboundBotTitle')}</div>
+                    <p className="mt-1 text-xs leading-5 text-emerald-800">{t('teams.external.form.inboundBotHint')}</p>
+                    <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">App ID</div>
+                        <div className="mt-1 break-all rounded-lg bg-white px-3 py-2 font-mono text-xs text-surface-800 ring-1 ring-emerald-100">{botAppId}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Token</div>
+                        <div className="mt-1 break-all rounded-lg bg-white px-3 py-2 font-mono text-xs text-surface-800 ring-1 ring-emerald-100">{botToken}</div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Inbound URL</div>
+                        <div className="mt-1 break-all rounded-lg bg-white px-3 py-2 font-mono text-xs text-surface-800 ring-1 ring-emerald-100">{inboundUrl}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {transportVisible && (
+                  <div>
+                    <label htmlFor="external-agent-transport" className="mb-1 block text-sm font-medium text-surface-700">
+                      {t('teams.external.form.transport')}
+                    </label>
+                    <select
+                      id="external-agent-transport"
+                      value={form.transport}
+                      onChange={(event) => setForm({ ...form, transport: event.target.value as ExternalAgentFormState['transport'] })}
+                      className="w-full rounded-lg border border-surface-300 px-3 py-2 focus:border-primary-500 focus:ring-2 focus:ring-primary-500"
+                    >
+                      <option value="http_sse">{t('teams.external.transport.httpSse')}</option>
+                      <option value="http">{t('teams.external.transport.http')}</option>
+                      <option value="websocket">{t('teams.external.transport.websocket')}</option>
+                    </select>
+                    <p className="mt-1 text-xs text-surface-500">{t('teams.external.form.transportHint')}</p>
+                  </div>
+                )}
                 <div>
                   <label htmlFor="external-agent-avatar" className="mb-1 block text-sm font-medium text-surface-700">
                     {t('teams.external.form.avatar')}
@@ -492,6 +697,7 @@ const ExternalAgentFormModal = ({
                 />
               </div>
 
+              {!inboundBotAdapter && (
               <div className="rounded-2xl border border-surface-200 bg-surface-50/80 p-4">
                 <h4 className="text-sm font-medium text-surface-800">{t('teams.external.form.authSection')}</h4>
                 <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -541,6 +747,7 @@ const ExternalAgentFormModal = ({
                   </div>
                 </div>
               </div>
+              )}
             </div>
           )}
 
@@ -863,6 +1070,25 @@ const ExternalAgentFormModal = ({
                         <option value="referenced_only">{t('teams.external.fileAccess.referencedOnly')}</option>
                       </select>
                     </div>
+                    <div className="md:col-span-2 xl:col-span-4">
+                      <label htmlFor="external-agent-adapter-config" className="mb-1 block text-xs font-medium text-surface-600">
+                        {t('teams.external.form.adapterConfig')}
+                      </label>
+                      <textarea
+                        id="external-agent-adapter-config"
+                        rows={5}
+                        value={adapterConfigDraft}
+                        onChange={(event) => handleAdapterConfigChange(event.target.value)}
+                        className={`w-full rounded-lg border px-3 py-2 font-mono text-xs focus:border-primary-500 focus:ring-2 focus:ring-primary-500 ${
+                          adapterConfigError ? 'border-red-300 bg-red-50/40' : 'border-surface-300'
+                        }`}
+                        placeholder='{"model":"gpt-4o-mini"}'
+                        aria-invalid={Boolean(adapterConfigError)}
+                      />
+                      {adapterConfigError
+                        ? <p className="mt-1 text-xs text-red-600">{adapterConfigError}</p>
+                        : <p className="mt-1 text-xs text-surface-500">{t('teams.external.form.adapterConfigHint')}</p>}
+                    </div>
                   </div>
                 )}
               </div>
@@ -899,7 +1125,7 @@ const ExternalAgentFormModal = ({
           ) : (
             <button
               onClick={onSubmit}
-              disabled={submitDisabled}
+              disabled={submitDisabled || Boolean(adapterConfigError)}
               className="rounded-lg bg-primary-500 px-4 py-2 text-white transition-colors hover:bg-primary-600 disabled:cursor-not-allowed disabled:bg-surface-300"
             >
               {isCreateMode ? t('common.create') : t('common.save')}

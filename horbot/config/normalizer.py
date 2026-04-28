@@ -7,6 +7,7 @@ from typing import Iterable
 from horbot.config.schema import Config
 
 _CHANNEL_TYPES = {
+    "horbot-inbound-bot",
     "whatsapp",
     "telegram",
     "discord",
@@ -138,10 +139,14 @@ def normalize_config(config: Config) -> Config:
 
     for agent in config.external_agents.instances.values():
         agent.capabilities = _unique_str_list(agent.capabilities)
+        agent.adapter = str(getattr(agent, "adapter", "") or "generic-agent-api").strip().lower() or "generic-agent-api"
+        if agent.adapter in {"channel-backed-agent", "web-ui-bridge"}:
+            agent.adapter = "inbound-bot"
         agent.endpoint = agent.endpoint.strip()
         agent.auth_header = (agent.auth_header or "Authorization").strip() or "Authorization"
         agent.transport = agent.transport.strip().lower()
         agent.auth_type = agent.auth_type.strip().lower()
+        agent.adapter_config = dict(getattr(agent, "adapter_config", {}) or {})
         agent.metadata = dict(agent.metadata or {})
 
     normalized_endpoints = []

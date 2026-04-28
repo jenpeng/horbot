@@ -591,13 +591,51 @@ const ChannelsPage: React.FC = () => {
     };
   });
   const unboundEndpoints = data.endpoints.filter(endpoint => !endpoint.agent_id);
-  const draftStepOneReady = Boolean(form?.type && form?.agent_id);
+  const isHorbotInboundBotSelected = form?.type === 'horbot-inbound-bot';
+  const agentBindingOptional = isHorbotInboundBotSelected;
+  const draftStepOneReady = Boolean(form?.type && (form?.agent_id || agentBindingOptional));
   const draftStepTwoReady = requiredFieldKeys.every(fieldKey => hasConfiguredValue(form?.config?.[fieldKey]));
   const draftMissingFields = requiredFieldKeys.filter(fieldKey => !hasConfiguredValue(form?.config?.[fieldKey]));
   const draftTestPassed = draftTestResult?.result.status === 'ok';
   const canRunDraftTest = Boolean(isDraft && draftStepTwoReady && form?.type);
   const draftConnectionFeedback = getConnectionFeedback(t, draftTestResult?.result, form?.type);
   const savedConnectionFeedback = getConnectionFeedback(t, testResult?.result, form?.type);
+  const inboundBotAppId = typeof form?.config?.bot_app_id === 'string' ? form.config.bot_app_id : '';
+  const inboundBotToken = typeof form?.config?.bot_token === 'string' ? form.config.bot_token : '';
+  const inboundBotPath = typeof form?.config?.inbound_url_path === 'string' ? form.config.inbound_url_path : '';
+  const inboundBotUrl = inboundBotPath
+    ? (inboundBotPath.startsWith('http') ? inboundBotPath : `${window.location.origin}${inboundBotPath}`)
+    : '';
+  const hasInboundBotCredentials = Boolean(inboundBotAppId || inboundBotToken || inboundBotUrl);
+
+  const renderInboundBotCredentials = () => {
+    if (!isHorbotInboundBotSelected || !hasInboundBotCredentials) {
+      return null;
+    }
+
+    const values = [
+      { label: t('channels.inboundBotAppId'), value: inboundBotAppId },
+      { label: t('channels.inboundBotToken'), value: inboundBotToken },
+      { label: t('channels.inboundBotInboundUrl'), value: inboundBotUrl || inboundBotPath },
+    ].filter(item => item.value);
+
+    return (
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4">
+        <div className="text-sm font-semibold text-emerald-900">{t('channels.inboundBotCredentialsTitle')}</div>
+        <p className="mt-1 text-xs leading-5 text-emerald-800">{t('channels.inboundBotCredentialsHint')}</p>
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+          {values.map(item => (
+            <div key={item.label}>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">{item.label}</div>
+              <div className="mt-1 break-all rounded-lg bg-white px-3 py-2 font-mono text-xs text-surface-800 ring-1 ring-emerald-100">
+                {item.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   const renderChannelField = (field: ChannelCatalogEntry['fields'][number]) => {
     const rawValue = form?.config?.[field.key];
@@ -622,6 +660,7 @@ const ChannelsPage: React.FC = () => {
         key={field.key}
         label={field.label}
         type={field.secret ? 'password' : field.type === 'number' ? 'number' : 'text'}
+        disabled={Boolean(field.readonly)}
         value={rawValue === undefined || rawValue === null ? '' : String(rawValue)}
         onChange={(event) => {
           const nextValue = field.type === 'number'
@@ -793,6 +832,9 @@ const ChannelsPage: React.FC = () => {
         const result = await channelsService.testDraftEndpoint(payload);
         setDraftTestResult(result);
         setTestResult(null);
+        setForm(current => current
+          ? { ...current, config: { ...current.config, ...(result.endpoint.config || {}) } }
+          : current);
       }
     } catch (err) {
       console.error('Failed to test channel endpoint:', err);
@@ -803,6 +845,9 @@ const ChannelsPage: React.FC = () => {
   };
 
   const getAgentLabel = (agentId: string) => {
+    if (!agentId && isHorbotInboundBotSelected) {
+      return t('channels.inboundBotDynamicAgentLabel');
+    }
     const agent = data.agents.find(item => item.id === agentId);
     return agent ? `${agent.name} · ${agent.provider || t('channels.providerNotSet')}` : t('channels.noBoundAgentLabel');
   };
@@ -1167,13 +1212,13 @@ const ChannelsPage: React.FC = () => {
                             value={form.agent_id}
                             onChange={(event) => handleFieldChange('agent_id', event.target.value)}
                             options={[
-                              { value: '', label: t('channels.placeholderAgent') },
+                              { value: '', label: isHorbotInboundBotSelected ? t('channels.inboundBotDynamicAgentOption') : t('channels.placeholderAgent') },
                               ...data.agents.map(agent => ({
                                 value: agent.id,
                                 label: `${agent.name} · ${agent.provider || t('channels.providerNotSet')} · ${agent.model || t('channels.modelNotSet')}`,
                               })),
                             ]}
-                            hint={t('channels.bindAgentHint')}
+                            hint={isHorbotInboundBotSelected ? t('channels.inboundBotBindAgentHint') : t('channels.bindAgentHint')}
                           />
                           <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-4 md:col-span-2">
                             <label className="flex items-center gap-3">
@@ -1304,8 +1349,8 @@ const ChannelsPage: React.FC = () => {
                                     <p className="text-sm font-medium text-surface-900">{t('channels.checkAgentReadyTitle')}</p>
                                     <p className="mt-1 text-xs text-surface-500">{t('channels.checkAgentReadyDescription')}</p>
                                   </div>
-                                  <Badge variant={form.agent_id ? 'success' : 'warning'} size="sm">
-                                    {form.agent_id ? t('channels.completed') : t('channels.incomplete')}
+                                  <Badge variant={form.agent_id || agentBindingOptional ? 'success' : 'warning'} size="sm">
+                                    {form.agent_id || agentBindingOptional ? t('channels.completed') : t('channels.incomplete')}
                                   </Badge>
                                 </div>
                                 <div className="flex items-start justify-between gap-3 rounded-xl border border-surface-200 bg-white px-3 py-3">
@@ -1376,6 +1421,8 @@ const ChannelsPage: React.FC = () => {
                                 )}
                               </div>
                             )}
+
+                            {renderInboundBotCredentials()}
                           </div>
 
                           <div className="space-y-4 rounded-2xl border border-surface-200 bg-surface-50/70 px-4 py-4">
@@ -1452,13 +1499,13 @@ const ChannelsPage: React.FC = () => {
                         value={form.agent_id}
                         onChange={(event) => handleFieldChange('agent_id', event.target.value)}
                         options={[
-                          { value: '', label: t('channels.noBoundAgent') },
+                          { value: '', label: isHorbotInboundBotSelected ? t('channels.inboundBotDynamicAgentOption') : t('channels.noBoundAgent') },
                           ...data.agents.map(agent => ({
                             value: agent.id,
                             label: `${agent.name} · ${agent.provider || t('channels.providerNotSet')} · ${agent.model || t('channels.modelNotSet')}`,
                           })),
                         ]}
-                        hint={t('channels.bindAgentRouteHint')}
+                        hint={isHorbotInboundBotSelected ? t('channels.inboundBotBindAgentHint') : t('channels.bindAgentRouteHint')}
                       />
                       <div className="rounded-2xl border border-surface-200 bg-surface-50 px-4 py-4">
                         <label className="flex items-center gap-3">
@@ -1503,9 +1550,12 @@ const ChannelsPage: React.FC = () => {
                       </div>
 
                       {selectedCatalog ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {selectedCatalog.fields.map(renderChannelField)}
-                        </div>
+                        <>
+                          {renderInboundBotCredentials()}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {selectedCatalog.fields.map(renderChannelField)}
+                          </div>
+                        </>
                       ) : (
                         <Empty
                           title={t('channels.emptyNoFieldsTitle')}

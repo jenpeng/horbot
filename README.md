@@ -88,6 +88,8 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 - MCP integration
 - Automatic OfficeCLI MCP wiring during local setup so agents can use Word, Excel, PowerPoint, and OpenXML-aware document tools without extra manual configuration
 - `browser`, `web_search`, and `web_fetch` as the standard browser/search toolset, with Playwright as the default browser runtime
+- External Agent inbound-bot runtime for Feishu/Discord-style vendor or local agent platforms, plus compatibility adapters for OpenAI-compatible and generic HTTP/SSE/WebSocket agents
+- Channels can also create Horbot inbound bot endpoints that issue App ID, Token, and an Inbound URL for platforms such as WorkBuddy to push messages into a fixed or request-specified internal Agent
 - External channels such as WeCom, Feishu, ShareCRM, Telegram, Discord, Slack, Matrix, Email, Mochat, and others
 - WeCom AI Bot support with reply-mode streaming, media upload, and inbound media download/decryption
 

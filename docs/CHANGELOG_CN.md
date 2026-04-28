@@ -2,6 +2,18 @@
 
 本记录用于概览 Horbot 的关键功能和文档演进。更细粒度的代码改动请直接查看 Git 历史。
 
+## 2026-04-27
+
+### External Agent Adapter 架构
+
+- External Agent 运行时已改为 adapter registry 分发，不再把旧 `endpoint + transport` 逻辑固化在单一 runtime 中
+- 新增 `inbound-bot` 作为主接入模式：Horbot 生成 App ID、Token 和 Inbound URL，WorkBuddy 或其他厂商/本地平台像飞书/Discord 机器人一样把消息推送进 Horbot
+- Channels 新增 `horbot-inbound-bot` 通道实例，由 Horbot 生成通道级 App ID、Token 和 Inbound URL，并将入站消息路由给固定绑定或请求指定的内部 Agent
+- 新增 `generic-agent-api` 默认适配器，用于兼容原 HTTP / HTTP SSE / WebSocket 行为
+- 新增 `openai-compatible` 适配器，用于接入 Chat Completions 风格的厂商或本地服务
+- 外部 Agent 配置新增开放式 `adapter` slug 与 `adapter_config`，合法但尚未实现的未来厂商适配器可以先保存配置，运行时会给出明确 unsupported adapter 诊断
+- Teams 页面外部 Agent 表单和详情页已展示 adapter 字段，并同步中英泰多语言文案
+
 ## 2026-04-15
 
 ### 浏览器联网回归 Playwright 默认模式

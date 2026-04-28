@@ -324,6 +324,27 @@ async def test_channel_connection(channel_type: str, channel_config: Any) -> dic
     """Run a lightweight connection test for one typed channel config."""
     channel_type = str(channel_type or "").strip().lower()
 
+    if channel_type == "horbot-inbound-bot":
+        start = time.time()
+        if not getattr(channel_config, "bot_app_id", "") or not getattr(channel_config, "bot_token", ""):
+            return _build_error_result(
+                channel_type,
+                enabled=False,
+                latency_ms=0,
+                error="Inbound bot App ID or Token not configured",
+            )
+        latency = int((time.time() - start) * 1000)
+        return _result(
+            channel_type,
+            bool(getattr(channel_config, "enabled", True)),
+            "ok",
+            latency,
+            None,
+            remediation=[
+                "把 Horbot 生成的 App ID、Token 和 Inbound URL 配置到 WorkBuddy 或其他外部 Agent 平台。",
+            ],
+        )
+
     if channel_type == "telegram":
         if not channel_config.token:
             return _build_error_result(channel_type, enabled=False, latency_ms=0, error="Token not configured")

@@ -14,12 +14,12 @@ horbot 采用模块化设计，核心组件包括：
 4. **工具系统** - 内置工具和 MCP 扩展
 5. **存储层** - 会话、记忆、配置持久化
 6. **安全治理层** - 用户输入守卫、工具结果审计与 bootstrap 资产治理
-7. **外部 Agent 接入层** - 第三方 Agent 配置、探测与团队成员编排
+7. **外部 Agent 接入层** - 第三方/本地 Agent 适配器、探测与团队成员编排
 
 ### 当前治理与诊断增量
 
 - Agent 实例除了 `SOUL.md` / `USER.md`，还新增 `AGENTS.md` 作为运行治理与协作规则文件
-- 外部 Agent 通过独立 `external_agents` 模块接入，不与内部 Agent 配置混写
+- 外部 Agent 通过独立 `external_agents` 模块接入，不与内部 Agent 配置混写；运行时通过 adapter registry 分发到具体厂商、本地协议或通用 Horbot Agent API 适配器
 - 团队成员接口返回已显式区分 internal / external member，前端可稳定渲染 mixed team
 - 工具审计支持按风险级别、时间窗口、`session_key` 聚合，并在管理页顶部展示摘要
 - 聊天错误卡片、顶部状态条和 turn badge 都会尽量保留 `request_id` 作为统一诊断线索
@@ -178,8 +178,12 @@ horbot/
 ├── external_agents/         # 外部 Agent 接入
 │   ├── manager.py           # 外部 Agent 管理器
 │   ├── models.py            # 外部 Agent 数据模型
-│   ├── runtime.py           # 连接探测与调用运行时
-│   └── adapters/            # 鉴权/协议适配器
+│   ├── registry.py          # adapter 注册表与别名解析
+│   ├── runtime.py           # adapter 分发运行时
+│   └── adapters/            # 厂商/协议/本地 Agent 适配器
+│       ├── base.py          # 适配器契约与通用请求/响应工具
+│       ├── generic_agent_api.py
+│       └── openai_compatible.py
 ├── cron/                    # 定时任务
 │   ├── service.py           # 任务服务
 │   └── types.py             # 类型定义
@@ -242,6 +246,19 @@ Agent 是 horbot 的核心，负责与 LLM 交互和工具执行。
 `workspace/` 下还可能存在 `.audit`、`.checkpoints`、`.state` 等运行目录，它们属于有效运行资产，不是冗余副本。
 
 旧的 `.horbot/agents/<agent-id>/{memory,sessions,skills}` 和 `workspace/{memory,skills}` 现在只作为兼容迁移来源，运行时会向前合并，但不会再继续作为 canonical 写入路径。
+
+### 外部 Agent 接入层 (`horbot/external_agents/`)
+
+当前外部 Agent 架构不再把 `endpoint + transport` 当成唯一接入模型，而是拆成两层：
+
+- `ExternalAgentConfig` 保存外部成员身份、权限、上下文策略、`adapter`、`endpoint`、`transport` 和 `adapter_config`
+- `ExternalAgentRuntime` 只负责通过 `registry.py` 解析 adapter 并转发 `complete()` / `probe()`
+- `inbound-bot` 是主接入模式：Horbot 管理机器人身份、Token 校验和入站消息落库，WorkBuddy 或其他厂商/本地平台负责把消息推送进来
+- `generic-agent-api` 是兼容旧 HTTP / SSE / WebSocket URL 调用行为的适配器
+- `openai-compatible` 是面向 Chat Completions 风格协议的示例适配器
+- 未来接 Dify、Coze、LangGraph、MCP Agent、网页 UI 桥接或渠道托管 Agent 时，应新增 adapter，而不是在 runtime 里继续堆厂商条件分支
+
+合法但尚未实现的 adapter slug 可以先保存配置；实际调用时会返回明确的 unsupported adapter 诊断，避免把配置扩展能力和运行时实现进度绑定死。
 
 #### 模块依赖关系
 
@@ -533,6 +550,8 @@ graph TB
 
 渠道模块负责与各聊天平台的集成。
 
+当前 Channels 还承担 Horbot 入站机器人入口能力：`horbot-inbound-bot` 通道实例由 Horbot 生成 App ID、Token 和入站 URL，外部平台把消息推送进来后，后端可以按固定绑定关系路由给内部 Agent，也可以在未固定绑定时读取入站请求里的 `target_agent_id` / `agent_id`，并在当前运行实例的 Agent 配置中校验后路由。它和 External Agent 的区别是：Channels 管“消息入口”，External Agent 管“外部成员身份”。
+
 #### 渠道管理流程
 
 ```mermaid
@@ -613,6 +632,7 @@ class BaseChannel(ABC):
 | WhatsApp | whatsapp.py | 支持桥接模式                |
 | Matrix   | matrix.py   | 支持端到端加密               |
 | Mochat   | mochat.py   | 支持群组消息                |
+| Horbot 入站机器人 | horbot_inbound_bot.py | Horbot 生成 App ID、Token 和入站 URL，供 WorkBuddy 或其他平台推送消息 |
 
 其中 `WeCom` 与 `Mochat` 都属于企业微信生态，但协议与运行链路不同：前者对接官方 AI Bot WebSocket 网关，后者对接 Mochat / Claw 生态账号链路。
 

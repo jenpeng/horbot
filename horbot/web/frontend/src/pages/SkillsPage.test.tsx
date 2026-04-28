@@ -1,8 +1,9 @@
 import type { ReactElement } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import SkillsPage from './SkillsPage';
 import { I18nProvider } from '../contexts/I18nContext';
+import { preloadLocaleMessages } from '../i18n/messages';
 import skillsService from '../services/skills';
 import type { Skill, SkillDetail } from '../types';
 
@@ -102,6 +103,10 @@ const skillDetailFixture: SkillDetail = {
 const renderWithI18n = (ui: ReactElement) => render(<I18nProvider>{ui}</I18nProvider>);
 
 describe('SkillsPage', () => {
+  beforeAll(async () => {
+    await preloadLocaleMessages('en');
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(skillsService.getSkills).mockResolvedValue([skillFixture, builtinSkillFixture]);

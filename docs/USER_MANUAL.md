@@ -155,6 +155,22 @@ Horbot currently distinguishes two enterprise-WeChat-style paths:
 
 Treat them as different protocols with different credentials and operational assumptions.
 
+## External Agents
+
+The Teams page can connect third-party or local agents as external members.
+
+Use `Adapter` to choose the integration mode. Prefer `inbound-bot`: Horbot creates a bot identity and shows App ID, Token, and Inbound URL. Copy those values into WorkBuddy or another vendor/local agent platform so it can push messages into Horbot.
+
+`generic-agent-api` is now a compatibility mode for the older design where Horbot actively calls an external HTTP, SSE, or WebSocket URL. `Transport` is only shown for that generic adapter. `Endpoint` is required for `generic-agent-api` and `openai-compatible`, but not for `inbound-bot`.
+
+For `openai-compatible`, provide a Chat Completions-style endpoint and set `adapter_config.model`.
+
+## Channels Inbound Bot
+
+Use the Channels page when you need a message entrance that routes into an internal Agent. Create a `Horbot inbound bot` channel instance, optionally bind it to a target Agent, run the draft test, and save it.
+
+After the test/save step, Horbot shows the generated App ID, Token, and Inbound URL. Configure those values in WorkBuddy or another vendor/local platform so it can push messages into Horbot. If the endpoint is not fixed to one Agent, the inbound request must include `target_agent_id` or `agent_id`; Horbot validates the ID against the current running instance before routing. This is separate from External Agent membership: Channels owns entrances, External Agents own team/DM member identity.
+
 ## Smoke Tests
 
 Useful smoke commands:

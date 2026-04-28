@@ -395,11 +395,16 @@ const createEmptyTeamForm = (): TeamFormState => ({
 
 const normalizeTeamId = (value: string): string => value.trim().toLowerCase();
 
+const externalAgentAdapterRequiresEndpoint = (adapter?: string): boolean => (
+  (adapter || 'inbound-bot') === 'generic-agent-api' || adapter === 'openai-compatible'
+);
+
 const createEmptyExternalAgentForm = (): ExternalAgentFormState => ({
   id: '',
   name: '',
   description: '',
   avatar: '',
+  adapter: 'inbound-bot',
   transport: 'http_sse',
   endpoint: '',
   auth_type: 'none',
@@ -415,6 +420,7 @@ const createEmptyExternalAgentForm = (): ExternalAgentFormState => ({
   context_scope: 'recent_turns',
   memory_access: 'none',
   file_access: 'none',
+  adapter_config: {},
   metadata: {},
 });
 
@@ -583,7 +589,9 @@ const TeamsPage: React.FC = () => {
   const normalizedCreateExternalAgentId = normalizeExternalAgentId(externalAgentForm.id);
   const createExternalAgentIdRequired = modalType === 'create-external-agent' && !externalAgentForm.id.trim();
   const createExternalAgentNameRequired = modalType === 'create-external-agent' && !externalAgentForm.name.trim();
-  const createExternalAgentEndpointRequired = modalType === 'create-external-agent' && !externalAgentForm.endpoint.trim();
+  const createExternalAgentEndpointRequired = modalType === 'create-external-agent'
+    && externalAgentAdapterRequiresEndpoint(externalAgentForm.adapter)
+    && !externalAgentForm.endpoint.trim();
   const createExternalAgentIdExists = modalType === 'create-external-agent'
     && normalizedCreateExternalAgentId.length > 0
     && externalAgents.some((agent) => normalizeExternalAgentId(agent.id) === normalizedCreateExternalAgentId);
@@ -598,7 +606,7 @@ const TeamsPage: React.FC = () => {
     && (
       !externalAgentForm.id.trim()
       || !externalAgentForm.name.trim()
-      || !externalAgentForm.endpoint.trim()
+      || (externalAgentAdapterRequiresEndpoint(externalAgentForm.adapter) && !externalAgentForm.endpoint.trim())
       || createExternalAgentIdExists
     );
   const recommendedMemoryProfile = buildRecommendedMemoryBankProfile(t, agentForm.profile, agentForm.capabilities);
@@ -1077,7 +1085,7 @@ const TeamsPage: React.FC = () => {
       return;
     }
 
-    if (!externalAgentForm.endpoint.trim()) {
+    if (externalAgentAdapterRequiresEndpoint(externalAgentForm.adapter) && !externalAgentForm.endpoint.trim()) {
       alert(t('teams.validation.externalAgentEndpointRequired'));
       return;
     }
@@ -1145,6 +1153,7 @@ const TeamsPage: React.FC = () => {
       name: agent.name,
       description: agent.description || '',
       avatar: agent.avatar || '',
+      adapter: agent.adapter || 'generic-agent-api',
       transport: agent.transport,
       endpoint: agent.endpoint,
       auth_type: agent.auth_type,
@@ -1160,6 +1169,7 @@ const TeamsPage: React.FC = () => {
       context_scope: agent.context_scope,
       memory_access: agent.memory_access,
       file_access: agent.file_access,
+      adapter_config: agent.adapter_config || {},
       metadata: agent.metadata || {},
     });
     setModalType('edit-external-agent');

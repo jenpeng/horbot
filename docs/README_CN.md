@@ -34,6 +34,7 @@
 
 ## 📢 最新动态
 
+- **2026-04-27** 🔌 External Agent 已调整为入站 Bot 优先的可插拔 adapter 架构；Channels 也新增 Horbot 入站机器人通道实例，Horbot 可生成 App ID、Token 与 Inbound URL，WorkBuddy 或其他平台像飞书/Discord 机器人一样推送消息进来；`generic-agent-api` 仅保留为兼容旧 URL 调用模式。
 - **2026-04-15** 🌐 Agent 联网能力已改回默认使用 Playwright 浏览器链路，并以 `browser` / `web_search` / `web_fetch` 作为标准联网工具；`horbot.sh` 不再托管 `web-access` 服务。
 - **2026-04-14** 🛡️ 新增外部 Agent 接入管理、`AGENTS.md` 治理文件、工具审计摘要与聊天 `request_id` 诊断增强；并修复一类前端误报 provider timeout 的假超时场景。
 - **2026-04-12** 🚀 新增 **WeCom（企业微信 AI Bot）** 渠道支持，包含 reply-mode 流式回复、媒体上传、入站媒体下载/解密，以及对应的文档与诊断能力同步。
@@ -65,7 +66,7 @@
 | 👀 **历史预览** | 历史消息中的图片、音频、PDF、Office、文本附件可直接内联预览；远程图片链接会尽量自动转成统一图片卡片；多图弹窗支持底部缩略条快速切换 |
 | 🌐 **浏览器与联网工具** | Agent 默认使用 `browser` / `web_search` / `web_fetch` 处理网页交互、搜索与抓取，浏览器 MCP 默认走 Playwright |
 | 🔁 **团队接力可视化** | 聊天区会直接显示接力棒次、交棒来源、继续讨论/返回总结状态 |
-| 🌐 **外部 Agent 接入** | 支持独立配置、连接探测、团队成员编排和 capability tags 管理 |
+| 🌐 **外部 Agent 接入** | 支持 adapter 化接入、连接探测、团队成员编排和 capability tags 管理 |
 | 🛡️ **Agent 治理与审计** | 支持 `AGENTS.md` / `SOUL.md` / `USER.md` 资产管理、工具审计摘要与风险筛选 |
 | 🌐 **三语界面切换** | 当前 Web UI 支持英文、简体中文、泰语切换，适合跨语言团队协作与演示 |
 
@@ -136,7 +137,7 @@ cd horbot
 
 当前多 Agent 管理页新增三类治理能力：
 
-- 支持把外部 Agent 接入为独立目录项，并控制其是否允许单聊、团队接力、显式提及和上下文范围
+- 支持把外部 Agent 接入为独立目录项，并控制其 adapter、是否允许单聊、团队接力、显式提及和上下文范围
 - Agent 配置中新增 `AGENTS.md`，用于编写运行治理与协作规则，不再只有 `SOUL.md` / `USER.md`
 - Agent Activity 中可查看最近工具审计记录，并按风险类型与 `session_key` 过滤
 

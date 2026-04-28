@@ -18,6 +18,7 @@ Horbot keeps the runtime intentionally small:
 - Web UI
 - CLI
 - external chat channels such as WeCom, Feishu, ShareCRM, Telegram, Slack, Matrix, and Mochat
+- Horbot-issued inbound bot endpoints for vendor or local Agent platforms that need an App ID, Token, and push URL instead of a Horbot-calling-out URL
 
 ### Core Runtime
 
@@ -32,6 +33,16 @@ Horbot keeps the runtime intentionally small:
 - `AgentManager` for per-agent configuration and lifecycle
 - `TeamManager` and team workspaces
 - relay-style team chat and ordered agent participation
+- `external_agents` adapter registry for adding vendor, local, OpenAI-compatible, or generic external agents as team members
+
+### External Agent Runtime
+
+- External Agent identity and team membership stay separate from internal `agents.instances`
+- `ExternalAgentRuntime` only dispatches `complete()` and `probe()` through the adapter registry
+- `inbound-bot` is the primary adapter for Feishu/Discord-style integrations: Horbot owns bot identity, token verification, and inbound message persistence while vendor/local platforms push messages in
+- `generic-agent-api` preserves the previous HTTP, HTTP SSE, and WebSocket behavior as a compatibility adapter
+- `openai-compatible` supports Chat Completions-style services through `adapter_config.model` and optional endpoint overrides
+- Future integrations such as Dify, Coze, LangGraph, MCP Agent, web UI bridges, or channel-backed agents should add adapters instead of branching inside the runtime dispatcher
 
 ### Provider And Tool Layer
 
@@ -51,6 +62,7 @@ Horbot keeps the runtime intentionally small:
 
 - endpoint catalog and missing-config diagnostics
 - long-lived connectors for official and ecosystem chat gateways
+- `horbot-inbound-bot` endpoints are channel-owned inbound entrances: Horbot issues credentials, validates pushed messages, and routes them to a fixed bound Agent or to a request-specified Agent that exists in the current running instance
 - reply-mode streaming and media handling for channels that support progressive edits
 
 ### Persistence Layer

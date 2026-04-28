@@ -304,13 +304,37 @@ Skills 页面当前支持导入 `.skill` 与 `.zip`。
 
 “团队管理 / 多 Agent 管理”现在支持接入外部 Agent。
 
+如果你的目标只是给 WorkBuddy 或其他平台一个 Horbot 机器人入口，让它把消息推送给某个内部 Agent，应该优先去 `Channels / 渠道` 页面创建 `Horbot 入站机器人` 通道实例，而不是在 External Agent 里填写外部 endpoint。
+
+Channels 入站机器人的典型流程：
+
+1. 进入 `Channels / 渠道`
+2. 新建通道实例，类型选择 `Horbot 入站机器人`
+3. 可选择固定绑定目标内部 Agent；如果不绑定，外部请求需要传 `target_agent_id` 或 `agent_id`
+4. 执行草稿测试，保存后复制 Horbot 生成的 App ID、Token 和 Inbound URL
+5. 将这些值配置到 WorkBuddy 或其他厂商/本地 Agent 平台
+
+边界很明确：Channels 管外部消息入口和路由，External Agent 管外部成员身份和团队/单聊编排。
+
+不固定绑定时，Horbot 不会信任外部任意字符串直接执行，而是只允许路由到当前运行实例 `.horbot/config.json` 中实际存在的 Agent。这样不同用户独立运行本项目、各自创建自己的 Agent 时，同一个接入模式仍然能按各自实例里的 Agent ID 工作。
+
 典型流程：
 
 1. 进入 `Connect External Agent`
-2. 填写 endpoint、传输方式与鉴权方式
+2. 优先选择 `inbound-bot`，复制 Horbot 生成的 App ID、Token 和 Inbound URL 到 WorkBuddy 或其他厂商/本地 Agent 平台
 3. 选择 capability tags
 4. 决定是否允许单聊、团队接力、是否必须显式 `@`
 5. 点击“测试连接”做轻量探测
+
+当前表单里最重要的两个连接字段是：
+
+- `Adapter`：决定接入模式；推荐 `inbound-bot`，由 Horbot 提供机器人凭证和入站 URL，外部平台负责推送消息进来
+- `Endpoint`：只对需要 URL 的适配器强制填写，例如兼容旧模式的 `generic-agent-api` 和 `openai-compatible`
+- `Transport`：仅在通用适配器下显示，表示 HTTP、SSE 或 WebSocket 底层连接方式
+
+`generic-agent-api` 仅用于兼容旧设计，也就是 Horbot 主动调用外部 HTTP / SSE / WebSocket URL；新接 WorkBuddy 或类似平台时不应优先使用这个模式。
+
+`openai-compatible` 适配器适合接入 Chat Completions 风格的服务，通常需要在 `adapter_config` 中提供 `model`，并可选提供 `chat_completions_endpoint`。
 
 能力标签不再建议纯手填。当前界面支持：
 

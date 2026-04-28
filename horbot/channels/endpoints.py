@@ -13,6 +13,7 @@ from horbot.config.schema import (
     DiscordConfig,
     EmailConfig,
     FeishuConfig,
+    HorbotInboundBotConfig,
     MatrixConfig,
     MochatConfig,
     QQConfig,
@@ -24,6 +25,7 @@ from horbot.config.schema import (
 )
 
 CHANNEL_TYPE_MODELS = {
+    "horbot-inbound-bot": HorbotInboundBotConfig,
     "whatsapp": WhatsAppConfig,
     "telegram": TelegramConfig,
     "discord": DiscordConfig,
@@ -39,6 +41,16 @@ CHANNEL_TYPE_MODELS = {
 }
 
 CHANNEL_CATALOG: dict[str, dict[str, Any]] = {
+    "horbot-inbound-bot": {
+        "label": "Horbot 入站机器人",
+        "description": "由 Horbot 生成 App ID、Token 和 Inbound URL，供 WorkBuddy 或其他外部 Agent 平台像飞书/Discord 机器人一样接入。",
+        "required_fields": [],
+        "fields": [
+            {"key": "bot_app_id", "label": "App ID", "readonly": True, "placeholder": "保存后自动生成"},
+            {"key": "bot_token", "label": "Token", "secret": True, "readonly": True, "placeholder": "保存后自动生成"},
+            {"key": "inbound_url_path", "label": "Inbound URL Path", "readonly": True, "placeholder": "保存后自动生成"},
+        ],
+    },
     "telegram": {
         "label": "Telegram",
         "description": "使用 Bot Token 对接 Telegram 机器人。",
@@ -272,6 +284,8 @@ def build_legacy_endpoint(config: Config, channel_type: str) -> ResolvedChannelE
     """Project a legacy global channel config into endpoint view data."""
     if channel_type not in CHANNEL_TYPE_MODELS:
         return None
+    if not hasattr(config.channels, channel_type):
+        return None
     channel_config = getattr(config.channels, channel_type)
     if not _has_legacy_channel_payload(channel_type, channel_config):
         return None
@@ -349,7 +363,8 @@ def find_channel_endpoint(config: Config, endpoint_id: str) -> ResolvedChannelEn
 def build_runtime_channel_config(channels: ChannelsConfig, endpoint: ResolvedChannelEndpoint) -> Any:
     """Merge endpoint values into the typed runtime config for a channel implementation."""
     model_cls = CHANNEL_TYPE_MODELS[endpoint.type]
-    base_config = getattr(channels, endpoint.type)
+    attr_name = endpoint.type.replace("-", "_")
+    base_config = getattr(channels, attr_name, model_cls())
     payload = base_config.model_dump()
     payload["enabled"] = endpoint.enabled
     payload["allow_from"] = list(endpoint.allow_from)

@@ -2,6 +2,7 @@ import unittest
 
 import httpx
 from fastapi import FastAPI
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from horbot.channels.telemetry import clear_channel_telemetry, record_channel_event
@@ -77,6 +78,185 @@ class ChannelEndpointsApiTests(unittest.IsolatedAsyncioTestCase):
         wecom_entry = next(item for item in payload["catalog"] if item["type"] == "wecom")
         self.assertEqual(wecom_entry["label"], "WeCom")
         self.assertIn("bot_id", wecom_entry["required_fields"])
+        inbound_entry = next(item for item in payload["catalog"] if item["type"] == "horbot-inbound-bot")
+        self.assertEqual(inbound_entry["label"], "Horbot 入站机器人")
+        self.assertEqual(inbound_entry["required_fields"], [])
+
+    async def test_create_horbot_inbound_bot_channel_generates_credentials(self):
+        config = Config()
+        config.agents.instances = {
+            "alpha": AgentConfig(id="alpha", name="Alpha"),
+        }
+        config = normalize_config(config)
+
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with (
+            patch("horbot.web.api.get_cached_config", return_value=config),
+            patch("horbot.web.api.save_config"),
+            patch("horbot.web.api.reset_agent_loop", new=AsyncMock()),
+        ):
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                response = await client.post("/api/channels/endpoints", json={
+                    "id": "workbuddy-inbound",
+                    "type": "horbot-inbound-bot",
+                    "name": "WorkBuddy Inbound",
+                    "agent_id": "alpha",
+                    "enabled": True,
+                    "allow_from": [],
+                    "config": {},
+                })
+
+        self.assertEqual(response.status_code, 200)
+        endpoint = response.json()["endpoint"]
+        self.assertEqual(endpoint["type"], "horbot-inbound-bot")
+        self.assertIn("bot_app_id", endpoint["config"])
+        self.assertIn("bot_token", endpoint["config"])
+        self.assertEqual(
+            endpoint["config"]["inbound_url_path"],
+            f"/api/channels/inbound/{endpoint['config']['bot_app_id']}/messages",
+        )
+
+    async def test_horbot_inbound_bot_message_routes_to_bound_agent(self):
+        config = Config()
+        config.agents.instances = {
+            "alpha": AgentConfig(id="alpha", name="Alpha"),
+        }
+        config.channels.endpoints = [
+            ChannelEndpointConfig(
+                id="workbuddy-inbound",
+                type="horbot-inbound-bot",
+                name="WorkBuddy Inbound",
+                agent_id="alpha",
+                enabled=True,
+                config={
+                    "bot_app_id": "hbot_ch_workbuddy",
+                    "bot_token": "secret-token",
+                    "inbound_url_path": "/api/channels/inbound/hbot_ch_workbuddy/messages",
+                },
+            ),
+        ]
+        config = normalize_config(config)
+        agent_loop = SimpleNamespace(process_message=AsyncMock(return_value=SimpleNamespace(content="agent reply")))
+
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with (
+            patch("horbot.web.api.get_cached_config", return_value=config),
+            patch("horbot.web.api.get_agent_loop", new=AsyncMock(return_value=agent_loop)),
+        ):
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                response = await client.post(
+                    "/api/channels/inbound/hbot_ch_workbuddy/messages",
+                    headers={"Authorization": "Bearer secret-token"},
+                    json={
+                        "content": "hello from WorkBuddy",
+                        "chat_id": "room-1",
+                        "sender_id": "workbuddy",
+                        "message_id": "msg-1",
+                    },
+                )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["endpoint_id"], "workbuddy-inbound")
+        self.assertEqual(payload["agent_id"], "alpha")
+        self.assertEqual(payload["session_key"], "workbuddy-inbound:room-1")
+        self.assertEqual(payload["content"], "agent reply")
+        agent_loop.process_message.assert_awaited_once()
+
+    async def test_horbot_inbound_bot_message_can_route_to_request_agent_when_unbound(self):
+        config = Config()
+        config.agents.instances = {
+            "alpha": AgentConfig(id="alpha", name="Alpha"),
+            "beta": AgentConfig(id="beta", name="Beta"),
+        }
+        config.channels.endpoints = [
+            ChannelEndpointConfig(
+                id="workbuddy-inbound",
+                type="horbot-inbound-bot",
+                name="WorkBuddy Inbound",
+                agent_id="",
+                enabled=True,
+                config={
+                    "bot_app_id": "hbot_ch_workbuddy",
+                    "bot_token": "secret-token",
+                    "inbound_url_path": "/api/channels/inbound/hbot_ch_workbuddy/messages",
+                },
+            ),
+        ]
+        config = normalize_config(config)
+        agent_loop = SimpleNamespace(process_message=AsyncMock(return_value=SimpleNamespace(content="beta reply")))
+
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with (
+            patch("horbot.web.api.get_cached_config", return_value=config),
+            patch("horbot.web.api.get_agent_loop", new=AsyncMock(return_value=agent_loop)) as get_agent_loop_mock,
+        ):
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                response = await client.post(
+                    "/api/channels/inbound/hbot_ch_workbuddy/messages",
+                    headers={"Authorization": "Bearer secret-token"},
+                    json={
+                        "content": "hello beta",
+                        "chat_id": "room-1",
+                        "sender_id": "workbuddy",
+                        "target_agent_id": "beta",
+                    },
+                )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["agent_id"], "beta")
+        self.assertEqual(payload["content"], "beta reply")
+        get_agent_loop_mock.assert_awaited_once_with("beta")
+        agent_loop.process_message.assert_awaited_once()
+
+    async def test_horbot_inbound_bot_rejects_unknown_request_agent_when_unbound(self):
+        config = Config()
+        config.agents.instances = {
+            "alpha": AgentConfig(id="alpha", name="Alpha"),
+        }
+        config.channels.endpoints = [
+            ChannelEndpointConfig(
+                id="workbuddy-inbound",
+                type="horbot-inbound-bot",
+                name="WorkBuddy Inbound",
+                agent_id="",
+                enabled=True,
+                config={
+                    "bot_app_id": "hbot_ch_workbuddy",
+                    "bot_token": "secret-token",
+                    "inbound_url_path": "/api/channels/inbound/hbot_ch_workbuddy/messages",
+                },
+            ),
+        ]
+        config = normalize_config(config)
+
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with patch("horbot.web.api.get_cached_config", return_value=config):
+            async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                response = await client.post(
+                    "/api/channels/inbound/hbot_ch_workbuddy/messages",
+                    headers={"Authorization": "Bearer secret-token"},
+                    json={
+                        "content": "hello nobody",
+                        "target_agent_id": "missing-agent",
+                    },
+                )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("not bound to a valid agent", response.json()["detail"])
 
     async def test_endpoint_test_api_returns_result_and_records_healthcheck_event(self):
         config = Config()

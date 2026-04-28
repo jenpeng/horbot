@@ -1,9 +1,10 @@
 import React, { type ReactElement } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import TeamsPage from './TeamsPage';
 import { useTeamAgentAssets, useTeamsDirectoryData, useTeamsMutations } from '../hooks';
 import { I18nProvider } from '../contexts/I18nContext';
+import { preloadLocaleMessages } from '../i18n/messages';
 import type { AgentInfo, ExternalAgentInfo, ProviderInfo, TeamInfo } from './teams/types';
 
 vi.mock('../components/CollaborationFlow', () => ({
@@ -97,6 +98,10 @@ describe('TeamsPage', () => {
   const setToolAuditRiskFilter = vi.fn();
   const setToolAuditWindowHours = vi.fn();
   const loadMoreToolAudits = vi.fn();
+
+  beforeAll(async () => {
+    await preloadLocaleMessages('en');
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -337,7 +342,7 @@ describe('TeamsPage', () => {
     expect(loadMoreToolAudits).toHaveBeenCalled();
   });
 
-  it('syncs tool audit filters into the URL for agent selections', () => {
+  it('syncs tool audit filters into the URL for agent selections', async () => {
     vi.mocked(useTeamAgentAssets).mockReturnValue({
       agentAssets: {
         workspace_path: '/tmp/agent-a',
@@ -389,11 +394,13 @@ describe('TeamsPage', () => {
 
     renderWithI18n(<TeamsPage />);
 
-    expect(window.location.search).toContain('agent=agent-a');
-    expect(window.location.search).toContain('auditSession=web%3Ademo');
-    expect(window.location.search).toContain('auditRisk=exec');
-    expect(window.location.search).toContain('auditWindow=72');
-    expect(window.location.search).toContain('auditLimit=24');
+    await waitFor(() => {
+      expect(window.location.search).toContain('agent=agent-a');
+      expect(window.location.search).toContain('auditSession=web%3Ademo');
+      expect(window.location.search).toContain('auditRisk=exec');
+      expect(window.location.search).toContain('auditWindow=72');
+      expect(window.location.search).toContain('auditLimit=24');
+    });
   });
 
   it('restores selection and audit filters from the URL on popstate', async () => {

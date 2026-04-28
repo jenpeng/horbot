@@ -31,7 +31,7 @@ interface I18nContextValue {
 }
 
 const I18nContext = createContext<I18nContextValue | undefined>(undefined);
-const LOCALE_CATALOG_CACHE_VERSION = '2026-04-26';
+const LOCALE_CATALOG_CACHE_VERSION = '2026-04-27';
 
 interface CachedLocaleCatalog {
   version: string;

@@ -51,6 +51,7 @@ export interface ChannelCatalogField {
   secret?: boolean;
   placeholder?: string;
   type?: 'text' | 'boolean' | 'number';
+  readonly?: boolean;
 }
 
 export interface ChannelCatalogEntry {

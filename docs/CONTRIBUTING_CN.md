@@ -181,6 +181,38 @@ await watcher.start()
 **前端 HMR**: 确保 Vite 配置正确（已配置）
 **后端热重载**: 使用 `uvicorn --reload` 启动
 
+### Horbot 入站机器人开发
+
+修改 `horbot-inbound-bot` 时，需要保持完整链路一致：
+
+- `horbot/config/schema.py`：`HorbotInboundBotConfig` 保存通道级自动生成凭证
+- `horbot/channels/endpoints.py`：维护 catalog 元数据、类型映射、runtime config 合并和 endpoint 投影
+- `horbot/config/normalizer.py`：`_CHANNEL_TYPES` 必须包含 `horbot-inbound-bot`，否则保存的 endpoint 可能被规范化过程丢弃
+- `horbot/channels/manager.py`：ChannelManager factory 必须能创建 `HorbotInboundBotChannel`
+- `horbot/channels/horbot_inbound_bot.py`：保持轻量运行时；真正的 HTTP 入站处理在 Web API route 中，不在这里维护长连接
+- `horbot/channels/diagnostics.py`：诊断需要确认 App ID 和 Token 已生成
+- `horbot/web/api.py`：`/api/channels/inbound/{app_id}/messages` 负责 token 校验、sender allowlist、目标 Agent 校验，并调用 `get_agent_loop(target_agent_id).process_message(...)`
+- `horbot/web/frontend/src/pages/ChannelsPage.tsx`：页面必须以可复制方式展示 App ID、Token 和 Inbound URL，并且该通道类型的 Agent 绑定是可选的
+
+路由与安全规则：
+
+- endpoint 上固定配置了 `agent_id` 时，优先路由到这个 Agent
+- endpoint 未绑定 Agent 时，请求必须在顶层提供 `target_agent_id` / `agent_id`，或在 `metadata.target_agent_id` / `metadata.agent_id` 中提供
+- 不允许把外部传入的任意 ID 直接当成目标执行，必须在当前运行实例的 `config.agents.instances` 中校验存在
+- 未绑定 endpoint 不能静默回退到第一个默认 Agent；缺少或未知目标时应返回明确的 400
+- token 可来自 `Authorization: Bearer`、`X-Horbot-Bot-Token` 或 JSON body 的 `token`，但比较必须继续使用 `secrets.compare_digest`
+
+测试要求：
+
+- 请求结构、路由规则、凭证生成或校验行为变化时，同步更新 `tests/test_channel_endpoints_api.py`
+- 保持覆盖：凭证生成、固定 Agent 路由、请求指定 Agent 路由、未知 Agent 拒绝、错误 token 拒绝
+- 推荐执行：`./.venv/bin/python -m unittest tests.test_channel_endpoints_api tests.test_config_normalizer tests.test_channel_diagnostics`
+
+文档要求：
+
+- 同步更新 `docs/API.md`、`docs/API_CN.md`、`docs/USER_MANUAL.md`、`docs/USER_MANUAL_CN.md`、`docs/ARCHITECTURE.md`、`docs/ARCHITECTURE_CN.md`
+- 如果 UI 文案或提示变化，需要同步中英泰 locale 文件
+
 ---
 
 ## 技能开发流程

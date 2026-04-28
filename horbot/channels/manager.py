@@ -47,6 +47,7 @@ class ChannelManager:
             "slack": self._build_slack_channel,
             "qq": self._build_qq_channel,
             "sharecrm": self._build_sharecrm_channel,
+            "horbot-inbound-bot": self._build_horbot_inbound_bot_channel,
         }
 
         for endpoint in list_channel_endpoints(self.config):
@@ -156,6 +157,12 @@ class ChannelManager:
 
         runtime_config = build_runtime_channel_config(self.config.channels, endpoint)
         return ShareCrmChannel(runtime_config, self.bus, **self._channel_common_kwargs(endpoint))
+
+    def _build_horbot_inbound_bot_channel(self, endpoint) -> BaseChannel:
+        from horbot.channels.horbot_inbound_bot import HorbotInboundBotChannel
+
+        runtime_config = build_runtime_channel_config(self.config.channels, endpoint)
+        return HorbotInboundBotChannel(runtime_config, self.bus, **self._channel_common_kwargs(endpoint))
     
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

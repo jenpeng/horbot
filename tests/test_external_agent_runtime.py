@@ -5,10 +5,62 @@ from websockets.asyncio.server import serve
 
 from horbot.config.schema import ExternalAgentConfig
 from horbot.external_agents.models import ExternalAgentInstance
+from horbot.external_agents.registry import get_external_agent_adapter_registry
 from horbot.external_agents.runtime import ExternalAgentRuntime
 
 
 class ExternalAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    def test_registry_resolves_adapter_and_legacy_transport_aliases(self):
+        registry = get_external_agent_adapter_registry()
+
+        self.assertEqual(registry.get("generic-agent-api").adapter_id, "generic-agent-api")
+        self.assertEqual(registry.get("http_sse").adapter_id, "generic-agent-api")
+        self.assertEqual(registry.get("websocket-chat").adapter_id, "generic-agent-api")
+        self.assertEqual(registry.get("openai-compatible").adapter_id, "openai-compatible")
+        self.assertEqual(registry.get("inbound-bot").adapter_id, "inbound-bot")
+        self.assertEqual(registry.get("channel-backed-agent").adapter_id, "inbound-bot")
+
+    async def test_runtime_reports_unsupported_adapter(self):
+        runtime = ExternalAgentRuntime()
+        agent = ExternalAgentInstance(
+            ExternalAgentConfig(
+                id="future-agent",
+                name="Future Agent",
+                adapter="dify",
+                endpoint="https://example.com/agent",
+            )
+        )
+
+        result = await runtime.complete(
+            agent,
+            message="hello",
+            session_key="web:future-agent",
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["adapter"], "dify")
+        self.assertIn("Unsupported external agent adapter", result["detail"])
+
+    async def test_inbound_bot_probe_reports_credentials_ready(self):
+        runtime = ExternalAgentRuntime()
+        agent = ExternalAgentInstance(
+            ExternalAgentConfig(
+                id="workbuddy-agent",
+                name="WorkBuddy Agent",
+                adapter="inbound-bot",
+                adapter_config={
+                    "bot_app_id": "hbot_workbuddy",
+                    "bot_token": "secret-token",
+                },
+            )
+        )
+
+        result = await runtime.probe(agent)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mode"], "inbound_bot_probe")
+        self.assertEqual(result["inbound"]["app_id"], "hbot_workbuddy")
+
     async def test_complete_websocket_supports_single_json_reply(self):
         runtime = ExternalAgentRuntime()
         received_payloads: list[dict[str, object]] = []

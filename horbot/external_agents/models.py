@@ -26,11 +26,21 @@ class ExternalAgentInstance:
         return self._config
 
     def to_dict(self) -> dict[str, Any]:
+        adapter_config = dict(self._config.adapter_config or {})
+        bot_app_id = str(adapter_config.get("bot_app_id") or "").strip()
+        inbound = None
+        if bot_app_id:
+            inbound = {
+                "app_id": bot_app_id,
+                "token": str(adapter_config.get("bot_token") or ""),
+                "url_path": f"/api/external-agents/inbound/{bot_app_id}/messages",
+            }
         return {
             "id": self._config.id,
             "name": self._config.name,
             "description": self._config.description,
             "avatar": self._config.avatar,
+            "adapter": self._config.adapter,
             "transport": self._config.transport,
             "endpoint": self._config.endpoint,
             "auth_type": self._config.auth_type,
@@ -45,5 +55,7 @@ class ExternalAgentInstance:
             "context_scope": self._config.context_scope,
             "memory_access": self._config.memory_access,
             "file_access": self._config.file_access,
+            "adapter_config": adapter_config,
+            "inbound": inbound,
             "metadata": dict(self._config.metadata or {}),
         }

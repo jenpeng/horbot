@@ -1,6 +1,6 @@
 """API routes."""
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from typing import List, Dict, Any, AsyncGenerator, Optional, Callable
 from datetime import datetime, timedelta
@@ -12,6 +12,7 @@ import uuid
 import os
 import mimetypes
 import re
+import secrets
 import shutil
 import threading
 import time
@@ -55,6 +56,7 @@ from horbot.channels.endpoints import (
     build_runtime_channel_config,
     find_channel_endpoint,
     get_channel_catalog,
+    get_default_agent_id,
     legacy_endpoint_id,
     list_channel_endpoints,
 )
@@ -2258,7 +2260,10 @@ def get_session_manager():
     from horbot.workspace.manager import get_workspace_manager
 
     workspace_manager = get_workspace_manager()
-    expected_sessions_dir = Path(workspace_manager.get_agent_workspace(default_agent_id).sessions_path)
+    if hasattr(workspace_manager, "get_agent_workspace"):
+        expected_sessions_dir = Path(workspace_manager.get_agent_workspace(default_agent_id).sessions_path)
+    else:
+        expected_sessions_dir = Path(".horbot") / "agents" / default_agent_id / "sessions"
 
     if _session_manager is None or Path(_session_manager.sessions_dir) != Path(expected_sessions_dir):
         _session_manager = SessionManager(workspace=expected_sessions_dir)
@@ -3170,6 +3175,19 @@ class ChannelEndpointUpsertRequest(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+class ChannelInboundBotRequest(BaseModel):
+    """Message pushed to a Horbot-issued channel inbound bot."""
+
+    content: str
+    token: str = ""
+    chat_id: str = ""
+    sender_id: str = ""
+    message_id: str = ""
+    target_agent_id: str = ""
+    agent_id: str = ""
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 def _serialize_channel_endpoint(endpoint) -> dict[str, Any]:
     data = endpoint.to_dict() if hasattr(endpoint, "to_dict") else endpoint
     endpoint_id = data.get("id")
@@ -3193,6 +3211,29 @@ def _normalize_channel_endpoint_payload(request: ChannelEndpointUpsertRequest) -
     return request
 
 
+def _is_horbot_inbound_channel_type(channel_type: str) -> bool:
+    return channel_type.strip().lower() == "horbot-inbound-bot"
+
+
+def _ensure_channel_inbound_bot_credentials(
+    channel_type: str,
+    endpoint_id: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    next_config = dict(config or {})
+    if not _is_horbot_inbound_channel_type(channel_type):
+        return next_config
+
+    safe_id = re.sub(r"[^a-z0-9_-]+", "-", endpoint_id.strip().lower()).strip("-") or "channel"
+    if not str(next_config.get("bot_app_id") or "").strip():
+        next_config["bot_app_id"] = f"hbot_ch_{safe_id}_{secrets.token_hex(4)}"
+    bot_app_id = str(next_config.get("bot_app_id") or "").strip()
+    if not str(next_config.get("bot_token") or "").strip():
+        next_config["bot_token"] = secrets.token_urlsafe(32)
+    next_config["inbound_url_path"] = f"/api/channels/inbound/{bot_app_id}/messages"
+    return next_config
+
+
 def _apply_endpoint_binding(config: Config, endpoint_id: str, agent_id: str) -> None:
     for current_agent in config.agents.instances.values():
         current_agent.channel_bindings = [
@@ -3204,6 +3245,29 @@ def _apply_endpoint_binding(config: Config, endpoint_id: str, agent_id: str) -> 
             *config.agents.instances[agent_id].channel_bindings,
             endpoint_id,
         ])
+
+
+def _string_metadata_value(metadata: dict[str, Any], key: str) -> str:
+    value = metadata.get(key)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _resolve_channel_inbound_target_agent_id(
+    config: Config,
+    endpoint,
+    request: ChannelInboundBotRequest,
+) -> str:
+    if endpoint.agent_id:
+        return endpoint.agent_id
+
+    metadata = dict(request.metadata or {})
+    requested_agent_id = (
+        request.target_agent_id.strip()
+        or request.agent_id.strip()
+        or _string_metadata_value(metadata, "target_agent_id")
+        or _string_metadata_value(metadata, "agent_id")
+    )
+    return requested_agent_id
 
 
 def _channel_agents_payload(config: Config) -> list[dict[str, str]]:
@@ -3252,6 +3316,99 @@ async def get_channel_endpoints():
     """Return channel endpoints, including legacy global configs projected as endpoints."""
     config = get_cached_config()
     return _channel_endpoints_payload(config)
+
+
+@router.post("/channels/inbound/{app_id}/messages")
+async def receive_channel_inbound_bot_message(
+    app_id: str,
+    request: ChannelInboundBotRequest,
+    authorization: str = Header(default=""),
+    x_horbot_bot_token: str = Header(default="", alias="X-Horbot-Bot-Token"),
+):
+    """Receive a message pushed through a Horbot-issued channel inbound bot."""
+    config = get_cached_config()
+    endpoint = None
+    for candidate in list_channel_endpoints(config):
+        if candidate.type != "horbot-inbound-bot":
+            continue
+        if str((candidate.config or {}).get("bot_app_id") or "").strip() == app_id:
+            endpoint = candidate
+            break
+
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail="Channel inbound bot app_id was not found")
+    if not endpoint.enabled:
+        raise HTTPException(status_code=403, detail="Channel inbound bot endpoint is disabled")
+
+    expected_token = str((endpoint.config or {}).get("bot_token") or "")
+    bearer_token = authorization.removeprefix("Bearer ").strip() if authorization.lower().startswith("bearer ") else ""
+    provided_token = request.token.strip() or x_horbot_bot_token.strip() or bearer_token
+    if not expected_token or not provided_token or not secrets.compare_digest(expected_token, provided_token):
+        raise HTTPException(status_code=401, detail="Invalid channel inbound bot token")
+
+    content = request.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Content is required")
+
+    sender_id = request.sender_id.strip() or "external-agent"
+    if endpoint.allow_from and sender_id not in endpoint.allow_from:
+        raise HTTPException(status_code=403, detail="Sender is not allowed for this channel endpoint")
+
+    target_agent_id = _resolve_channel_inbound_target_agent_id(config, endpoint, request)
+    if not target_agent_id or target_agent_id not in config.agents.instances:
+        raise HTTPException(status_code=400, detail="Channel inbound bot endpoint is not bound to a valid agent")
+
+    chat_id = request.chat_id.strip() or f"dm_{endpoint.id}"
+    metadata = {
+        "channel_instance_id": endpoint.id,
+        "target_agent_id": target_agent_id,
+        "channel_type": endpoint.type,
+        "channel_endpoint_name": endpoint.name,
+        "inbound_app_id": app_id,
+        "inbound_sender_id": sender_id,
+        "inbound_message_id": request.message_id.strip(),
+        **dict(request.metadata or {}),
+    }
+    msg = InboundMessage(
+        channel=endpoint.type,
+        sender_id=sender_id,
+        chat_id=chat_id,
+        content=content,
+        channel_instance_id=endpoint.id,
+        target_agent_id=target_agent_id,
+        metadata=metadata,
+    )
+
+    record_channel_event(
+        endpoint.id,
+        channel_type=endpoint.type,
+        event_type="inbound",
+        status="ok",
+        message=f"Received inbound bot message from {sender_id}",
+        details={"chat_id": chat_id, "message_id": request.message_id.strip()},
+    )
+
+    agent_loop = await get_agent_loop(target_agent_id)
+    response = await agent_loop.process_message(msg)
+    response_content = response.content if response else ""
+
+    if response_content:
+        record_channel_event(
+            endpoint.id,
+            channel_type=endpoint.type,
+            event_type="outbound",
+            status="ok",
+            message=f"Generated response for {chat_id}",
+            details={"chat_id": chat_id},
+        )
+
+    return {
+        "ok": True,
+        "endpoint_id": endpoint.id,
+        "agent_id": target_agent_id,
+        "session_key": msg.session_key,
+        "content": response_content,
+    }
 
 
 @router.get("/channels/endpoints/{endpoint_id}/events")
@@ -3316,7 +3473,7 @@ async def test_draft_channel_endpoint(request: ChannelEndpointUpsertRequest):
         agent_id=request.agent_id,
         enabled=request.enabled,
         allow_from=request.allow_from,
-        config=request.config,
+        config=_ensure_channel_inbound_bot_credentials(request.type, request.id or f"draft:{request.type}", request.config),
     )
     resolved = build_custom_endpoint(config, draft_endpoint)
     runtime_config = build_runtime_channel_config(config.channels, resolved)
@@ -3345,6 +3502,8 @@ async def create_channel_endpoint(request: ChannelEndpointUpsertRequest):
         raise HTTPException(status_code=400, detail="Custom endpoint ID cannot use the reserved legacy:* prefix")
     if find_channel_endpoint(config, endpoint_id) is not None:
         raise HTTPException(status_code=400, detail=f"Endpoint already exists: {endpoint_id}")
+
+    request.config = _ensure_channel_inbound_bot_credentials(request.type, endpoint_id, request.config)
 
     endpoint = ChannelEndpointConfig(
         id=endpoint_id,
@@ -3417,7 +3576,7 @@ async def update_channel_endpoint(endpoint_id: str, request: ChannelEndpointUpse
     target.agent_id = request.agent_id
     target.enabled = request.enabled
     target.allow_from = request.allow_from
-    target.config = request.config
+    target.config = _ensure_channel_inbound_bot_credentials(target.type, endpoint_id, request.config)
     _apply_endpoint_binding(config, endpoint_id, request.agent_id)
 
     try:
@@ -5632,6 +5791,7 @@ async def _stream_generator(
                     "agent_id": agent_id,
                     "agent_name": agent_name,
                     "agent_type": "external",
+                    "_external_agent_adapter": result.get("adapter"),
                     "_external_agent_mode": result.get("mode"),
                     "_external_agent_transport": result.get("transport"),
                     "_external_agent_detail": result.get("detail"),
@@ -9464,8 +9624,9 @@ class CreateExternalAgentRequest(BaseModel):
     name: str
     description: str = ""
     avatar: str = ""
+    adapter: str = "generic-agent-api"
     transport: str = "http_sse"
-    endpoint: str
+    endpoint: str = ""
     auth_type: str = "none"
     auth_secret: str = ""
     auth_header: str = "Authorization"
@@ -9478,6 +9639,17 @@ class CreateExternalAgentRequest(BaseModel):
     context_scope: str = "recent_turns"
     memory_access: str = "none"
     file_access: str = "none"
+    adapter_config: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ExternalAgentInboundRequest(BaseModel):
+    content: str
+    token: str = ""
+    chat_id: str = ""
+    session_key: str = ""
+    sender_id: str = ""
+    message_id: str = ""
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -9513,13 +9685,36 @@ def _validate_external_agent_transport(value: str) -> str:
     return transport
 
 
-def _validate_external_agent_endpoint(value: str, transport: str) -> str:
+def _validate_external_agent_adapter(value: str) -> str:
+    adapter = (value or "generic-agent-api").strip().lower()
+    aliases = {
+        "generic": "generic-agent-api",
+        "http": "generic-agent-api",
+        "http_sse": "generic-agent-api",
+        "sse-chat": "generic-agent-api",
+        "websocket": "generic-agent-api",
+        "websocket-chat": "generic-agent-api",
+        "openai": "openai-compatible",
+        "openai-chat-completions": "openai-compatible",
+        "channel-backed-agent": "inbound-bot",
+        "web-ui-bridge": "inbound-bot",
+    }
+    adapter = aliases.get(adapter, adapter)
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", adapter):
+        raise HTTPException(status_code=400, detail=f"Invalid external agent adapter: {value}")
+    return adapter
+
+
+def _validate_external_agent_endpoint(value: str, transport: str, adapter: str) -> str:
     endpoint = value.strip()
+    endpoint_required = adapter in {"generic-agent-api", "openai-compatible"}
     if not endpoint:
-        raise HTTPException(status_code=400, detail="External agent endpoint is required")
+        if endpoint_required:
+            raise HTTPException(status_code=400, detail="External agent endpoint is required")
+        return ""
 
     parsed = urlparse(endpoint)
-    if transport in {"http", "http_sse"}:
+    if adapter == "openai-compatible" or transport in {"http", "http_sse"}:
         allowed_schemes = {"http", "https"}
     else:
         allowed_schemes = {"ws", "wss", "http", "https"}
@@ -9564,6 +9759,31 @@ def _normalize_external_agent_metadata(value: Dict[str, Any] | None) -> Dict[str
     return dict(value or {})
 
 
+def _normalize_external_agent_adapter_config(value: Dict[str, Any] | None) -> Dict[str, Any]:
+    return dict(value or {})
+
+
+def _is_inbound_external_agent_adapter(adapter: str) -> bool:
+    return adapter in {"inbound-bot", "channel-backed-agent", "web-ui-bridge"}
+
+
+def _ensure_external_agent_inbound_credentials(
+    adapter: str,
+    adapter_config: Dict[str, Any],
+    external_agent_id: str,
+) -> Dict[str, Any]:
+    normalized_config = dict(adapter_config or {})
+    if not _is_inbound_external_agent_adapter(adapter):
+        return normalized_config
+
+    safe_id = re.sub(r"[^a-z0-9_-]+", "-", external_agent_id.strip().lower()).strip("-") or "external"
+    if not str(normalized_config.get("bot_app_id") or "").strip():
+        normalized_config["bot_app_id"] = f"hbot_{safe_id}_{secrets.token_hex(4)}"
+    if not str(normalized_config.get("bot_token") or "").strip():
+        normalized_config["bot_token"] = secrets.token_urlsafe(32)
+    return normalized_config
+
+
 def _build_external_agent_config(
     request: CreateExternalAgentRequest,
     *,
@@ -9575,19 +9795,26 @@ def _build_external_agent_config(
     if not request_name:
         raise HTTPException(status_code=400, detail="External agent name is required")
 
+    adapter = _validate_external_agent_adapter(request.adapter)
     transport = _validate_external_agent_transport(request.transport)
     auth_type = _validate_external_agent_auth_type(request.auth_type)
-    endpoint = _validate_external_agent_endpoint(request.endpoint, transport)
+    endpoint = _validate_external_agent_endpoint(request.endpoint, transport, adapter)
     timeout_s = max(5, min(int(request.timeout_s or 90), 600))
     max_turn_chars = max(1000, min(int(request.max_turn_chars or 12000), 100000))
     auth_header = (request.auth_header or "Authorization").strip() or "Authorization"
     auth_secret = request.auth_secret.strip() or persisted_secret
+    adapter_config = _ensure_external_agent_inbound_credentials(
+        adapter,
+        _normalize_external_agent_adapter_config(request.adapter_config),
+        request.id.strip(),
+    )
 
     return ExternalAgentConfig(
         id=request.id.strip(),
         name=request_name,
         description=request.description.strip(),
         avatar=request.avatar.strip(),
+        adapter=adapter,
         transport=transport,
         endpoint=endpoint,
         auth_type=auth_type,
@@ -9602,6 +9829,7 @@ def _build_external_agent_config(
         context_scope=_validate_external_agent_context_scope(request.context_scope),
         memory_access=_validate_external_agent_memory_access(request.memory_access),
         file_access=_validate_external_agent_file_access(request.file_access),
+        adapter_config=adapter_config,
         metadata=_normalize_external_agent_metadata(request.metadata),
     )
 
@@ -9903,6 +10131,93 @@ async def list_external_agents():
     return {
         "external_agents": [agent.to_dict() for agent in agents],
         "count": len(agents),
+    }
+
+
+@router.post("/external-agents/inbound/{app_id}/messages")
+async def receive_external_agent_inbound_message(
+    app_id: str,
+    request: ExternalAgentInboundRequest,
+    authorization: str = Header(default=""),
+    x_horbot_bot_token: str = Header(default="", alias="X-Horbot-Bot-Token"),
+):
+    """Receive a message pushed by a vendor/local agent using Horbot-issued bot credentials."""
+    config = get_cached_config()
+    matched_agent_id = ""
+    matched_agent = None
+    for external_agent_id, external_agent_config in config.external_agents.instances.items():
+        adapter_config = dict(external_agent_config.adapter_config or {})
+        if str(adapter_config.get("bot_app_id") or "").strip() == app_id:
+            matched_agent_id = external_agent_id
+            matched_agent = external_agent_config
+            break
+
+    if matched_agent is None:
+        raise HTTPException(status_code=404, detail="External agent bot app_id was not found")
+
+    adapter_config = dict(matched_agent.adapter_config or {})
+    expected_token = str(adapter_config.get("bot_token") or "")
+    bearer_token = authorization.removeprefix("Bearer ").strip() if authorization.lower().startswith("bearer ") else ""
+    provided_token = request.token.strip() or x_horbot_bot_token.strip() or bearer_token
+    if not expected_token or not provided_token or not secrets.compare_digest(expected_token, provided_token):
+        raise HTTPException(status_code=401, detail="Invalid external agent bot token")
+
+    content = request.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Content is required")
+
+    session_key = request.session_key.strip()
+    if not session_key:
+        chat_id = request.chat_id.strip() or f"dm_{matched_agent_id}"
+        session_key = chat_id if chat_id.startswith("web:") else f"web:{chat_id}"
+    elif not session_key.startswith("web:"):
+        session_key = f"web:{session_key}"
+
+    request_id = str(uuid.uuid4())
+    session_manager = get_session_manager()
+    session = session_manager.get_or_create(session_key)
+    message_id = session.add_message(
+        "assistant",
+        content,
+        dedup=True,
+        metadata={
+            "request_id": request_id,
+            "agent_id": matched_agent_id,
+            "agent_name": matched_agent.name,
+            "agent_type": "external",
+            "source": "external_agent_inbound",
+            "inbound_app_id": app_id,
+            "inbound_sender_id": request.sender_id.strip(),
+            "inbound_message_id": request.message_id.strip(),
+            **dict(request.metadata or {}),
+        },
+    )
+    session_manager.save(session)
+    from horbot.web.websocket import broadcast_to_session
+
+    await broadcast_to_session(
+        session_key,
+        _build_chat_stream_event(
+            "agent_done",
+            agent_id=matched_agent_id,
+            agent_name=matched_agent.name,
+            content=content,
+            message_id=message_id,
+            request_id=request_id,
+            agent_type="external",
+            source="external_agent_inbound",
+            inbound_app_id=app_id,
+            inbound_sender_id=request.sender_id.strip(),
+            inbound_message_id=request.message_id.strip(),
+        ),
+    )
+
+    return {
+        "ok": True,
+        "external_agent_id": matched_agent_id,
+        "session_key": session_key,
+        "message_id": message_id,
+        "request_id": request_id,
     }
 
 

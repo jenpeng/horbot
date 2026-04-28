@@ -2,6 +2,18 @@
 
 This file summarizes notable Horbot product and documentation changes. For fine-grained code history, use Git directly.
 
+## 2026-04-27
+
+### External Agent Adapter Runtime
+
+- Replaced the old monolithic External Agent runtime with an adapter registry dispatcher
+- Added `inbound-bot` as the primary Feishu/Discord-style integration mode: Horbot issues App ID, Token, and Inbound URL, and vendor/local platforms push messages into Horbot
+- Added Channels-managed `horbot-inbound-bot` endpoints so vendor/local platforms can push messages into a bound internal Agent or a request-specified Agent without being modeled as team members
+- Moved the previous HTTP, HTTP SSE, and WebSocket behavior into the `generic-agent-api` compatibility adapter
+- Added an `openai-compatible` adapter for Chat Completions-style vendor or local services
+- Added open `adapter` slugs and `adapter_config` to External Agent configuration, so future vendor/local protocols can be configured without schema enum changes
+- Updated the Teams UI to display and submit adapter fields with English, Simplified Chinese, and Thai labels
+
 ## 2026-04-15
 
 ### Native Web Access Runtime

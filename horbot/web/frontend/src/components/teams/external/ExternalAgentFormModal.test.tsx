@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { I18nProvider } from '../../../contexts/I18nContext';
+import { preloadLocaleMessages } from '../../../i18n/messages';
 import type { AgentCapabilityOption } from '../../../pages/teams/formOptions';
 import type { ExternalAgentFormState } from '../../../pages/teams/types';
 import ExternalAgentFormModal from './ExternalAgentFormModal';
@@ -69,10 +70,15 @@ const renderBehaviorStepModal = (initialForm: Partial<ExternalAgentFormState> = 
 };
 
 describe('ExternalAgentFormModal', () => {
+  beforeAll(async () => {
+    await preloadLocaleMessages('en');
+  });
+
   it('splits the form into connection and capability steps', () => {
     renderModal({
       id: 'partner-agent',
       name: 'Partner Agent',
+      adapter: 'generic-agent-api',
       endpoint: 'https://example.com/agent',
     });
 
@@ -85,10 +91,40 @@ describe('ExternalAgentFormModal', () => {
     expect(screen.queryByTestId('external-form-step-connection')).not.toBeInTheDocument();
   });
 
+  it('treats future adapter endpoints as optional and hides generic transport', () => {
+    renderModal({
+      id: 'future-agent',
+      name: 'Future Agent',
+      adapter: 'inbound-bot',
+      endpoint: '',
+    });
+
+    expect(screen.queryByLabelText(/Endpoint/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Transport')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('external-form-next'));
+
+    expect(screen.getByTestId('external-form-step-behavior')).toBeInTheDocument();
+  });
+
+  it('generates inbound bot credentials when selecting the inbound endpoint adapter', () => {
+    renderModal({
+      id: 'workbuddy-agent',
+      name: 'WorkBuddy Agent',
+    });
+
+    expect(screen.getByText('Bot credentials for external platforms')).toBeInTheDocument();
+    expect(screen.getAllByText(/hbot_workbuddy-agent_/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/\/api\/external-agents\/inbound\/hbot_workbuddy-agent_/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Endpoint/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Transport')).not.toBeInTheDocument();
+  });
+
   it('suggests connection setup from endpoint and description and applies it on demand', () => {
     renderModal({
       id: 'partner-agent',
       name: 'Partner Agent',
+      adapter: 'generic-agent-api',
       endpoint: 'wss://example.com/agent',
       description: 'Uses bearer token and supports team relay via @mention.',
     });
@@ -108,6 +144,7 @@ describe('ExternalAgentFormModal', () => {
   it('recommends a preset from description and lets users apply it directly', () => {
     renderBehaviorStepModal({
       name: 'Repo QA Bot',
+      adapter: 'generic-agent-api',
       description: 'Helps review pull requests, test changes, and inspect code quality.',
       endpoint: 'https://example.com/repo-agent',
     });
@@ -170,5 +207,23 @@ describe('ExternalAgentFormModal', () => {
 
     expect(screen.getByLabelText('Timeout (seconds)')).toBeInTheDocument();
     expect(screen.getByLabelText('Context Scope')).toBeInTheDocument();
+  });
+
+  it('validates adapter config as a JSON object before submit', () => {
+    renderBehaviorStepModal();
+
+    fireEvent.click(screen.getByTestId('toggle-runtime-settings'));
+    fireEvent.change(screen.getByLabelText('Adapter Config (JSON)'), {
+      target: { value: '{"model":"demo-model"}' },
+    });
+
+    expect(screen.getByRole('button', { name: 'Create' })).not.toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Adapter Config (JSON)'), {
+      target: { value: 'not-json' },
+    });
+
+    expect(screen.getByText('Adapter config must be a valid JSON object.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
   });
 });

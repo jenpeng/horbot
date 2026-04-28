@@ -224,6 +224,16 @@ class ShareCrmConfig(Base):
     text_chunk_limit: int = 4000  # Max characters per message
 
 
+class HorbotInboundBotConfig(Base):
+    """Horbot-issued inbound bot endpoint for external agent platforms."""
+
+    enabled: bool = False
+    bot_app_id: str = ""
+    bot_token: str = ""
+    inbound_url_path: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+
+
 class ChannelEndpointConfig(Base):
     """Per-agent channel endpoint configuration."""
 
@@ -254,6 +264,7 @@ class ChannelsConfig(Base):
     qq: QQConfig = Field(default_factory=QQConfig)
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
     sharecrm: ShareCrmConfig = Field(default_factory=ShareCrmConfig)
+    horbot_inbound_bot: HorbotInboundBotConfig = Field(default_factory=HorbotInboundBotConfig)
 
 
 class ModelConfig(Base):
@@ -483,6 +494,7 @@ class ExternalAgentConfig(Base):
     name: str = ""
     description: str = ""
     avatar: str = ""
+    adapter: str = "generic-agent-api"
     transport: Literal["http", "http_sse", "websocket"] = "http_sse"
     endpoint: str = ""
     auth_type: Literal["none", "bearer", "header"] = "none"
@@ -497,6 +509,7 @@ class ExternalAgentConfig(Base):
     context_scope: Literal["message_only", "recent_turns", "dm_summary"] = "recent_turns"
     memory_access: Literal["none", "summary_only"] = "none"
     file_access: Literal["none", "referenced_only"] = "none"
+    adapter_config: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
