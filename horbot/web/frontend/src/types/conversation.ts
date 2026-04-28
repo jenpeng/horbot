@@ -45,6 +45,24 @@ export interface Message {
   };
 }
 
+export interface RenderableArtifactSpec {
+  title?: string;
+  summary?: string;
+  description?: string;
+  template?: 'dashboard' | 'chart-story' | 'data-workbench' | 'map-story' | 'process-map' | 'interactive-report' | string;
+  theme?: Record<string, unknown>;
+  data?: Record<string, unknown> | unknown[];
+  items?: Record<string, unknown>[];
+  cards?: Record<string, unknown>[];
+  metrics?: Record<string, unknown>[];
+  chart?: Record<string, unknown>;
+  table?: Record<string, unknown>;
+  rows?: Record<string, unknown>[];
+  points?: Record<string, unknown>[];
+  sections?: Record<string, unknown>[];
+  [key: string]: unknown;
+}
+
 export interface MemorySource {
   category?: string;
   level: string;

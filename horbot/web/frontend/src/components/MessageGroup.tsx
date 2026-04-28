@@ -6,6 +6,8 @@ import { useI18n } from '../contexts/I18nContext';
 import { Modal, ModalFooter } from './ui';
 import type { MemoryRecall, MemorySource, Message, MessageFile } from '../types/conversation';
 import { lazyWithReload } from '../utils/lazyWithReload';
+import LiveArtifactCard from './LiveArtifactCard';
+import { parseRenderableArtifacts } from '../utils/renderableArtifacts';
 
 interface MessageGroupProps {
   messages: Message[];
@@ -856,7 +858,10 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
     const requestId = !isUser
       ? (message.requestId || (typeof message.metadata?.request_id === 'string' ? message.metadata.request_id : ''))
       : '';
-    const cleanedContent = stripMessageTags(message.content);
+    const parsedArtifacts = !isUser
+      ? parseRenderableArtifacts(stripMessageTags(message.content), message.metadata)
+      : { content: stripMessageTags(message.content), artifacts: [] };
+    const cleanedContent = parsedArtifacts.content;
     const memorySources = !isUser ? coerceMemorySources(message.metadata?._memory_sources) : [];
     const memoryRecall = !isUser ? coerceMemoryRecall(message.metadata?._memory_recall) : null;
     const memorySummaryLabel = memorySources.length > 0
@@ -1043,6 +1048,16 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
                   </Suspense>
                 ) : (
                   cleanedContent
+                )}
+                {!isUser && !isErrorMessage && parsedArtifacts.artifacts.length > 0 && (
+                  <div className={cleanedContent ? 'mt-2 space-y-2 whitespace-normal' : 'space-y-2 whitespace-normal'}>
+                    {parsedArtifacts.artifacts.map((artifact, artifactIndex) => (
+                      <LiveArtifactCard
+                        key={`${message.id}-artifact-${artifactIndex}`}
+                        spec={artifact}
+                      />
+                    ))}
+                  </div>
                 )}
               </div>
             )}

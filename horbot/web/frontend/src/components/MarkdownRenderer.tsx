@@ -214,7 +214,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = memo(({ content, class
     h2: isDark ? 'text-base font-semibold text-surface-100 mb-1.5 mt-2.5' : 'text-base font-semibold text-surface-800 mb-1.5 mt-2.5',
     h3: isDark ? 'text-sm font-semibold text-surface-100 mb-1 mt-2' : 'text-sm font-semibold text-surface-800 mb-1 mt-2',
     h4: isDark ? 'text-sm font-semibold text-surface-200 mb-1 mt-1.5' : 'text-sm font-semibold text-surface-700 mb-1 mt-1.5',
-    p: isDark ? 'text-surface-300 leading-[1.55] mb-1.5 break-words' : 'text-surface-700 leading-[1.55] mb-1.5 break-words',
+    p: isDark ? 'text-surface-300 leading-[1.42] mb-1 break-words' : 'text-surface-700 leading-[1.42] mb-1 break-words',
     a: isDark ? 'text-primary-400 hover:text-primary-300 hover:underline transition-colors' : 'text-primary-600 hover:text-primary-700 hover:underline transition-colors',
     strong: isDark ? 'text-surface-100 font-semibold' : 'text-surface-900 font-semibold',
     em: isDark ? 'text-surface-300 italic' : 'text-surface-600 italic',
@@ -227,7 +227,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = memo(({ content, class
   };
 
   return (
-    <div className={`markdown-content max-w-none break-words text-[13px] ${className}`}>
+    <div className={`markdown-content max-w-none whitespace-normal break-words text-[13px] leading-[1.42] tracking-normal [letter-spacing:normal] [word-spacing:normal] ${className}`}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         urlTransform={(url) => unwrapAngleBrackets(url)}

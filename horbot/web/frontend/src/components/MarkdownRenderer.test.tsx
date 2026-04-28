@@ -22,4 +22,16 @@ describe('MarkdownRenderer', () => {
     expect(link).toHaveAttribute('href', 'https://example.com/docs');
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
+
+  it('does not preserve parent pre-wrap whitespace inside rendered markdown', () => {
+    const { container } = render(
+      <div className="whitespace-pre-wrap">
+        <MarkdownRenderer content={'第一段\\n\\n## 标题\\n\\n第二段'} />
+      </div>
+    );
+
+    const markdownRoot = container.querySelector('.markdown-content');
+    expect(markdownRoot).toHaveClass('whitespace-normal');
+    expect(markdownRoot).toHaveClass('leading-[1.42]');
+  });
 });

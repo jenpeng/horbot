@@ -48,6 +48,12 @@ from horbot.web.security import (
     sanitize_execution_steps,
     sanitize_mcp_server_for_client,
 )
+from horbot.web.artifacts import (
+    ArtifactValidationError,
+    cleanup_expired_artifacts,
+    render_artifact,
+    resolve_runtime_artifact_file,
+)
 from horbot.utils.error_messages import public_error_message
 from horbot.channels.endpoints import (
     CHANNEL_TYPE_MODELS,
@@ -2250,6 +2256,11 @@ class ConfirmRequest(BaseModel):
     confirmation_id: str
     action: str  # "confirm" or "cancel"
     session_key: str = "default"
+
+
+class ArtifactRenderRequest(BaseModel):
+    spec: Dict[str, Any]
+    ttl_seconds: int = Field(default=1800, ge=60, le=86400)
 
 
 def get_session_manager():
@@ -5186,6 +5197,43 @@ async def get_file_preview(file_id: str):
         return HTMLResponse(_render_pptx_preview_html(file_path, display_name), headers=_INLINE_PREVIEW_HEADERS)
 
     raise HTTPException(status_code=400, detail="Preview only available for supported inline file types")
+
+
+@router.post("/artifacts/render")
+async def create_live_artifact_render(request: ArtifactRenderRequest):
+    """Create an ephemeral sandbox render from a structured renderable spec."""
+    try:
+        return render_artifact(request.spec, ttl_seconds=request.ttl_seconds)
+    except ArtifactValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Live artifact render failed")
+        raise HTTPException(status_code=500, detail=f"Live artifact render failed: {exc}") from exc
+
+
+@router.get("/artifacts/runtime/{artifact_id}/{filename}")
+async def serve_live_artifact_runtime_file(artifact_id: str, filename: str):
+    """Serve a generated runtime artifact file."""
+    try:
+        file_path = resolve_runtime_artifact_file(artifact_id, filename)
+    except ArtifactValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Rendered artifact has expired or does not exist") from exc
+    return FileResponse(
+        file_path,
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-ancestors 'self';",
+        },
+    )
+
+
+@router.delete("/artifacts/runtime/expired")
+async def delete_expired_live_artifacts():
+    """Manually clean expired temporary render files."""
+    return {"removed": cleanup_expired_artifacts()}
 
 
 @router.delete("/files/{file_id}")
