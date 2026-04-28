@@ -1270,11 +1270,38 @@ class AgentLoop:
         for message in reversed(messages):
             if message.get("role") != "tool":
                 continue
+            tool_name = str(message.get("name") or "").strip().lower()
+            if AgentLoop._is_internal_tool_result_for_final_fallback(tool_name, str(message.get("content") or "")):
+                continue
             content = str(message.get("content") or "").strip()
             if not content:
                 continue
             return content
         return ""
+
+    @staticmethod
+    def _is_internal_tool_result_for_final_fallback(tool_name: str, content: str) -> bool:
+        """Avoid turning operational tool receipts into user-visible final answers."""
+        normalized_tool = (tool_name or "").strip().lower()
+        if normalized_tool in {
+            "browser",
+            "web_access",
+            "web_search",
+            "web_fetch",
+            "message",
+        }:
+            return True
+        if normalized_tool.startswith("mcp_browser") or normalized_tool.startswith("browser_"):
+            return True
+
+        normalized_content = (content or "").strip()
+        if re.match(r"^✅\s*(已打开|新标签页已打开|已在默认浏览器打开)\s*[:：]", normalized_content):
+            return True
+        if normalized_content.startswith("Results for:") or normalized_content.startswith("No results for:"):
+            return True
+        if normalized_content.startswith("Message sent to"):
+            return True
+        return False
 
     def _should_skip_planning_for_message(self, msg: InboundMessage) -> bool:
         """Skip planning for file-heavy chat requests that should go direct."""

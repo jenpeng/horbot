@@ -263,6 +263,48 @@ class AgentLoopWebEnforcementTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
 
+    async def test_browser_navigation_receipt_is_not_used_as_final_reply(self):
+        provider = SequencedProvider([
+            LLMResponse(tool_calls=[
+                ToolCallRequest(
+                    id="call-browser-json-schema",
+                    name="browser",
+                    arguments={"action": "navigate", "url": "https://json-schema.org/"},
+                )
+            ], content=None),
+            LLMResponse(content=""),
+        ])
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            loop = _build_loop(
+                provider,
+                tempdir,
+                browser_outputs=["✅ 已打开: https://json-schema.org/\n标题: JSON Schema"],
+            )
+            final_content, tools_used, messages, _, _ = await loop._run_agent_loop(
+                [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "不用做任何事情，也不用回复。"},
+                ],
+                session_key="web:dm_main",
+            )
+
+            self.assertEqual(final_content, "")
+            self.assertIn("browser", tools_used)
+            self.assertTrue(
+                any(
+                    m.get("role") == "tool"
+                    and m.get("name") == "browser"
+                    and "json-schema.org" in str(m.get("content", ""))
+                    for m in messages
+                )
+            )
+            self.assertFalse(any(
+                m.get("role") == "assistant"
+                and "✅ 已打开" in str(m.get("content", ""))
+                for m in messages
+            ))
+
     async def test_run_agent_loop_retries_until_web_search_used_for_fresh_knowledge(self):
         provider = SequencedProvider([
             LLMResponse(content="我先直接总结一下最新局势。"),
