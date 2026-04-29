@@ -114,6 +114,8 @@
 - Word / Excel / PowerPoint / 文本会展示可读预览或原文件入口
 - 对于 assistant 正文里独立出现的远程图片链接，后端会尽量自动提升成统一图片卡片，而不是只显示裸链接
 
+刷新 Chat 页面、切换到其他模块再回来时，前端会用 no-store 请求重新拉取最新聊天窗口，并在增量锚点失效时回退加载最新消息。正常情况下页面会回到最新 turn；如果你正在翻看较早历史，发送新消息前建议先点“回到最新”。
+
 ### PPTX 高保真预览
 
 当本机可用 `soffice` 时，PPTX 附件会走 LibreOffice 高保真预览链路。Horbot 会使用隔离的 LibreOffice profile 先把 PPTX 转成中间 PDF，再在用户打开或翻页时按页渲染 PNG。这样不会再依赖浏览器侧重建 PPTX 版式，能更好保留原始布局、字体和元素位置。
@@ -474,6 +476,8 @@ localStorage.setItem('horbotAdminToken', 'replace-with-a-long-random-token')
 ```bash
 ./horbot.sh restart backend
 ```
+
+当前聊天历史接口也会返回 `Cache-Control: no-store`，前端请求同样禁用缓存。如果刷新或切换模块后最近一轮仍没有出现，优先确认后端是否已重启到最新代码，再查看对应会话的最新历史接口返回。
 
 ### 5.1 页面打开了，但提示 401 或 403
 

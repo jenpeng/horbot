@@ -4,6 +4,12 @@ This file summarizes notable Horbot product and documentation changes. For fine-
 
 ## 2026-04-28
 
+### Web API And Chat History
+
+- Split the large Web API surface into focused `horbot/web/*_routes.py` modules while keeping `horbot/web/api.py` as the router composition, chat-core, and compatibility layer
+- Stabilized chat history reloads with backend `Cache-Control: no-store`, frontend no-store fetches, and latest-window fallback when incremental `after_id` anchors are stale
+- Moved Chat page history parsing, message file handling, stream errors, execution-step mapping, and turn virtualization into focused frontend modules
+
 ### Live Artifacts
 
 - Added chat-side Live Artifact cards for structured agent output such as dashboards, chart stories, data workbenches, map stories, process maps, and interactive reports

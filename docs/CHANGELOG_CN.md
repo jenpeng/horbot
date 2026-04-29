@@ -4,6 +4,12 @@
 
 ## 2026-04-28
 
+### Web API 拆分与聊天历史稳定性
+
+- 将大型 Web API 面拆分为 `horbot/web/*_routes.py` 功能路由模块，`horbot/web/api.py` 保留为路由组合、聊天核心兼容和旧导入 shim
+- 聊天历史加载补充后端 `Cache-Control: no-store`、前端 no-store 请求，以及 `after_id` 增量锚点失效时的最新窗口回退
+- Chat 页面已将历史解析、消息附件处理、流式错误、执行步骤映射和 turn 虚拟化拆入独立前端模块
+
 ### Live Artifact 交互渲染
 
 - 新增聊天气泡内的 Live Artifact 卡片，支持看板、图表故事、数据工作台、地图故事、流程视图和交互报告等结构化 Agent 输出

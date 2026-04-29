@@ -32,6 +32,7 @@ horbot 采用模块化设计，核心组件包括：
 - Live Artifact 能力会把 Agent 输出的结构化渲染规格临时转换成 sandbox HTML 视图，运行文件统一落在 `.horbot/runtime/rendered-artifacts`，刷新历史后可从消息中的规格重新生成
 - Configuration 页面新增“远程图片缓存”状态区块，直接读取后端缓存统计，并支持手动清理自动落盘的远程图片缓存
 - Skills 页面当前支持系统技能/自定义技能分组展示、自动技能手动整理，以及把自定义技能转为系统技能
+- Web 聊天历史接口和前端加载链路已统一采用 no-store 策略，并在增量锚点失效时回退拉取最新窗口，减少刷新或切换模块后最近消息偶发缺失的问题
 
 ### 架构概览图
 
@@ -223,7 +224,8 @@ horbot/
 │   └── helpers.py           # 辅助函数
 └── web/                     # Web 界面
     ├── main.py              # FastAPI 入口
-    ├── api.py               # API 路由
+    ├── api.py               # 路由注册、聊天核心兼容层与旧导入 shims
+    ├── *_routes.py          # 按功能拆分的 API 路由模块
     ├── websocket.py         # WebSocket 处理
     └── frontend/            # 前端代码
 ```
@@ -231,6 +233,12 @@ horbot/
 ***
 
 ## 📦 核心模块详解
+
+### Web API 路由拆分
+
+`horbot/web/api.py` 现在不再承载所有业务端点，主要负责 FastAPI router 组合、聊天流式核心兼容、以及旧测试/扩展仍会引用的兼容入口。新增或调整功能 API 时，应优先放入 `horbot/web/` 下对应的 `*_routes.py` 模块，例如 `agent_routes.py`、`conversation_routes.py`、`skills_routes.py`、`upload_routes.py`、`channel_routes.py` 等。
+
+这样可以继续保留 `horbot.web.api.get_chat_history`、`delete_session`、`update_session_title`、上传 helper 等旧导入点，同时避免 `api.py` 重新膨胀。
 
 ### 1. Agent 模块 (`horbot/agent/`)
 

@@ -35,6 +35,7 @@
 ## 📢 最新动态
 
 - **2026-04-28** 📎 PPTX 预览已改为 LibreOffice 高保真链路：先无头导出 PDF，再按页懒加载 PNG，关闭预览时会清理中间 PDF。
+- **2026-04-28** 💬 聊天历史接口和前端加载链路已补充 `no-store` 与增量回退策略，刷新页面或切换模块后会重新拉取最新窗口，避免最近消息偶发缺失。
 - **2026-04-27** 🔌 External Agent 已调整为入站 Bot 优先的可插拔 adapter 架构；Channels 也新增 Horbot 入站机器人通道实例，Horbot 可生成 App ID、Token 与 Inbound URL，WorkBuddy 或其他平台像飞书/Discord 机器人一样推送消息进来；`generic-agent-api` 仅保留为兼容旧 URL 调用模式。
 - **2026-04-15** 🌐 Agent 联网能力已改回默认使用 Playwright 浏览器链路，并以 `browser` / `web_search` / `web_fetch` 作为标准联网工具；`horbot.sh` 不再托管 `web-access` 服务。
 - **2026-04-14** 🛡️ 新增外部 Agent 接入管理、`AGENTS.md` 治理文件、工具审计摘要与聊天 `request_id` 诊断增强；并修复一类前端误报 provider timeout 的假超时场景。
@@ -63,6 +64,7 @@
 | 🔒 **安全可控** | 内置权限系统和审计日志，支持自主执行框架 |
 | 🔥 **热加载** | 默认启用代码热加载，AI 修改代码后自动生效 |
 | 📝 **Markdown 聊天** | Assistant 回复支持标题、列表、表格、引用、代码块与高亮 |
+| 💬 **稳定历史加载** | 聊天历史刷新、模块切换和增量加载会避开浏览器缓存，并在锚点失效时回退拉取最新窗口 |
 | 📊 **Live Artifact** | Agent 可在聊天气泡中生成临时交互式看板、图表故事、地图故事、流程视图与报告 |
 | 📎 **多模态附件** | 支持图片、音频、PDF、Word、Excel、PowerPoint、文本上传、拖拽与粘贴 |
 | 👀 **历史预览** | 历史消息中的图片、音频、PDF、Office、文本附件可直接内联预览；PPTX 使用 LibreOffice 转 PDF 后按页渲染；远程图片链接会尽量自动转成统一图片卡片；多图弹窗支持底部缩略条快速切换 |

@@ -67,6 +67,12 @@ Horbot keeps the runtime intentionally small:
 - `horbot-inbound-bot` endpoints are channel-owned inbound entrances: Horbot issues credentials, validates pushed messages, and routes them to a fixed bound Agent or to a request-specified Agent that exists in the current running instance
 - reply-mode streaming and media handling for channels that support progressive edits
 
+### Web API Route Modules
+
+The Web backend keeps `horbot/web/api.py` as the composition layer for router registration, chat-core streaming compatibility, and legacy import shims. Feature endpoints should live in focused modules such as `agent_routes.py`, `conversation_routes.py`, `skills_routes.py`, `upload_routes.py`, `channel_routes.py`, and the other `*_routes.py` files under `horbot/web/`.
+
+This split keeps large API areas independently testable while preserving old test and extension import points such as `horbot.web.api.get_chat_history`, `delete_session`, `update_session_title`, and upload helper hooks.
+
 ### Persistence Layer
 
 - `.horbot/agents/<agent-id>/workspace`
@@ -116,6 +122,7 @@ The Web UI currently covers:
 - configuration and providers
 - agents and teams
 - chat and relay conversations
+- chat history loading that uses no-store fetches, no-store backend responses, progressive rendering, and viewport virtualization for large turn lists
 - baton-aware relay navigation between direct chat and team chat during DM-initiated team dispatch flows
 - richer attachment preview UX, including inline previews and a bottom thumbnail strip for multi-image preview modals
 - assistant history normalization that upgrades standalone remote image URLs into image-card attachments when possible

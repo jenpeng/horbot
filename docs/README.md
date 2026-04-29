@@ -16,6 +16,7 @@ Horbot is a lightweight multi-agent assistant stack with:
 - chat-side Live Artifacts for temporary interactive dashboards, charts, maps, process views, and reports
 - high-fidelity PPTX previews through LibreOffice PDF export and lazy per-slide PNG rendering
 - compact chat layout plus baton-aware relay status in team conversations
+- no-store chat history reloads plus incremental fallback recovery so the latest turns remain visible after refreshes and module switches
 - automatic DM -> team -> DM baton navigation in Web Chat, with a temporary top banner so relay-driven view changes are explicit
 - promoted remote image links that render as normal image-card attachments, plus a manual remote-image cache clear entry in Configuration
 - MCP and external channel integration
@@ -77,3 +78,4 @@ Current web runtime notes:
 - `./horbot.sh install libreoffice` installs LibreOffice for PPTX preview; `./horbot.sh check libreoffice` verifies the detected `soffice` command
 - `./horbot.sh smoke officecli` validates direct `officecli` document operations for `.docx`, `.xlsx`, and `.pptx`
 - Configuration now exposes a remote-image cache status panel and manual clear action for chat image-card materialization
+- Backend Web API routes are organized in focused `horbot/web/*_routes.py` modules. New feature APIs should go into the closest route module instead of expanding `horbot/web/api.py`.

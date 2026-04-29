@@ -39,6 +39,17 @@ cd horbot/web/frontend && npm run build
 - keep English and Chinese docs aligned when a change affects end users
 - avoid reintroducing legacy `.horbot/context`, `.horbot/memory`, `.horbot/agents/<agent-id>/{memory,sessions,skills}`, or `workspace/skills` assumptions
 
+## Web Backend Route Changes
+
+`horbot/web/api.py` is now a router composition, chat-core compatibility, and legacy shim module. Add new feature endpoints to the closest focused route module under `horbot/web/*_routes.py` instead of expanding `api.py`.
+
+When changing chat or conversation history routes, preserve these behavior contracts:
+
+- history responses must include `Cache-Control: no-store`
+- frontend history fetches should use `cache: 'no-store'`
+- incremental `after_id` loads should fall back to the latest window when the anchor is stale or missing
+- compatibility imports from `horbot.web.api` should keep working unless a migration is documented and tested
+
 ## Skill Changes
 
 When you change the skills system, keep these current rules aligned:

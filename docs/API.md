@@ -33,6 +33,7 @@
 - `GET /api/conversations`
 - `GET /api/conversations/{conv_id}`
 - `GET /api/conversations/{conv_id}/messages`
+- `GET /api/conversations/{conv_id}/search`
 
 ### Files And Cache
 
@@ -222,6 +223,8 @@ Supported templates are `dashboard`, `chart-story`, `data-workbench`, `map-story
 ## Notes
 
 - Agent creation requires explicit `provider` and `model`.
+- Chat history endpoints such as `GET /api/chat/history`, `GET /api/conversations/{conv_id}/messages`, and `GET /api/conversations/{conv_id}/search` are intentionally returned with `Cache-Control: no-store`. Clients should also fetch them with `cache: 'no-store'` so refreshes and module switches do not reuse stale latest-message windows.
+- Conversation message pagination supports latest-window loading plus anchors such as `before_id`, `after_id`, and `around_id`. If an `after_id` incremental load returns an empty window because the local anchor is stale or missing, clients should reload the latest window instead of treating the conversation as empty.
 - External Agent creation accepts an open `adapter` slug plus `adapter_config`; missing legacy adapters default to `generic-agent-api`.
 - `inbound-bot` is the preferred Feishu/Discord-style adapter. Horbot generates `adapter_config.bot_app_id` and `adapter_config.bot_token`, then exposes `/api/external-agents/inbound/{app_id}/messages` for WorkBuddy or another platform to push messages into Horbot.
 - `generic-agent-api` is only the compatibility adapter for the older model where Horbot calls HTTP, HTTP SSE, or WebSocket endpoints. `openai-compatible` is for Chat Completions-style services and expects `adapter_config.model`.

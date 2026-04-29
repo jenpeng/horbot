@@ -515,6 +515,7 @@ GET /api/chat/history?session_key=default
 
 - 当某个 Agent 的会话历史同时存在于旧 `workspace/sessions` 与当前 `.horbot/agents/<agent-id>/workspace/.horbot-agent/sessions` 路径时，接口会自动合并、去重并按时间排序返回
 - 返回结果中的附件与执行过程字段会尽量保留较完整的一份
+- 该接口会返回 `Cache-Control: no-store`，前端也应使用 no-store 请求，避免刷新页面或切换模块后复用浏览器缓存中的旧历史窗口
 
 **响应示例**:
 ```json
@@ -773,6 +774,8 @@ Content-Type: application/json
 历史消息补充说明：
 
 - `GET /api/chat/history` 与 `GET /api/conversations/{conv_id}/messages` 会尽量把 assistant 正文中的独立远程图片链接提升为 `files` 附件
+- `GET /api/conversations/{conv_id}/messages`、`GET /api/conversations/{conv_id}/search` 与 `GET /api/chat/history` 会明确返回 `Cache-Control: no-store`
+- 会话消息分页支持最新窗口加载，以及 `before_id`、`after_id`、`around_id` 等锚点参数；如果 `after_id` 增量锚点已过期或本地不存在，客户端应回退重新拉取最新窗口
 - 当远程图片缓存成功时，返回体中的 `preview_url` 会指向本地 `/api/files/{file_id}/preview`
 - 当缓存失败时，仍会回退为远程 URL 形式的附件对象，前端继续按图片卡片渲染
 

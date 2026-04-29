@@ -92,6 +92,17 @@ npm install
 npm run dev
 ```
 
+### Web 后端路由开发
+
+`horbot/web/api.py` 现在主要负责 router 组合、聊天核心兼容和旧导入 shim。新增功能端点时，应放入 `horbot/web/*_routes.py` 中最接近的功能模块，避免继续扩张 `api.py`。
+
+修改聊天或会话历史路由时，需要保持以下契约：
+
+- 历史接口响应必须包含 `Cache-Control: no-store`
+- 前端历史请求应使用 `cache: 'no-store'`
+- `after_id` 增量加载在锚点失效或本地缺失时，需要回退拉取最新窗口
+- 除非有明确迁移文档和测试，否则 `horbot.web.api` 中的旧兼容导入点应继续可用
+
 ### 文档与截图同步
 
 如果改动影响了 README 或文档截图，请基于当前本地运行中的真实 Web UI 重新抓图，不要使用设计稿或旧项目截图。

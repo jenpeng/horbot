@@ -74,6 +74,7 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 - Markdown rendering for assistant messages
 - Live Artifact cards for structured agent output such as dashboards, chart stories, map stories, process views, and interactive reports
 - Denser chat bubbles and tighter Markdown spacing to reduce blank space in long conversations
+- Conversation history loads use no-store responses and incremental fallback recovery so refreshes or module switches do not reuse stale latest-message windows
 - Inline preview for image, audio, PDF, Office, and text attachments
 - High-fidelity PPTX preview through LibreOffice PDF export plus lazy per-slide PNG rendering
 - Office document operations via OfficeCLI MCP, including structure-aware create/edit/view/validate flows for `.docx`, `.xlsx`, and `.pptx`
@@ -103,6 +104,11 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 - Built-in UI locale switcher for English, Simplified Chinese, and Thai, with the selection persisted in browser storage
 - Smoke scripts for browser, chat, configuration, and agent asset flows
 - Security defaults for local-only access and admin-token-gated remote access
+
+### Development Notes
+
+- Web API endpoints are now split into focused route modules under `horbot/web/*_routes.py`; keep `horbot/web/api.py` as the composition, chat-core, and compatibility layer instead of adding unrelated feature routes back into it.
+- The Chat page keeps history parsing, file metadata, stream errors, execution-step mapping, and turn virtualization in focused modules under `horbot/web/frontend/src/pages/chat/`.
 
 ## Quick Start
 
