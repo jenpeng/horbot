@@ -158,7 +158,8 @@ PPTX previews use LibreOffice when available:
 
 - `GET /api/files/{file_id}/preview-capabilities` reports the selected renderer, slide count, rendered page count, and detected LibreOffice command.
 - `GET /api/files/{file_id}/preview/slides/{page}` returns one rendered slide PNG. The first request may trigger LibreOffice PDF export; later page requests reuse the cached PDF or PNG.
-- `POST /api/files/{file_id}/preview/cleanup` removes the intermediate LibreOffice PDF for that upload. The Web UI calls this when the preview iframe unloads. Already rendered slide PNGs may remain cached for faster reopening.
+- `POST /api/files/{file_id}/preview/cleanup` removes the intermediate LibreOffice PDF for that upload. The Web UI calls this when the preview iframe unloads.
+- Rendered slide PNG cache directories are refreshed when used and automatically removed after 3 days without use.
 
 Example capabilities response:
 

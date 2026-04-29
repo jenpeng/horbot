@@ -260,7 +260,7 @@ class ChatHistoryApiTests(unittest.TestCase):
     def test_history_normalization_does_not_cache_remote_images(self):
         content = "https://image.pollinations.ai/prompt/test?seed=123"
 
-        with patch("horbot.web.api._cache_remote_image_file") as cache_remote_image:
+        with patch("horbot.web.upload_preview._cache_remote_image_file") as cache_remote_image:
             cleaned_content, files = _normalize_saved_assistant_content_and_files(content, None)
 
         cache_remote_image.assert_not_called()

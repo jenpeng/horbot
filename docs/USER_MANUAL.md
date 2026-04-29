@@ -69,7 +69,7 @@ If a remote image link can be cached successfully, later history loads use a loc
 
 PPTX files use a LibreOffice-based high-fidelity preview path when `soffice` is available. Horbot converts the deck to an intermediate PDF with an isolated LibreOffice profile, then renders slide PNGs lazily as you open or navigate pages. This avoids browser-side PPTX reconstruction, which often loses layout, fonts, and positioning.
 
-The preview iframe loads only the current slide and nearby slides. Closing or unloading the preview asks the backend to remove the intermediate PDF; already rendered slide PNGs may remain in the upload preview cache so reopening the same file is faster.
+The preview iframe loads only the current slide and nearby slides. Closing or unloading the preview asks the backend to remove the intermediate PDF. Already rendered slide PNGs may remain in the upload preview cache for faster reopening, but the backend automatically removes slide image caches that have not been used for 3 days.
 
 Install or verify the dependency with:
 

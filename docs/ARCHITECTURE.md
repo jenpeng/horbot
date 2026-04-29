@@ -75,7 +75,7 @@ Horbot keeps the runtime intentionally small:
 - `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`
 - `.horbot/data/*` for uploads, plans, sessions, and cron data
 - remote image cards can also be materialized into `.horbot/data/uploads` so later history loads still render as normal file attachments
-- upload preview cache files live under `.horbot/data/uploads/.previews`; PPTX intermediate PDFs are transient and are removed on preview cleanup while rendered slide PNGs may be reused
+- upload preview cache files live under `.horbot/data/uploads/.previews`; PPTX intermediate PDFs are transient and are removed on preview cleanup, while rendered slide PNG directories are reused only while active and are automatically removed after 3 days without use
 - temporary Live Artifact runtime files are written to `.horbot/runtime/rendered-artifacts` and can be regenerated from saved message specs
 
 The workspace root may also contain runtime-owned directories such as `.audit`, `.checkpoints`, and `.state`. These are active runtime artifacts, not duplicate legacy storage.

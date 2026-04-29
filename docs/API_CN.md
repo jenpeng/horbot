@@ -666,7 +666,8 @@ POST /api/files/{file_id}/preview/cleanup
 - PPTX 预览优先使用 LibreOffice：先把 PPTX 无头导出为中间 PDF，再用 PyMuPDF 按页渲染 PNG
 - `preview-capabilities` 返回当前文件使用的 renderer、页数、已渲染页数和检测到的 `soffice` 路径
 - `preview/slides/{page}` 只返回指定页 PNG；首次请求可能触发 LibreOffice 转 PDF，后续页面会复用 PDF 或 PNG 缓存
-- `preview/cleanup` 删除该 PPTX 的中间 PDF；前端预览 iframe 卸载时会自动调用，已生成的 PNG 页缓存可继续用于再次打开加速
+- `preview/cleanup` 删除该 PPTX 的中间 PDF；前端预览 iframe 卸载时会自动调用
+- 已生成的 PNG 页缓存使用时会刷新时间戳，连续 3 天未使用后会被自动清理
 
 响应示例：
 

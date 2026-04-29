@@ -1,5 +1,7 @@
 import io
+import os
 import sys
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -12,14 +14,15 @@ from docx import Document
 from fastapi import FastAPI
 from reportlab.pdfgen import canvas
 
-from horbot.web.api import (
+from horbot.web.api import router as api_router
+from horbot.web.upload_preview import (
     _build_preview_url,
     _cleanup_pptx_pdf_preview,
     _extract_document_content,
+    cleanup_upload_preview_cache,
     _render_pptx_pdf_preview_path,
     _render_docx_preview_html,
     _render_pptx_preview_html,
-    router as api_router,
 )
 
 
@@ -300,7 +303,7 @@ class UploadExtractionTests(unittest.TestCase):
             pptx_path = Path(tmpdir) / "preview.pptx"
             create_simple_pptx(pptx_path, "Preview slide body")
 
-            with patch("horbot.web.api._pptx_visual_preview_plan", return_value=("text-fallback", 0)):
+            with patch("horbot.web.upload_preview._pptx_visual_preview_plan", return_value=("text-fallback", 0)):
                 rendered = _render_pptx_preview_html("file-pptx", pptx_path, "preview.pptx")
 
             self.assertIn("A reliable PPT renderer is not configured", rendered)
@@ -314,7 +317,7 @@ class UploadExtractionTests(unittest.TestCase):
             image_path = Path(tmpdir) / "slide-001.png"
             image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
 
-            with patch("horbot.web.api._pptx_visual_preview_plan", return_value=("libreoffice-pdf-images", 1)):
+            with patch("horbot.web.upload_preview._pptx_visual_preview_plan", return_value=("libreoffice-pdf-images", 1)):
                 rendered = _render_pptx_preview_html("file-pptx", pptx_path, "styled.pptx")
 
             self.assertNotIn("ppt-slide-stage", rendered)
@@ -337,9 +340,9 @@ class UploadExtractionTests(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
             with (
-                patch("horbot.web.api._get_upload_dir", return_value=upload_dir),
-                patch("horbot.web.api._find_soffice_command", return_value="/usr/local/bin/soffice"),
-                patch("horbot.web.api.subprocess.run", side_effect=fake_run) as run_mock,
+                patch("horbot.web.upload_preview._get_upload_dir", return_value=upload_dir),
+                patch("horbot.web.upload_preview._find_soffice_command", return_value="/usr/local/bin/soffice"),
+                patch("horbot.web.upload_preview.subprocess.run", side_effect=fake_run) as run_mock,
             ):
                 first = _render_pptx_pdf_preview_path(pptx_path)
                 second = _render_pptx_pdf_preview_path(pptx_path)
@@ -361,15 +364,44 @@ class UploadExtractionTests(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
 
             with (
-                patch("horbot.web.api._get_upload_dir", return_value=upload_dir),
-                patch("horbot.web.api._find_soffice_command", return_value="/usr/local/bin/soffice"),
-                patch("horbot.web.api.subprocess.run", side_effect=fake_run),
+                patch("horbot.web.upload_preview._get_upload_dir", return_value=upload_dir),
+                patch("horbot.web.upload_preview._find_soffice_command", return_value="/usr/local/bin/soffice"),
+                patch("horbot.web.upload_preview.subprocess.run", side_effect=fake_run),
             ):
                 pdf_path = _render_pptx_pdf_preview_path(pptx_path)
                 self.assertIsNotNone(pdf_path)
                 self.assertTrue(pdf_path.is_file())
                 self.assertTrue(_cleanup_pptx_pdf_preview(pptx_path))
                 self.assertFalse(pdf_path.exists())
+
+    def test_pptx_preview_cache_cleanup_removes_old_slide_png_dirs(self):
+        with TemporaryDirectory() as tmpdir:
+            upload_dir = Path(tmpdir)
+            previews_dir = upload_dir / ".previews"
+            old_slides = previews_dir / "old-cache-slides"
+            fresh_slides = previews_dir / "fresh-cache-slides"
+            old_slides.mkdir(parents=True)
+            fresh_slides.mkdir(parents=True)
+            (old_slides / "slide-001.png").write_bytes(b"old")
+            (fresh_slides / "slide-001.png").write_bytes(b"fresh")
+            old_pdf = previews_dir / "old-cache.pdf"
+            fresh_pdf = previews_dir / "fresh-cache.pdf"
+            old_pdf.write_bytes(b"%PDF-old")
+            fresh_pdf.write_bytes(b"%PDF-fresh")
+
+            now = time.time()
+            old_mtime = now - (4 * 24 * 60 * 60)
+            for path in (old_slides / "slide-001.png", old_slides, old_pdf):
+                os.utime(path, (old_mtime, old_mtime))
+
+            with patch("horbot.web.upload_preview._get_upload_dir", return_value=upload_dir):
+                result = cleanup_upload_preview_cache(max_age_seconds=3 * 24 * 60 * 60, now=now)
+
+            self.assertEqual(result, {"removed_dirs": 1, "removed_files": 1})
+            self.assertFalse(old_slides.exists())
+            self.assertFalse(old_pdf.exists())
+            self.assertTrue(fresh_slides.exists())
+            self.assertTrue(fresh_pdf.exists())
 
     def test_build_preview_url_for_inline_office_documents(self):
         self.assertEqual(
@@ -405,6 +437,7 @@ class UploadApiTests(unittest.IsolatedAsyncioTestCase):
 
             with (
                 patch("horbot.web.api._get_upload_dir", return_value=upload_dir),
+                patch("horbot.web.upload_preview._get_upload_dir", return_value=upload_dir),
                 patch(
                     "horbot.web.api.get_cached_config",
                     return_value=SimpleNamespace(providers={"minimax": {"apiKey": "fake-key"}}),
@@ -443,9 +476,12 @@ class UploadApiTests(unittest.IsolatedAsyncioTestCase):
 
             with (
                 patch("horbot.web.api._get_upload_dir", return_value=upload_dir),
+                patch("horbot.web.upload_preview._get_upload_dir", return_value=upload_dir),
                 patch("horbot.web.api._find_soffice_command", return_value=None),
-                patch("horbot.web.api.shutil.which", return_value=None),
+                patch("horbot.web.upload_preview._find_soffice_command", return_value=None),
+                patch("horbot.web.upload_preview.shutil.which", return_value=None),
                 patch("horbot.web.api._pptx_visual_preview_plan", return_value=("text-fallback", 0)),
+                patch("horbot.web.upload_preview._pptx_visual_preview_plan", return_value=("text-fallback", 0)),
             ):
                 async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
                     upload_response = await client.post(
@@ -483,7 +519,10 @@ class UploadApiTests(unittest.IsolatedAsyncioTestCase):
             first_content = b"first duplicate payload"
             second_content = b"second duplicate payload"
 
-            with patch("horbot.web.api._get_upload_dir", return_value=upload_dir):
+            with (
+                patch("horbot.web.api._get_upload_dir", return_value=upload_dir),
+                patch("horbot.web.upload_preview._get_upload_dir", return_value=upload_dir),
+            ):
                 async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
                     response = await client.post(
                         "/api/upload",

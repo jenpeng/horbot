@@ -28,235 +28,96 @@ import { useConversationStore } from '../stores/conversationStore';
 import { ConversationType, conversationIdToSessionKey, sessionKeyToConversationId } from '../types/conversation';
 import type { ExecutionStep, MessageFile } from '../types/conversation';
 import { chatService, ChatStreamError } from '../services/chat';
-import type { StreamState, UploadedFile } from '../services/chat';
+import type { StreamState } from '../services/chat';
 import type { ConversationState } from '../stores/conversationStore';
 import { createAsyncResourceCache } from '../utils/asyncResourceCache';
 import { lazyWithReload } from '../utils/lazyWithReload';
-
-interface AgentInfo {
-  id: string;
-  name: string;
-  description?: string;
-  external?: boolean;
-  team_enabled?: boolean;
-  profile?: string;
-  is_main?: boolean;
-  setup_required?: boolean;
-  bootstrap_setup_pending?: boolean;
-  runtime_capabilities?: ToolCapability[];
-  runtime_capability_labels?: string[];
-  tool_permission_profile?: string;
-  mcp_servers?: string[];
-}
-
-interface ToolCapability {
-  id: string;
-  label: string;
-  description?: string;
-  enabled: boolean;
-  source?: string;
-  tools?: string[];
-}
-
-interface TeamInfo {
-  id: string;
-  name: string;
-  members: string[];
-  description?: string;
-}
-
-interface ChatDirectoryBundle {
-  agents: AgentInfo[];
-  externalAgents: AgentInfo[];
-  teams: TeamInfo[];
-}
-
-interface UIMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp?: string;
-  turnId?: string;
-  requestId?: string;
-  isStreaming?: boolean;
-  isThinking?: boolean;
-  statusMessage?: string;
-  agentId?: string;
-  agentName?: string;
-  files?: MessageFile[];
-  executionSteps?: ExecutionStep[];
-  metadata?: Record<string, unknown>;
-  isError?: boolean;
-  errorKind?: 'provider' | 'network' | 'timeout' | 'stream';
-  retryable?: boolean;
-  retryPayload?: {
-    content: string;
-    mentionedAgents: string[];
-    files?: MessageFile[];
-  };
-}
-
-interface ProviderErrorInfo {
-  error_code?: string;
-  error_kind?: string;
-  remediation?: string[];
-  retryable?: boolean;
-}
-
-interface StreamMessageEntry {
-  messageId: string;
-  content: string;
-  turnId?: string;
-  agentId: string;
-  phase: 'pending' | 'active' | 'done';
-  executionSteps: ExecutionStep[];
-}
-
-interface RetryRequest {
-  conversationId: string;
-  content: string;
-  mentionedAgents: string[];
-  files?: MessageFile[];
-}
-
-interface MessageTurn {
-  id: string;
-  userMessage?: UIMessage;
-  assistantMessages: UIMessage[];
-  responseGroups: UIMessage[][];
-  hasError: boolean;
-  relayCount: number;
-  participantAgentIds: string[];
-}
-
-interface MessageTurnAccumulator extends MessageTurn {
-  requestIds: Set<string>;
-}
-
-interface InterruptNotice {
-  tone: 'info' | 'warning' | 'success';
-  message: string;
-}
-
-interface BatonNavigationNotice {
-  tone: 'team' | 'dm';
-  message: string;
-  actionLabel?: string;
-  actionConversationId?: string;
-}
-
-interface RelayStatusSnapshot {
-  pendingAgentNames: string[];
-  activeAgentNames: string[];
-  activeProcessingAgentName?: string;
-  activeProcessingMessage: UIMessage | null;
-}
-
-interface RelayTimelineStep {
-  key: string;
-  label: string;
-  state: 'waiting' | 'active' | 'done' | 'error';
-  detail: string;
-  isFinal: boolean;
-  groupIndex: number;
-}
-
-interface PendingRelayJump {
-  turnId: string;
-  groupIndex: number;
-}
-
-interface ExpandedRelaySegment {
-  startIndex: number;
-  endIndex: number;
-}
-
-interface HistorySearchMatch {
-  key: string;
-  turnId: string;
-  groupIndex?: number;
-  role: 'user' | 'assistant';
-  label: string;
-  preview: string;
-  messageIds: string[];
-}
-
-interface RemoteHistorySearchMatch {
-  message_id: string;
-  turn_id?: string;
-  request_id?: string;
-  role: 'user' | 'assistant';
-  preview: string;
-  timestamp?: string;
-  agent_id?: string;
-  agent_name?: string;
-}
-
-type HistorySearchTimeRange = 'all' | '7d' | '30d';
-
-type HistoryLoadMode = 'initial' | 'before' | 'after' | 'around';
-
-interface ConversationHistoryWindowState {
-  oldestMessageId?: string;
-  newestMessageId?: string;
-  hasMoreBefore: boolean;
-  hasMoreAfter: boolean;
-  totalMessages?: number;
-}
-
-interface ConversationHistoryPage {
-  oldest_message_id?: string | null;
-  newest_message_id?: string | null;
-  has_more_before?: boolean;
-  has_more_after?: boolean;
-  returned_messages?: number;
-  total_messages?: number;
-}
-
-type RelayGroupState = RelayTimelineStep['state'];
-
-interface ConversationHealth {
-  tone: 'warning' | 'danger';
-  approxTokens: number;
-  turnCount: number;
-}
-
-interface RelayRenderGroupItem {
-  type: 'group';
-  key: string;
-  group: UIMessage[];
-  groupIndex: number;
-}
-
-interface RelayRenderSummaryItem {
-  type: 'summary';
-  key: string;
-  hiddenCount: number;
-  startIndex: number;
-  endIndex: number;
-  labels: string[];
-}
-
-type RelayRenderItem = RelayRenderGroupItem | RelayRenderSummaryItem;
-type TranslateFn = (key: string, values?: Record<string, number | string>) => string;
-
-const EMPTY_MESSAGES: UIMessage[] = [];
-const EMPTY_TYPING_AGENTS: string[] = [];
-const CONVERSATION_HISTORY_PAGE_SIZE = 80;
-const CONVERSATION_HISTORY_SEARCH_PAGE_SIZE = 20;
-const CONVERSATION_HISTORY_SEARCH_CONTEXT = 20;
-const TURN_VIRTUALIZATION_THRESHOLD = 40;
-const TURN_VIRTUALIZATION_ESTIMATED_HEIGHT = 360;
-const TURN_VIRTUALIZATION_OVERSCAN = 4;
-const TURN_VIRTUALIZATION_ROW_GAP = 12;
-
-const resolveHistorySearchSince = (range: HistorySearchTimeRange): string | undefined => {
-  if (range === 'all') {
-    return undefined;
-  }
-  const days = range === '7d' ? 7 : 30;
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-};
+import {
+  hasRenderableMessageFiles,
+  normalizeMessageFiles,
+  serializeMessageFiles,
+} from './chat/messageFiles';
+import {
+  buildConversationMessagesUrl,
+  buildConversationSearchUrl,
+  buildSearchPreview,
+  cleanHistoryMessageContent,
+  estimateConversationTokens,
+  findHistorySearchMatchIndexByMessageId,
+  formatApproxTokenCount,
+  normalizeSearchText,
+  resolveHistorySearchSince,
+} from './chat/historyUtils';
+import {
+  formatConversationHistoryMessages as formatHistoryMessages,
+  mergeConversationHistoryMessages,
+  type RawConversationHistoryMessage,
+} from './chat/historyMessages';
+import {
+  normalizeAssistantErrorContent,
+  normalizeProviderErrorPayload,
+  resolveStreamFailureMessage,
+} from './chat/streamErrors';
+import {
+  finalizeRunningExecutionSteps,
+  inferExecutionStepTitle,
+  inferExecutionStepType,
+  mergeExecutionSteps,
+  normalizeExecutionStepStatus,
+  updateLatestRunningExecutionStep,
+  upsertExecutionStep,
+} from './chat/executionSteps';
+import {
+  buildInterruptSummary,
+  buildMessageTurns,
+  buildRelayRenderItems,
+  buildRequestPreview,
+  doesHistoryMessageReplaceStreamEntry,
+  findReplacedStreamEntries,
+  formatAgentNamesForStatus,
+  formatRequestIdBadge,
+  getDefaultVisibleRelayGroupIndexes,
+  getRelayGroupState,
+  getRelayGroupTransition,
+  isRelaySegmentStart,
+  MAX_VISIBLE_RELAY_GROUPS_WITHOUT_COLLAPSE,
+  parseRelayGroupKey,
+  resolveTurnRequestId,
+} from './chat/turns';
+import {
+  CONVERSATION_HISTORY_PAGE_SIZE,
+  CONVERSATION_HISTORY_SEARCH_CONTEXT,
+  CONVERSATION_HISTORY_SEARCH_PAGE_SIZE,
+  EMPTY_MESSAGES,
+  EMPTY_TYPING_AGENTS,
+  TURN_VIRTUALIZATION_ROW_GAP,
+  TURN_VIRTUALIZATION_THRESHOLD,
+} from './chat/types';
+import { useTurnVirtualization } from './chat/useTurnVirtualization';
+import type {
+  AgentInfo,
+  BatonNavigationNotice,
+  ChatDirectoryBundle,
+  ConversationHealth,
+  ConversationHistoryPage,
+  ConversationHistoryWindowState,
+  ExpandedRelaySegment,
+  HistoryLoadMode,
+  HistorySearchMatch,
+  HistorySearchTimeRange,
+  InterruptNotice,
+  MessageTurn,
+  PendingRelayJump,
+  RelayStatusSnapshot,
+  RelayTimelineStep,
+  RemoteHistorySearchMatch,
+  RetryRequest,
+  StreamMessageEntry,
+  TeamInfo,
+  ToolCapability,
+  TranslateFn,
+  UIMessage,
+} from './chat/types';
 
 const chatDirectoryCache = createAsyncResourceCache(
   async (): Promise<ChatDirectoryBundle> => {
@@ -350,177 +211,6 @@ const getCapabilityLabel = (t: TranslateFn, capability: ToolCapability): string 
   }
 };
 
-const isFriendlyProviderErrorMessage = (
-  t: TranslateFn,
-  content?: string,
-): boolean => {
-  const normalized = content?.trim();
-  if (!normalized) {
-    return false;
-  }
-
-  const friendlyMessages = new Set([
-    t('chat.providerAuthError'),
-    t('chat.providerModelMissing'),
-    t('chat.providerBusy'),
-    t('chat.providerTimeout'),
-    t('chat.providerConnectionFailed'),
-    t('chat.providerResponseInvalid'),
-    t('chat.providerUnavailable'),
-  ]);
-  return friendlyMessages.has(normalized);
-};
-
-const normalizeAssistantErrorContent = (
-  t: TranslateFn,
-  content?: string,
-): {
-  content: string;
-  isProviderError: boolean;
-} => {
-  const normalized = content?.trim() || '';
-  if (!normalized) {
-    return { content: '', isProviderError: false };
-  }
-  if (isFriendlyProviderErrorMessage(t, normalized)) {
-    return { content: normalized, isProviderError: true };
-  }
-
-  const lower = normalized.toLowerCase();
-  if (
-    lower.includes('invalid response object') ||
-    lower.includes('received_args=') ||
-    lower.includes('openaiexception') ||
-    lower.includes('modelresponse(') ||
-    lower.includes('error calling llm') ||
-    lower.includes('litellm.')
-  ) {
-    return { content: t('chat.providerResponseInvalid'), isProviderError: true };
-  }
-  if (
-    lower.includes('unauthorized') ||
-    lower.includes('invalid api key') ||
-    lower.includes('incorrect api key') ||
-    lower.includes('forbidden')
-  ) {
-    return { content: t('chat.providerAuthError'), isProviderError: true };
-  }
-  if (lower.includes('model not found') || lower.includes('404')) {
-    return { content: t('chat.providerModelMissing'), isProviderError: true };
-  }
-  if (
-    lower.includes('rate limit') ||
-    lower.includes('too many requests') ||
-    lower.includes('overloaded') ||
-    lower.includes('负载较高')
-  ) {
-    return { content: t('chat.providerBusy'), isProviderError: true };
-  }
-  if (
-    lower.includes('timeout') ||
-    lower.includes('timed out') ||
-    lower.includes('readtimeout') ||
-    lower.includes('connecttimeout')
-  ) {
-    return { content: t('chat.providerTimeout'), isProviderError: true };
-  }
-
-  return { content: normalized, isProviderError: false };
-};
-
-const normalizeProviderErrorPayload = (value: unknown): ProviderErrorInfo | null => {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-  const item = value as Record<string, unknown>;
-  return {
-    error_code: typeof item.error_code === 'string' ? item.error_code : undefined,
-    error_kind: typeof item.error_kind === 'string' ? item.error_kind : undefined,
-    remediation: Array.isArray(item.remediation)
-      ? item.remediation.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-      : undefined,
-    retryable: typeof item.retryable === 'boolean' ? item.retryable : undefined,
-  };
-};
-
-const resolveStreamFailureMessage = (
-  t: TranslateFn,
-  error: unknown,
-): {
-  content: string;
-  errorKind: 'network' | 'timeout' | 'stream';
-} => {
-  if (error instanceof ChatStreamError) {
-    if (error.code === 'timeout') {
-      return {
-        content: t('chat.streamTimeoutMessage'),
-        errorKind: 'timeout',
-      };
-    }
-    if (error.code === 'http') {
-      return {
-        content: t('chat.streamHttpErrorMessage'),
-        errorKind: 'stream',
-      };
-    }
-  }
-
-  return {
-    content: t('chat.streamNetworkErrorMessage'),
-    errorKind: 'network',
-  };
-};
-
-const cleanHistoryMessageContent = (content: string): string => {
-  if (!content) return content;
-
-  const messageFromPattern = /<message\s+from="[^"]*">\s*([\s\S]*?)\s*<\/message>/gi;
-  return content.replace(
-    messageFromPattern,
-    (fullMatch: string, innerContent: string, offset: number, source: string) => {
-      const remaining = source.slice(offset + fullMatch.length).trim();
-      return `${innerContent.trim()}${remaining ? '\n\n' : ''}`;
-    },
-  ).trim();
-};
-
-const buildHistoryMessageFallbackId = (msg: {
-  role: string;
-  content: string;
-  timestamp?: string;
-  metadata?: { agent_id?: string; agent_name?: string; turn_id?: string; request_id?: string };
-}): string => {
-  const source = JSON.stringify({
-    role: msg.role || '',
-    content: cleanHistoryMessageContent(msg.content || ''),
-    timestamp: msg.timestamp || '',
-    agentId: msg.metadata?.agent_id || '',
-    agentName: msg.metadata?.agent_name || '',
-    turnId: msg.metadata?.turn_id || '',
-    requestId: msg.metadata?.request_id || '',
-  });
-
-  let hash = 0;
-  for (let i = 0; i < source.length; i += 1) {
-    hash = ((hash << 5) - hash + source.charCodeAt(i)) | 0;
-  }
-  return `legacy-${Math.abs(hash).toString(36)}`;
-};
-
-const toAbsoluteApiUrl = (value?: string): string | undefined => {
-  if (!value) {
-    return undefined;
-  }
-  if (/^https?:\/\//i.test(value)) {
-    return value;
-  }
-  const apiBase = resolveApiBase();
-  if (!apiBase) {
-    return value;
-  }
-  return `${apiBase}${value.startsWith('/') ? value : `/${value}`}`;
-};
-
 const resolveChatWebSocketUrl = (): string => {
   const apiBase = resolveApiBase();
   if (apiBase) {
@@ -536,295 +226,6 @@ const resolveChatWebSocketUrl = (): string => {
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.toString();
 };
-
-const buildConversationMessagesUrl = (
-  conversationId: string,
-  options: {
-    limit?: number;
-    beforeId?: string;
-    afterId?: string;
-    aroundId?: string;
-    contextBefore?: number;
-    contextAfter?: number;
-  } = {},
-): string => {
-  const params = new URLSearchParams();
-  if (options.limit) {
-    params.set('limit', String(options.limit));
-  }
-  if (options.beforeId) {
-    params.set('before_id', options.beforeId);
-  }
-  if (options.afterId) {
-    params.set('after_id', options.afterId);
-  }
-  if (options.aroundId) {
-    params.set('around_id', options.aroundId);
-  }
-  if (typeof options.contextBefore === 'number') {
-    params.set('context_before', String(options.contextBefore));
-  }
-  if (typeof options.contextAfter === 'number') {
-    params.set('context_after', String(options.contextAfter));
-  }
-
-  const query = params.toString();
-  return `/api/conversations/${conversationId}/messages${query ? `?${query}` : ''}`;
-};
-
-const buildConversationSearchUrl = (
-  conversationId: string,
-  query: string,
-  options: {
-    limit?: number;
-    offset?: number;
-    since?: string;
-  } = {},
-): string => {
-  const params = new URLSearchParams();
-  params.set('q', query);
-  if (options.limit) {
-    params.set('limit', String(options.limit));
-  }
-  if (typeof options.offset === 'number' && options.offset > 0) {
-    params.set('offset', String(options.offset));
-  }
-  if (options.since) {
-    params.set('since', options.since);
-  }
-  return `/api/conversations/${conversationId}/search?${params.toString()}`;
-};
-
-const normalizeMessageFile = (value: unknown): MessageFile | null => {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-
-  const file = value as Record<string, unknown>;
-  const fileId = typeof file.fileId === 'string'
-    ? file.fileId
-    : typeof file.file_id === 'string'
-      ? file.file_id
-      : '';
-
-  if (!fileId) {
-    return null;
-  }
-
-  const url = typeof file.url === 'string' ? file.url : '';
-  const previewUrlValue = typeof file.previewUrl === 'string'
-    ? file.previewUrl
-    : typeof file.preview_url === 'string'
-      ? file.preview_url
-      : undefined;
-
-  return {
-    fileId,
-    filename: typeof file.filename === 'string' ? file.filename : '',
-    originalName: typeof file.originalName === 'string'
-      ? file.originalName
-      : typeof file.original_name === 'string'
-        ? file.original_name
-        : '',
-    storedFilename: typeof file.storedFilename === 'string'
-      ? file.storedFilename
-      : typeof file.stored_filename === 'string'
-        ? file.stored_filename
-        : undefined,
-    mimeType: typeof file.mimeType === 'string'
-      ? file.mimeType
-      : typeof file.mime_type === 'string'
-        ? file.mime_type
-        : 'application/octet-stream',
-    size: typeof file.size === 'number' ? file.size : 0,
-    category: typeof file.category === 'string' ? file.category : 'document',
-    url: toAbsoluteApiUrl(url) || url,
-    previewUrl: toAbsoluteApiUrl(previewUrlValue),
-    localPreview: typeof file.localPreview === 'string' ? file.localPreview : undefined,
-    minimaxFileId: typeof file.minimaxFileId === 'string'
-      ? file.minimaxFileId
-      : typeof file.minimax_file_id === 'string'
-        ? file.minimax_file_id
-        : undefined,
-    extractedText: typeof file.extractedText === 'string'
-      ? file.extractedText
-      : typeof file.extracted_text === 'string'
-        ? file.extracted_text
-        : undefined,
-  };
-};
-
-const normalizeMessageFiles = (value: unknown): MessageFile[] | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  const files = value
-    .map((item) => normalizeMessageFile(item))
-    .filter((item): item is MessageFile => !!item);
-  return files.length > 0 ? files : undefined;
-};
-
-const hasRenderableMessageFiles = (value: unknown): boolean => {
-  const files = normalizeMessageFiles(value);
-  return Boolean(files && files.length > 0);
-};
-
-const serializeMessageFiles = (files?: MessageFile[]): UploadedFile[] | undefined => {
-  if (!files || files.length === 0) {
-    return undefined;
-  }
-  return files.map((file) => ({
-    file_id: file.fileId,
-    filename: file.filename,
-    original_name: file.originalName,
-    stored_filename: file.storedFilename,
-    mime_type: file.mimeType,
-    size: file.size,
-    category: file.category,
-    url: file.url,
-    preview_url: file.previewUrl,
-    minimax_file_id: file.minimaxFileId,
-    extracted_text: file.extractedText,
-  }));
-};
-
-const buildMessageMergeKey = (message: Pick<
-  UIMessage,
-  'role' | 'content' | 'timestamp' | 'agentId' | 'agentName' | 'turnId' | 'requestId'
->): string => {
-  const compactContent = cleanHistoryMessageContent(message.content || '').replace(/\s+/g, ' ').trim();
-  return JSON.stringify({
-    role: message.role,
-    content: compactContent,
-    timestamp: message.timestamp || '',
-    agentId: message.agentId || '',
-    agentName: message.agentName || '',
-    turnId: message.turnId || '',
-    requestId: message.requestId || '',
-  });
-};
-
-const doesHistoryMessageReplaceStreamEntry = (
-  message: Pick<UIMessage, 'id' | 'turnId' | 'agentId'>,
-  streamEntry: Pick<StreamMessageEntry, 'messageId' | 'turnId' | 'agentId'>,
-): boolean => {
-  if (message.id === streamEntry.messageId) {
-    return true;
-  }
-  if (!streamEntry.turnId || !message.turnId || message.turnId !== streamEntry.turnId) {
-    return false;
-  }
-  if (!streamEntry.agentId) {
-    return true;
-  }
-  return message.agentId === streamEntry.agentId;
-};
-
-const findReplacedStreamEntries = (
-  historyMessages: UIMessage[],
-  streamEntries: StreamMessageEntry[],
-): StreamMessageEntry[] => {
-  if (historyMessages.length === 0 || streamEntries.length === 0) {
-    return [];
-  }
-
-  return streamEntries.filter((streamEntry) => (
-    historyMessages.some((message) => doesHistoryMessageReplaceStreamEntry(message, streamEntry))
-  ));
-};
-
-const groupMessagesBySpeaker = (messages: UIMessage[]): UIMessage[][] => {
-  if (messages.length === 0) return [];
-
-  const groups: UIMessage[][] = [];
-  let currentGroup: UIMessage[] = [messages[0]];
-
-  for (let i = 1; i < messages.length; i += 1) {
-    const current = messages[i];
-    const previous = currentGroup[currentGroup.length - 1];
-    const sameRole = current.role === previous.role;
-    const sameAgent = current.agentId === previous.agentId;
-    const currentRequestId = current.requestId || '';
-    const previousRequestId = previous.requestId || '';
-    const sameRequest = !currentRequestId || !previousRequestId || currentRequestId === previousRequestId;
-    if (sameRole && sameAgent && sameRequest) {
-      currentGroup.push(current);
-    } else {
-      groups.push(currentGroup);
-      currentGroup = [current];
-    }
-  }
-
-  groups.push(currentGroup);
-  return groups;
-};
-
-const parseMessageTimestamp = (timestamp?: string): number | null => {
-  if (!timestamp) {
-    return null;
-  }
-
-  const value = Date.parse(timestamp);
-  return Number.isNaN(value) ? null : value;
-};
-
-const normalizeSearchText = (value?: string): string => (
-  (value || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-);
-
-const buildSearchPreview = (value?: string, maxLength: number = 96): string => {
-  const normalized = (value || '').replace(/\s+/g, ' ').trim();
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return `${normalized.slice(0, Math.max(1, maxLength - 1))}…`;
-};
-
-const findHistorySearchMatchIndexByMessageId = (
-  matches: HistorySearchMatch[],
-  messageId: string,
-): number => matches.findIndex((match) => match.messageIds.includes(messageId));
-
-const estimateConversationTokens = (messages: UIMessage[]): number => {
-  const totalChars = messages.reduce((sum, message) => (
-    sum + cleanHistoryMessageContent(message.content || '').length
-  ), 0);
-  return Math.ceil(totalChars / 4);
-};
-
-const formatApproxTokenCount = (count: number): string => (
-  count >= 1000 ? `${Math.round(count / 1000)}k` : `${count}`
-);
-
-const findTurnVirtualRangeIndex = (offsets: number[], target: number): number => {
-  let low = 0;
-  let high = offsets.length - 1;
-  let bestIndex = 0;
-
-  while (low <= high) {
-    const mid = Math.floor((low + high) / 2);
-    if (offsets[mid] <= target) {
-      bestIndex = mid;
-      low = mid + 1;
-    } else {
-      high = mid - 1;
-    }
-  }
-
-  return bestIndex;
-};
-
-const resolveTurnRequestId = (turn: MessageTurn): string | undefined => (
-  [...turn.assistantMessages].reverse().find((message) => !!message.requestId)?.requestId
-  || turn.userMessage?.requestId
-);
-
-const formatRequestIdBadge = (requestId?: string): string => (
-  requestId ? requestId.slice(0, 8) : ''
-);
 
 const shouldBootstrapRealtimeStreamEntry = (eventType: string): boolean => (
   eventType === 'thinking'
@@ -878,501 +279,6 @@ const getRealtimeBootstrapStatusMessage = (
 
   return t('chat.streamingInput');
 };
-
-const hasLegacyTimeBoundary = (
-  currentTurn: MessageTurnAccumulator,
-  message: UIMessage,
-): boolean => {
-  if (message.requestId || currentTurn.assistantMessages.length === 0) {
-    return false;
-  }
-
-  const hasAssistantRequestIds = currentTurn.assistantMessages.some((item) => !!item.requestId);
-  if (hasAssistantRequestIds) {
-    return false;
-  }
-
-  const previousAssistant = currentTurn.assistantMessages[currentTurn.assistantMessages.length - 1];
-  const previousTimestamp = parseMessageTimestamp(previousAssistant.timestamp);
-  const currentTimestamp = parseMessageTimestamp(message.timestamp);
-  if (previousTimestamp === null || currentTimestamp === null) {
-    return false;
-  }
-
-  const timeDelta = currentTimestamp - previousTimestamp;
-  return timeDelta < 0 || timeDelta > 2 * 60 * 1000;
-};
-
-const buildMessageTurns = (messages: UIMessage[]): MessageTurn[] => {
-  const turns: MessageTurn[] = [];
-  let currentTurn: MessageTurnAccumulator | null = null;
-
-  const finalizeTurn = (turn: MessageTurnAccumulator | null) => {
-    if (!turn) {
-      return;
-    }
-
-    turn.responseGroups = groupMessagesBySpeaker(turn.assistantMessages);
-    turn.relayCount = turn.responseGroups.filter((group) => group[0]?.role === 'assistant').length;
-    turns.push({
-      id: turn.id,
-      userMessage: turn.userMessage,
-      assistantMessages: turn.assistantMessages,
-      responseGroups: turn.responseGroups,
-      hasError: turn.hasError,
-      relayCount: turn.relayCount,
-      participantAgentIds: turn.participantAgentIds,
-    });
-  };
-
-  const createTurn = (message: UIMessage): MessageTurnAccumulator => ({
-    id: message.requestId || message.turnId || message.id,
-    userMessage: message.role === 'user' ? message : undefined,
-    assistantMessages: message.role === 'assistant' ? [message] : [],
-    responseGroups: [],
-    hasError: !!message.isError,
-    relayCount: 0,
-    participantAgentIds: message.agentId ? [message.agentId] : [],
-    requestIds: new Set(message.requestId ? [message.requestId] : []),
-  });
-
-  for (const message of messages) {
-    if (message.role === 'user') {
-      finalizeTurn(currentTurn);
-      currentTurn = createTurn(message);
-      continue;
-    }
-
-    if (!currentTurn) {
-      currentTurn = createTurn(message);
-      continue;
-    }
-
-    const shouldSplitOnRequestBoundary = Boolean(
-      currentTurn.userMessage &&
-      message.requestId &&
-      currentTurn.assistantMessages.length > 0 &&
-      currentTurn.requestIds.size > 0 &&
-      !currentTurn.requestIds.has(message.requestId),
-    );
-
-    if (shouldSplitOnRequestBoundary) {
-      finalizeTurn(currentTurn);
-      currentTurn = createTurn(message);
-      continue;
-    }
-
-    if (hasLegacyTimeBoundary(currentTurn, message)) {
-      finalizeTurn(currentTurn);
-      currentTurn = createTurn(message);
-      continue;
-    }
-
-    currentTurn.assistantMessages.push(message);
-    currentTurn.hasError = currentTurn.hasError || !!message.isError;
-    if (message.requestId) {
-      currentTurn.requestIds.add(message.requestId);
-    }
-    if (message.agentId && !currentTurn.participantAgentIds.includes(message.agentId)) {
-      currentTurn.participantAgentIds.push(message.agentId);
-    }
-  }
-
-  finalizeTurn(currentTurn);
-
-  return turns;
-};
-
-const attachRetryPayloadsToHistoryMessages = (messages: UIMessage[]): UIMessage[] => {
-  const turns = buildMessageTurns(messages);
-  const retryPayloadByMessageId = new Map<string, NonNullable<UIMessage['retryPayload']>>();
-
-  turns.forEach((turn) => {
-    if (!turn.userMessage) {
-      return;
-    }
-
-    const retryPayload = {
-      content: turn.userMessage.content,
-      mentionedAgents: [] as string[],
-      files: turn.userMessage.files,
-    };
-
-    turn.assistantMessages.forEach((message) => {
-      if (message.isError && message.retryable) {
-        retryPayloadByMessageId.set(message.id, retryPayload);
-      }
-    });
-  });
-
-  return messages.map((message) => {
-    const retryPayload = retryPayloadByMessageId.get(message.id);
-    if (!retryPayload || message.retryPayload) {
-      return message;
-    }
-    return {
-      ...message,
-      retryPayload,
-    };
-  });
-};
-
-const parseRelayGroupKey = (value: string | null): PendingRelayJump | null => {
-  if (!value) return null;
-  const separatorIndex = value.lastIndexOf(':');
-  if (separatorIndex <= 0) {
-    return null;
-  }
-
-  const turnId = value.slice(0, separatorIndex);
-  const groupIndex = Number.parseInt(value.slice(separatorIndex + 1), 10);
-  if (Number.isNaN(groupIndex)) {
-    return null;
-  }
-
-  return { turnId, groupIndex };
-};
-
-const getRelayGroupState = (group: UIMessage[]): RelayGroupState => {
-  if (group.some((message) => message.isError)) {
-    return 'error';
-  }
-  if (group.some((message) => message.metadata?._relay_phase === 'pending')) {
-    return 'waiting';
-  }
-  if (group.some((message) => message.isStreaming || message.isThinking)) {
-    return 'active';
-  }
-  return 'done';
-};
-
-const getMessageMetadataString = (message: UIMessage, key: string): string | undefined => {
-  const value = message.metadata?.[key];
-  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
-};
-
-const getRelayGroupTransition = (
-  group: UIMessage[],
-  getAgentName: (agentId?: string) => string | undefined,
-): {
-  sourceName?: string;
-  targetName?: string;
-  conversationType?: string;
-  handoffMode?: string;
-} => {
-  const firstMessage = group[0];
-  return {
-    sourceName: getMessageMetadataString(firstMessage, 'handoff_from_name')
-      || getMessageMetadataString(firstMessage, 'source_name'),
-    targetName: firstMessage.agentName
-      || getMessageMetadataString(firstMessage, 'handoff_to_name')
-      || getMessageMetadataString(firstMessage, 'target_name')
-      || getAgentName(firstMessage.agentId),
-    conversationType: getMessageMetadataString(firstMessage, 'conversation_type'),
-    handoffMode: getMessageMetadataString(firstMessage, 'handoff_mode'),
-  };
-};
-
-const MAX_VISIBLE_RELAY_GROUPS_WITHOUT_COLLAPSE = 4;
-
-const getDefaultVisibleRelayGroupIndexes = (
-  turn: MessageTurn,
-  options: {
-    highlightedGroupIndex?: number | null;
-    pendingJumpGroupIndex?: number | null;
-    interruptedGroupIndex?: number | null;
-  } = {},
-): Set<number> => {
-  const visibleIndexes = new Set<number>();
-  const lastIndex = turn.responseGroups.length - 1;
-
-  if (turn.responseGroups.length <= MAX_VISIBLE_RELAY_GROUPS_WITHOUT_COLLAPSE) {
-    turn.responseGroups.forEach((_, groupIndex) => {
-      visibleIndexes.add(groupIndex);
-    });
-  }
-
-  if (lastIndex >= 0) {
-    visibleIndexes.add(lastIndex);
-  }
-
-  turn.responseGroups.forEach((group, groupIndex) => {
-    const state = getRelayGroupState(group);
-    if (state === 'error' || state === 'active' || state === 'waiting') {
-      visibleIndexes.add(groupIndex);
-    }
-  });
-
-  if (options.highlightedGroupIndex !== undefined && options.highlightedGroupIndex !== null && options.highlightedGroupIndex >= 0) {
-    visibleIndexes.add(options.highlightedGroupIndex);
-  }
-  if (options.pendingJumpGroupIndex !== undefined && options.pendingJumpGroupIndex !== null && options.pendingJumpGroupIndex >= 0) {
-    visibleIndexes.add(options.pendingJumpGroupIndex);
-  }
-  if (options.interruptedGroupIndex !== undefined && options.interruptedGroupIndex !== null && options.interruptedGroupIndex >= 0) {
-    visibleIndexes.add(options.interruptedGroupIndex);
-  }
-
-  return visibleIndexes;
-};
-
-const buildRelayRenderItems = (
-  groups: UIMessage[][],
-  visibleIndexes: Set<number>,
-  getGroupLabel: (group: UIMessage[], index: number) => string,
-): RelayRenderItem[] => {
-  const items: RelayRenderItem[] = [];
-
-  let groupIndex = 0;
-  while (groupIndex < groups.length) {
-    if (visibleIndexes.has(groupIndex)) {
-      items.push({
-        type: 'group',
-        key: `group:${groupIndex}:${groups[groupIndex][0]?.id || groupIndex}`,
-        group: groups[groupIndex],
-        groupIndex,
-      });
-      groupIndex += 1;
-      continue;
-    }
-
-    const startIndex = groupIndex;
-    const labels: string[] = [];
-
-    while (groupIndex < groups.length && !visibleIndexes.has(groupIndex)) {
-      const label = getGroupLabel(groups[groupIndex], groupIndex);
-      if (!labels.includes(label)) {
-        labels.push(label);
-      }
-      groupIndex += 1;
-    }
-
-    const endIndex = groupIndex - 1;
-    items.push({
-      type: 'summary',
-      key: `summary:${startIndex}-${endIndex}`,
-      hiddenCount: endIndex - startIndex + 1,
-      startIndex,
-      endIndex,
-      labels,
-    });
-  }
-
-  return items;
-};
-
-const isRelaySegmentStart = (
-  segments: ExpandedRelaySegment[],
-  groupIndex: number,
-): ExpandedRelaySegment | null => {
-  return segments.find((segment) => segment.startIndex === groupIndex) || null;
-};
-
-const formatAgentNamesForStatus = (
-  t: TranslateFn,
-  names: string[],
-): string => {
-  if (names.length === 0) return '';
-  if (names.length === 1) return names[0];
-  if (names.length === 2) return t('chat.agentNamesTwo', { first: names[0], second: names[1] });
-  return t('chat.agentNamesMany', { first: names[0], count: names.length });
-};
-
-const buildInterruptSummary = (
-  t: TranslateFn,
-  activeAgentName?: string,
-  pendingAgentNames: string[] = [],
-): string => {
-  if (activeAgentName && pendingAgentNames.length > 0) {
-    return t('chat.interruptSummaryActivePending', {
-      active: activeAgentName,
-      pending: formatAgentNamesForStatus(t, pendingAgentNames),
-    });
-  }
-  if (activeAgentName) {
-    return t('chat.interruptSummaryActive', { active: activeAgentName });
-  }
-  if (pendingAgentNames.length > 0) {
-    return t('chat.interruptSummaryPending', {
-      pending: formatAgentNamesForStatus(t, pendingAgentNames),
-    });
-  }
-  return t('chat.interruptSummaryGeneric');
-};
-
-const buildRequestPreview = (
-  t: TranslateFn,
-  content: string,
-  maxLength = 18,
-): string => {
-  const normalized = content.replace(/\s+/g, ' ').trim();
-  if (!normalized) {
-    return t('chat.requestPreviewFallback');
-  }
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return `${normalized.slice(0, Math.max(1, maxLength - 1))}…`;
-};
-
-const normalizeExecutionStepStatus = (status?: string): ExecutionStep['status'] => {
-  switch (status) {
-    case 'running':
-    case 'completed':
-    case 'failed':
-    case 'pending':
-    case 'stopped':
-    case 'skipped':
-    case 'error':
-    case 'success':
-      return status;
-    default:
-      return 'completed';
-  }
-};
-
-const inferExecutionStepType = (
-  fallbackType?: string,
-  details?: Record<string, unknown>,
-): string => {
-  if (fallbackType) {
-    return fallbackType;
-  }
-  if (details?.toolName || details?.tool_name) {
-    return 'tool_call';
-  }
-  if (typeof details?.thinking === 'string') {
-    return 'thinking';
-  }
-  if (typeof details?.content === 'string') {
-    return 'response';
-  }
-  return 'step';
-};
-
-const inferExecutionStepTitle = (
-  t: TranslateFn,
-  type?: string,
-  title?: string,
-  details?: Record<string, unknown>,
-): string => {
-  if (title) {
-    return title;
-  }
-
-  const normalizedType = (type || '').toLowerCase();
-  const toolName = typeof details?.toolName === 'string'
-    ? details.toolName
-    : (typeof details?.tool_name === 'string' ? details.tool_name : '');
-
-  if (normalizedType.includes('tool') && toolName) {
-    return t('chat.executionToolNamed', { name: toolName });
-  }
-  if (normalizedType.includes('thinking')) {
-    return t('chat.executionThinking');
-  }
-  if (normalizedType.includes('response')) {
-    return t('chat.executionResponding');
-  }
-  if (normalizedType.includes('compression')) {
-    return t('chat.executionCompressing');
-  }
-  return t('chat.executionStep');
-};
-
-const mergeExecutionSteps = (
-  existingSteps: ExecutionStep[] = [],
-  incomingSteps: ExecutionStep[] = [],
-  fallbackTitle = 'Step',
-): ExecutionStep[] => {
-  if (incomingSteps.length === 0) {
-    return existingSteps;
-  }
-  if (existingSteps.length === 0) {
-    return incomingSteps;
-  }
-
-  const mergedSteps = [...existingSteps];
-  const indexById = new Map<string, number>();
-  mergedSteps.forEach((step, index) => {
-    indexById.set(step.id, index);
-  });
-
-  incomingSteps.forEach((step) => {
-    const existingIndex = indexById.get(step.id);
-    if (existingIndex === undefined) {
-      indexById.set(step.id, mergedSteps.length);
-      mergedSteps.push(step);
-      return;
-    }
-
-    const previous = mergedSteps[existingIndex];
-      mergedSteps[existingIndex] = {
-      ...previous,
-      ...step,
-      type: inferExecutionStepType(step.type || previous.type, step.details || previous.details),
-      title: step.title || previous.title || fallbackTitle,
-      status: normalizeExecutionStepStatus(step.status || previous.status),
-      timestamp: previous.timestamp || step.timestamp,
-      details: step.details ?? previous.details,
-    };
-  });
-
-  return mergedSteps;
-};
-
-const upsertExecutionStep = (
-  steps: ExecutionStep[] = [],
-  step: ExecutionStep,
-  fallbackTitle = 'Step',
-): ExecutionStep[] => mergeExecutionSteps(steps, [{
-  ...step,
-  type: inferExecutionStepType(step.type, step.details),
-  title: step.title || fallbackTitle,
-  status: normalizeExecutionStepStatus(step.status),
-}], fallbackTitle);
-
-const updateLatestRunningExecutionStep = (
-  steps: ExecutionStep[] = [],
-  matcher: (step: ExecutionStep) => boolean,
-  detailUpdates: Record<string, unknown>,
-  nextStatus?: ExecutionStep['status'],
-): ExecutionStep[] => {
-  const nextSteps = [...steps];
-  for (let index = nextSteps.length - 1; index >= 0; index -= 1) {
-    const step = nextSteps[index];
-    if ((step.status === 'running' || step.status === 'pending') && matcher(step)) {
-      nextSteps[index] = {
-        ...step,
-        status: nextStatus ?? step.status,
-        details: {
-          ...(step.details || {}),
-          ...detailUpdates,
-        },
-      };
-      return nextSteps;
-    }
-  }
-  return steps;
-};
-
-const finalizeRunningExecutionSteps = (
-  steps: ExecutionStep[] = [],
-  status: ExecutionStep['status'],
-  detailUpdates: Record<string, unknown> = {},
-): ExecutionStep[] => steps.map((step) => {
-  if (step.status !== 'running' && step.status !== 'pending') {
-    return step;
-  }
-  return {
-    ...step,
-    status,
-    details: {
-      ...(step.details || {}),
-      ...detailUpdates,
-    },
-  };
-});
 
 const ChatIconButton: React.FC<{
   label: string;
@@ -1460,9 +366,6 @@ const ChatPage: React.FC = () => {
   const [isRemoteHistorySearchLoadingMore, setIsRemoteHistorySearchLoadingMore] = useState(false);
   const [activeRemoteHistoryResultId, setActiveRemoteHistoryResultId] = useState<string | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
-  const [turnViewportState, setTurnViewportState] = useState({ scrollTop: 0, height: 0 });
-  const [turnListOffsetTop, setTurnListOffsetTop] = useState(0);
-  const [turnHeightVersion, setTurnHeightVersion] = useState(0);
 
   const directAgents = useMemo(
     () => [...agents, ...externalAgents],
@@ -1485,7 +388,6 @@ const ChatPage: React.FC = () => {
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const turnListContainerRef = useRef<HTMLDivElement>(null);
   const historySearchInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentRequestIdRef = useRef<string | null>(null);
@@ -1524,9 +426,6 @@ const ChatPage: React.FC = () => {
   const bottomStickConversationIdRef = useRef<string | null>(null);
   const bottomStickReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bottomStickDelayedTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const virtualizedTurnHeightsRef = useRef<Record<string, number>>({});
-  const virtualizedTurnElementsRef = useRef(new Map<string, HTMLDivElement>());
-  const virtualizedTurnResizeObserverRef = useRef<ResizeObserver | null>(null);
   const relayStatusSnapshotRef = useRef<RelayStatusSnapshot>({
     pendingAgentNames: [],
     activeAgentNames: [],
@@ -1707,9 +606,6 @@ const ChatPage: React.FC = () => {
       relayHistoryRefreshStopTimersRef.current.clear();
       conversationReconcileTimersRef.current.forEach((timerIds) => timerIds.forEach((timerId) => clearTimeout(timerId)));
       conversationReconcileTimersRef.current.clear();
-      virtualizedTurnResizeObserverRef.current?.disconnect();
-      virtualizedTurnResizeObserverRef.current = null;
-      virtualizedTurnElementsRef.current.clear();
     };
   }, []);
 
@@ -1797,133 +693,21 @@ const ChatPage: React.FC = () => {
   ) => upsertExecutionStep(steps, step, executionStepFallbackTitle), [executionStepFallbackTitle]);
 
   const mergeConversationHistory = useCallback((historyMessages: UIMessage[], existingMessages: UIMessage[]) => {
-    const mergedMessages = [...historyMessages];
-    const indexById = new Map<string, number>();
-    const indexBySignature = new Map<string, number>();
-
-    mergedMessages.forEach((message, index) => {
-      indexById.set(message.id, index);
-      indexBySignature.set(buildMessageMergeKey(message), index);
-    });
-
-    existingMessages.forEach((message) => {
-      const signature = buildMessageMergeKey(message);
-      const existingIndex = indexById.get(message.id) ?? indexBySignature.get(signature);
-
-      if (existingIndex !== undefined) {
-        const nextMessage = {
-          ...mergedMessages[existingIndex],
-          ...message,
-          turnId: message.turnId ?? mergedMessages[existingIndex].turnId,
-          requestId: message.requestId ?? mergedMessages[existingIndex].requestId,
-          agentId: message.agentId ?? mergedMessages[existingIndex].agentId,
-          agentName: message.agentName ?? mergedMessages[existingIndex].agentName,
-          timestamp: message.timestamp ?? mergedMessages[existingIndex].timestamp,
-          metadata: message.metadata ?? mergedMessages[existingIndex].metadata,
-          files: message.files ?? mergedMessages[existingIndex].files,
-          executionSteps: mergeLocalizedExecutionSteps(
-            mergedMessages[existingIndex].executionSteps,
-            message.executionSteps,
-          ),
-          retryPayload: message.retryPayload ?? mergedMessages[existingIndex].retryPayload,
-        };
-        mergedMessages[existingIndex] = nextMessage;
-        indexById.set(nextMessage.id, existingIndex);
-        indexBySignature.set(buildMessageMergeKey(nextMessage), existingIndex);
-        return;
-      }
-
-      const nextIndex = mergedMessages.length;
-      mergedMessages.push(message);
-      indexById.set(message.id, nextIndex);
-      indexBySignature.set(signature, nextIndex);
-    });
-
-    return mergedMessages
-      .map((message, index) => ({ message, index }))
-      .sort((left, right) => {
-        const leftTimestamp = parseMessageTimestamp(left.message.timestamp);
-        const rightTimestamp = parseMessageTimestamp(right.message.timestamp);
-
-        if (leftTimestamp === null && rightTimestamp === null) {
-          return left.index - right.index;
-        }
-        if (leftTimestamp === null) {
-          return 1;
-        }
-        if (rightTimestamp === null) {
-          return -1;
-        }
-        if (leftTimestamp === rightTimestamp) {
-          return left.index - right.index;
-        }
-        return leftTimestamp - rightTimestamp;
-      })
-      .map((entry) => entry.message);
+    return mergeConversationHistoryMessages(
+      historyMessages,
+      existingMessages,
+      mergeLocalizedExecutionSteps,
+    );
   }, [mergeLocalizedExecutionSteps]);
 
   const formatConversationHistoryMessages = useCallback((
-    rawMessages: Array<{
-      id?: string;
-      role: string;
-      content: string;
-      timestamp?: string;
-      metadata?: {
-        agent_id?: string;
-        agent_name?: string;
-        turn_id?: string;
-        request_id?: string;
-        _provider_error?: unknown;
-      };
-      files?: unknown[];
-      tool_calls?: unknown[];
-      execution_steps?: ExecutionStep[];
-    }>,
+    rawMessages: RawConversationHistoryMessage[],
   ): UIMessage[] => {
-    const formattedMessages = rawMessages
-      .filter((msg) => {
-        if (msg.role === 'tool') return false;
-        const hasToolCalls = msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
-        const hasContent = msg.content && msg.content.trim();
-        const hasFiles = hasRenderableMessageFiles(msg.files);
-        const hasExecutionSteps = msg.execution_steps && Array.isArray(msg.execution_steps) && msg.execution_steps.length > 0;
-        if (!hasContent && !hasToolCalls && !hasFiles && !hasExecutionSteps) return false;
-        if (msg.content && msg.content.startsWith('Message sent to ')) return false;
-        return true;
-      })
-      .map<UIMessage>((msg) => {
-        const agentId = msg.metadata?.agent_id;
-        let agentName = msg.metadata?.agent_name;
-        if (!agentName || agentName === t('chat.assistantFallback')) {
-          const agent = directAgents.find((a) => a.id === agentId);
-          if (agent) {
-            agentName = agent.name;
-          }
-        }
-        const cleanContent = cleanHistoryMessageContent(msg.content);
-        const normalizedError = msg.role === 'assistant'
-          ? normalizeAssistantErrorContent(t, cleanContent)
-          : { content: cleanContent, isProviderError: false };
-        const providerError = normalizeProviderErrorPayload(msg.metadata?._provider_error);
-        return {
-          id: msg.id || buildHistoryMessageFallbackId(msg),
-          role: msg.role as UIMessage['role'],
-          content: normalizedError.content,
-          timestamp: msg.timestamp,
-          turnId: msg.metadata?.turn_id,
-          requestId: msg.metadata?.request_id,
-          agentId,
-          agentName,
-          files: normalizeMessageFiles(msg.files),
-          executionSteps: mergeLocalizedExecutionSteps([], msg.execution_steps),
-          metadata: msg.metadata,
-          isError: Boolean(providerError) || normalizedError.isProviderError,
-          errorKind: (providerError || normalizedError.isProviderError) ? ('provider' as const) : undefined,
-          retryable: providerError?.retryable ?? normalizedError.isProviderError,
-        };
-      });
-
-    return attachRetryPayloadsToHistoryMessages(formattedMessages);
+    return formatHistoryMessages(rawMessages, {
+      directAgents,
+      mergeExecutionSteps: mergeLocalizedExecutionSteps,
+      t,
+    });
   }, [directAgents, mergeLocalizedExecutionSteps, t]);
 
   const getConversationStreamRegistry = useCallback((conversationId: string) => {
@@ -1973,7 +757,7 @@ const ChatPage: React.FC = () => {
         const response = await fetch(buildConversationMessagesUrl(convId, {
           limit: CONVERSATION_HISTORY_PAGE_SIZE,
           afterId: historyWindowStateRef.current[convId]?.newestMessageId,
-        }));
+        }), { cache: 'no-store' });
         const data = await response.json();
         let historyMessages = Array.isArray(data.messages)
           ? formatConversationHistoryMessages(data.messages)
@@ -1984,7 +768,7 @@ const ChatPage: React.FC = () => {
         if (snapshot.length > 0 && replacedStreamEntries.length === 0) {
           const latestResponse = await fetch(buildConversationMessagesUrl(convId, {
             limit: CONVERSATION_HISTORY_PAGE_SIZE,
-          }));
+          }), { cache: 'no-store' });
           const latestData = await latestResponse.json();
           const latestHistoryMessages = Array.isArray(latestData.messages)
             ? formatConversationHistoryMessages(latestData.messages)
@@ -2152,50 +936,6 @@ const ChatPage: React.FC = () => {
   }, [currentConversationId]);
 
   useEffect(() => {
-    const container = chatContainerRef.current;
-    if (!container) {
-      return;
-    }
-
-    let frameId: number | null = null;
-    const updateScrollState = () => {
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-      setIsNearBottom(distanceFromBottom < 120);
-      setTurnViewportState((prev) => (
-        prev.scrollTop === container.scrollTop && prev.height === container.clientHeight
-          ? prev
-          : { scrollTop: container.scrollTop, height: container.clientHeight }
-      ));
-    };
-
-    const scheduleUpdateScrollState = () => {
-      if (frameId !== null) {
-        return;
-      }
-      frameId = window.requestAnimationFrame(() => {
-        frameId = null;
-        updateScrollState();
-      });
-    };
-
-    updateScrollState();
-    container.addEventListener('scroll', scheduleUpdateScrollState, { passive: true });
-
-    const resizeObserver = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(() => scheduleUpdateScrollState())
-      : null;
-    resizeObserver?.observe(container);
-
-    return () => {
-      container.removeEventListener('scroll', scheduleUpdateScrollState);
-      resizeObserver?.disconnect();
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-      }
-    };
-  }, [currentConversationId]);
-
-  useEffect(() => {
     if (!currentConversationId) {
       return;
     }
@@ -2261,7 +1001,7 @@ const ChatPage: React.FC = () => {
       return;
     }
     stickConversationToBottom(currentConversationId, 2);
-  }, [currentConversationId, stickConversationToBottom, turnHeightVersion]);
+  }, [currentConversationId, stickConversationToBottom]);
   
   useEffect(() => {
     const initialize = async () => {
@@ -2421,12 +1161,34 @@ const ChatPage: React.FC = () => {
           aroundId: effectiveMode === 'around' ? options.aroundId : undefined,
           contextBefore: effectiveMode === 'around' ? CONVERSATION_HISTORY_SEARCH_CONTEXT : undefined,
           contextAfter: effectiveMode === 'around' ? CONVERSATION_HISTORY_SEARCH_CONTEXT : undefined,
-        }));
-        const data = await response.json();
+        }), { cache: 'no-store' });
+        let data = await response.json();
 
         if (data.messages && Array.isArray(data.messages)) {
-          const formattedMessages = formatConversationHistoryMessages(data.messages);
           const latestExistingMessages = getMessages(convId) as UIMessage[];
+          let formattedMessages = formatConversationHistoryMessages(data.messages);
+          let page = (data.page || {}) as ConversationHistoryPage;
+
+          // If the incremental anchor came from a transient streaming message or
+          // an older cached window, the backend cannot find it and returns an
+          // empty after-window. Fall back to a fresh latest window so refreshes
+          // and module switches never leave the conversation pinned to stale
+          // history.
+          if (
+            effectiveMode === 'after'
+            && formattedMessages.length === 0
+            && (typeof page.total_messages !== 'number' || page.total_messages > 0)
+          ) {
+            const latestResponse = await fetch(buildConversationMessagesUrl(convId, {
+              limit: CONVERSATION_HISTORY_PAGE_SIZE,
+            }), { cache: 'no-store' });
+            data = await latestResponse.json();
+            formattedMessages = Array.isArray(data.messages)
+              ? formatConversationHistoryMessages(data.messages)
+              : [];
+            page = (data.page || {}) as ConversationHistoryPage;
+          }
+
           const nextMessages = effectiveMode === 'around' || effectiveMode === 'initial'
             ? formattedMessages
             : mergeConversationHistory(formattedMessages, latestExistingMessages);
@@ -2436,7 +1198,6 @@ const ChatPage: React.FC = () => {
             stickConversationToBottom(convId);
           }
 
-          const page = (data.page || {}) as ConversationHistoryPage;
           setHistoryWindowStateByConversation((prev) => {
             const previousWindow = prev[convId] || { hasMoreBefore: false, hasMoreAfter: false };
             if (effectiveMode === 'around' || effectiveMode === 'initial') {
@@ -2519,7 +1280,7 @@ const ChatPage: React.FC = () => {
         const response = await fetch(buildConversationMessagesUrl(convId, {
           limit: CONVERSATION_HISTORY_PAGE_SIZE,
           afterId: historyWindowStateRef.current[convId]?.newestMessageId,
-        }));
+        }), { cache: 'no-store' });
         const data = await response.json();
         const rawMessages: Array<Record<string, unknown>> = Array.isArray(data.messages) ? data.messages : [];
         const matchedAssistantMessage = rawMessages.find((message: Record<string, unknown>) => (
@@ -4786,153 +3547,33 @@ const ChatPage: React.FC = () => {
     pendingRelayJump,
   ]);
 
-  useLayoutEffect(() => {
-    const nextOffsetTop = turnListContainerRef.current?.offsetTop || 0;
-    setTurnListOffsetTop((prev) => (prev === nextOffsetTop ? prev : nextOffsetTop));
-  }, [
+  const {
+    turnListContainerRef,
+    turnHeightVersion,
+    turnVirtualizationMetrics,
+    visibleVirtualizedTurnIndexes,
+    registerVirtualizedTurnElement,
+  } = useTurnVirtualization({
+    messageTurns,
+    shouldVirtualizeTurns,
+    scrollContainerRef: chatContainerRef,
+    currentConversationId,
+    currentConversationType: currentConversation?.type,
     canJumpBackToLatest,
-    currentConversation?.id,
-    currentConversation?.type,
     currentConversationHealth,
-    currentHistoryWindow?.hasMoreBefore,
-    messageTurns.length,
-  ]);
+    hasMoreBefore: currentHistoryWindow?.hasMoreBefore,
+    onNearBottomChange: setIsNearBottom,
+  });
 
-  const turnVirtualizationMetrics = useMemo(() => {
-    const rowHeights = messageTurns.map((turn) => (
-      virtualizedTurnHeightsRef.current[turn.id] || TURN_VIRTUALIZATION_ESTIMATED_HEIGHT
-    ));
-    const rowOffsets: number[] = new Array(messageTurns.length);
-    let currentOffset = 0;
-
-    rowHeights.forEach((height, index) => {
-      rowOffsets[index] = currentOffset;
-      currentOffset += height;
-    });
-
-    return {
-      rowHeights,
-      rowOffsets,
-      totalHeight: currentOffset,
-    };
-  }, [messageTurns, turnHeightVersion]);
-
-  const visibleVirtualizedTurnIndexes = useMemo(() => {
-    if (!shouldVirtualizeTurns || messageTurns.length === 0) {
-      return messageTurns.map((_, index) => index);
-    }
-
-    const viewportTop = Math.max(0, turnViewportState.scrollTop - turnListOffsetTop);
-    const viewportBottom = viewportTop + Math.max(1, turnViewportState.height);
-    const { rowHeights, rowOffsets } = turnVirtualizationMetrics;
-    const maxOffset = Math.max(0, turnVirtualizationMetrics.totalHeight - 1);
-    const startIndex = Math.max(
-      0,
-      findTurnVirtualRangeIndex(rowOffsets, Math.min(viewportTop, maxOffset)) - TURN_VIRTUALIZATION_OVERSCAN,
-    );
-
-    let stopIndex = findTurnVirtualRangeIndex(rowOffsets, Math.min(viewportBottom, maxOffset));
-    while (
-      stopIndex < rowHeights.length - 1
-      && rowOffsets[stopIndex] + rowHeights[stopIndex] < viewportBottom
-    ) {
-      stopIndex += 1;
-    }
-    stopIndex = Math.min(rowHeights.length - 1, stopIndex + TURN_VIRTUALIZATION_OVERSCAN);
-
-    const indexes: number[] = [];
-    for (let index = startIndex; index <= stopIndex; index += 1) {
-      indexes.push(index);
-    }
-    return indexes;
-  }, [messageTurns, shouldVirtualizeTurns, turnListOffsetTop, turnViewportState, turnVirtualizationMetrics]);
-
-  useEffect(() => {
-    if (typeof ResizeObserver === 'undefined') {
+  useLayoutEffect(() => {
+    if (!currentConversationId) {
       return;
     }
-
-    const observer = new ResizeObserver((entries) => {
-      let hasHeightChange = false;
-      entries.forEach((entry) => {
-        const element = entry.target as HTMLDivElement;
-        const turnId = element.dataset.turnId;
-        if (!turnId) {
-          return;
-        }
-        const nextHeight = Math.ceil(element.getBoundingClientRect().height);
-        if (!nextHeight || virtualizedTurnHeightsRef.current[turnId] === nextHeight) {
-          return;
-        }
-        virtualizedTurnHeightsRef.current[turnId] = nextHeight;
-        hasHeightChange = true;
-      });
-
-      if (hasHeightChange) {
-        setTurnHeightVersion((prev) => prev + 1);
-      }
-    });
-
-    virtualizedTurnResizeObserverRef.current = observer;
-    virtualizedTurnElementsRef.current.forEach((element) => observer.observe(element));
-
-    return () => {
-      if (virtualizedTurnResizeObserverRef.current === observer) {
-        virtualizedTurnResizeObserverRef.current = null;
-      }
-      observer.disconnect();
-    };
-  }, []);
-
-  useEffect(() => {
-    const activeTurnIds = new Set(messageTurns.map((turn) => turn.id));
-    let removedHeight = false;
-
-    Object.keys(virtualizedTurnHeightsRef.current).forEach((turnId) => {
-      if (activeTurnIds.has(turnId)) {
-        return;
-      }
-      delete virtualizedTurnHeightsRef.current[turnId];
-      removedHeight = true;
-    });
-
-    virtualizedTurnElementsRef.current.forEach((element, turnId) => {
-      if (activeTurnIds.has(turnId)) {
-        return;
-      }
-      virtualizedTurnResizeObserverRef.current?.unobserve(element);
-      virtualizedTurnElementsRef.current.delete(turnId);
-    });
-
-    if (removedHeight) {
-      setTurnHeightVersion((prev) => prev + 1);
-    }
-  }, [messageTurns]);
-
-  const registerVirtualizedTurnElement = useCallback((turnId: string, element: HTMLDivElement | null) => {
-    const existingElement = virtualizedTurnElementsRef.current.get(turnId);
-    if (existingElement === element) {
+    if (bottomStickConversationIdRef.current !== currentConversationId) {
       return;
     }
-
-    if (existingElement) {
-      virtualizedTurnResizeObserverRef.current?.unobserve(existingElement);
-      virtualizedTurnElementsRef.current.delete(turnId);
-    }
-
-    if (!element) {
-      return;
-    }
-
-    virtualizedTurnElementsRef.current.set(turnId, element);
-    virtualizedTurnResizeObserverRef.current?.observe(element);
-
-    const nextHeight = Math.ceil(element.getBoundingClientRect().height);
-    if (nextHeight && virtualizedTurnHeightsRef.current[turnId] !== nextHeight) {
-      virtualizedTurnHeightsRef.current[turnId] = nextHeight;
-      setTurnHeightVersion((prev) => prev + 1);
-    }
-  }, []);
+    stickConversationToBottom(currentConversationId, 2);
+  }, [currentConversationId, stickConversationToBottom, turnHeightVersion]);
 
   const handleHistorySearchMove = useCallback((direction: 'prev' | 'next') => {
     if (historySearchMatches.length === 0) {

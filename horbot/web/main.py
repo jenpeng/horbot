@@ -1,6 +1,7 @@
 """Web server main application."""
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -19,6 +20,16 @@ from horbot.web.websocket import router as websocket_router
 from horbot.utils.paths import get_logs_dir
 
 _channel_manager = None
+
+
+async def _upload_preview_cache_cleanup_loop(interval_seconds: int = 6 * 60 * 60) -> None:
+    """Periodically clean stale upload preview cache while the web server is running."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            api_module.cleanup_upload_preview_cache()
+        except Exception as exc:
+            logger.warning("Periodic upload preview cache cleanup failed: {}", exc)
 
 
 def setup_logging():
@@ -180,12 +191,22 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     setup_logging()
     logger.info("Starting Horbot Web UI...")
+    try:
+        api_module.cleanup_upload_preview_cache()
+    except Exception as exc:
+        logger.warning("Upload preview cache cleanup failed during startup: {}", exc)
+    preview_cleanup_task = asyncio.create_task(_upload_preview_cache_cleanup_loop())
     
     cron_service = api_module.get_cron_service()
     await api_module.setup_cron_callback()
     await cron_service.start()
     
-    yield
+    try:
+        yield
+    finally:
+        preview_cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await preview_cleanup_task
     
     logger.info("Shutting down Horbot Web UI...")
     cron_service.stop()

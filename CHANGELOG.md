@@ -15,6 +15,7 @@ This file summarizes notable Horbot product and documentation changes. For fine-
 
 - Replaced browser-side PPTX layout reconstruction with a LibreOffice-first preview path: PPTX -> PDF -> lazy per-slide PNG
 - Added `GET /api/files/{file_id}/preview-capabilities`, `GET /api/files/{file_id}/preview/slides/{page}`, and `POST /api/files/{file_id}/preview/cleanup`
+- Added automatic cleanup for PPTX slide PNG preview caches after 3 days without use
 - Added `./horbot.sh install libreoffice` and `./horbot.sh check libreoffice`
 - Added PyMuPDF as the page rasterization dependency and upload preview tests for LibreOffice export caching and cleanup
 

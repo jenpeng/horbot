@@ -15,6 +15,7 @@
 
 - PPTX 预览从浏览器侧重建版式改为 LibreOffice 优先链路：PPTX -> PDF -> 按页懒加载 PNG
 - 新增 `GET /api/files/{file_id}/preview-capabilities`、`GET /api/files/{file_id}/preview/slides/{page}`、`POST /api/files/{file_id}/preview/cleanup`
+- 新增 PPTX 页 PNG 预览缓存自动清理，连续 3 天未使用后删除
 - `horbot.sh` 新增 `install libreoffice` 与 `check libreoffice`
 - 新增 PyMuPDF 作为页面栅格化依赖，并补充 LibreOffice 导出缓存与清理相关测试
 
