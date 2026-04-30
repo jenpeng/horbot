@@ -322,6 +322,9 @@ const ChatPage: React.FC = () => {
   const { intlLocale, t } = useI18n();
   const toast = useToast();
   const executionStepFallbackTitle = t('chat.executionStep');
+  const [isConversationHeaderCollapsed, setIsConversationHeaderCollapsed] = useState(() => (
+    window.localStorage.getItem('horbot.chat.conversationHeaderCollapsed') === 'true'
+  ));
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [externalAgents, setExternalAgents] = useState<AgentInfo[]>([]);
   const [teams, setTeams] = useState<TeamInfo[]>([]);
@@ -366,6 +369,13 @@ const ChatPage: React.FC = () => {
   const [isRemoteHistorySearchLoadingMore, setIsRemoteHistorySearchLoadingMore] = useState(false);
   const [activeRemoteHistoryResultId, setActiveRemoteHistoryResultId] = useState<string | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      'horbot.chat.conversationHeaderCollapsed',
+      isConversationHeaderCollapsed ? 'true' : 'false',
+    );
+  }, [isConversationHeaderCollapsed]);
 
   const directAgents = useMemo(
     () => [...agents, ...externalAgents],
@@ -4247,79 +4257,94 @@ const ChatPage: React.FC = () => {
       <div className="flex min-h-0 flex-1 min-w-0 flex-col bg-white">
         {currentConversation ? (
           <>
-            <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
+            <div
+              className="relative z-20 flex shrink-0 items-center justify-between overflow-visible border-b border-slate-200 bg-white px-4 py-2"
+              data-testid="chat-conversation-header"
+            >
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex min-w-0 items-center gap-2">
                   {currentConversation.type === ConversationType.TEAM ? (
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-400 to-violet-600 flex items-center justify-center text-white">
+                    <div className="h-7 w-7 rounded-full bg-gradient-to-br from-violet-400 to-violet-600 flex items-center justify-center text-white">
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                       </svg>
                     </div>
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-semibold text-sm">
+                    <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-semibold text-sm">
                       {currentConversation.name.charAt(0).toUpperCase()}
                     </div>
                   )}
                   <div className="min-w-0">
                     <h2 className="truncate font-semibold text-slate-800">{currentConversation.name}</h2>
-                    <p className="text-xs text-slate-500">
-                      {currentConversation.type === ConversationType.TEAM
-                        ? t('chat.teamHeaderDescription', { count: currentTeamMembers.length })
-                        : currentDirectAgent?.external
-                          ? t('chat.externalHeaderDescription')
-                        : currentDirectAgentProfilePreset
-                          ? `${currentDirectAgentProfilePreset.label} · ${currentDirectAgentProfilePreset.summary}`
-                          : t('chat.directHeaderDescription')}
-                    </p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      {currentConversation.type !== ConversationType.TEAM && currentDirectAgentProfilePreset && (
-                        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${currentDirectAgentProfilePreset.accent}`}>
-                          {t('chat.profileBadge')} · {currentDirectAgentProfilePreset.label}
-                        </span>
-                      )}
-                      {currentConversation.type !== ConversationType.TEAM && currentDirectAgent?.external && (
-                        <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
-                          {t('chat.externalBadge')}
-                        </span>
-                      )}
-                      {currentConversation.type !== ConversationType.TEAM && currentDirectAgentPermissionPreset && (
-                        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${currentDirectAgentPermissionPreset.accent}`}>
-                          {t('chat.permissionBadge')} · {currentDirectAgentPermissionPreset.label}
-                        </span>
-                      )}
-                      {currentConversationCapabilities.length > 0 && (
-                        <>
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                            {t('chat.availableCapabilities')}
-                          </span>
-                          {currentConversationCapabilities.slice(0, 6).map((capability) => {
-                            const Icon = getCapabilityIcon(capability.id);
-                            const capabilityLabel = getCapabilityLabel(t, capability);
-                            return (
-                              <span
-                                key={capability.id}
-                                title={capability.description || capabilityLabel}
-                                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium ${getCapabilityTone(capability.id)}`}
-                              >
-                                <Icon className="h-3.5 w-3.5" />
-                                {capabilityLabel}
-                              </span>
-                            );
-                          })}
-                          {currentConversationCapabilities.length > 6 && (
-                            <span className="text-[11px] text-slate-400">
-                              +{currentConversationCapabilities.length - 6}
+                    <div
+                      data-testid="chat-conversation-header-details"
+                      aria-hidden={isConversationHeaderCollapsed}
+                      className={`absolute left-0 right-0 top-full z-30 border-b border-slate-200 bg-white px-4 pb-3 pt-0 transition-[opacity,transform,visibility] duration-200 ease-out ${
+                        isConversationHeaderCollapsed
+                          ? 'invisible -translate-y-1 opacity-0 pointer-events-none'
+                          : 'visible translate-y-0 opacity-100'
+                      }`}
+                    >
+                      <div className="ml-[3rem] min-w-0">
+                        <p className="text-xs text-slate-500">
+                          {currentConversation.type === ConversationType.TEAM
+                            ? t('chat.teamHeaderDescription', { count: currentTeamMembers.length })
+                            : currentDirectAgent?.external
+                              ? t('chat.externalHeaderDescription')
+                            : currentDirectAgentProfilePreset
+                              ? `${currentDirectAgentProfilePreset.label} · ${currentDirectAgentProfilePreset.summary}`
+                              : t('chat.directHeaderDescription')}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {currentConversation.type !== ConversationType.TEAM && currentDirectAgentProfilePreset && (
+                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${currentDirectAgentProfilePreset.accent}`}>
+                              {t('chat.profileBadge')} · {currentDirectAgentProfilePreset.label}
                             </span>
                           )}
-                        </>
-                      )}
+                          {currentConversation.type !== ConversationType.TEAM && currentDirectAgent?.external && (
+                            <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">
+                              {t('chat.externalBadge')}
+                            </span>
+                          )}
+                          {currentConversation.type !== ConversationType.TEAM && currentDirectAgentPermissionPreset && (
+                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${currentDirectAgentPermissionPreset.accent}`}>
+                              {t('chat.permissionBadge')} · {currentDirectAgentPermissionPreset.label}
+                            </span>
+                          )}
+                          {currentConversationCapabilities.length > 0 && (
+                            <>
+                              <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                {t('chat.availableCapabilities')}
+                              </span>
+                              {currentConversationCapabilities.slice(0, 6).map((capability) => {
+                                const Icon = getCapabilityIcon(capability.id);
+                                const capabilityLabel = getCapabilityLabel(t, capability);
+                                return (
+                                  <span
+                                    key={capability.id}
+                                    title={capability.description || capabilityLabel}
+                                    className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium ${getCapabilityTone(capability.id)}`}
+                                  >
+                                    <Icon className="h-3.5 w-3.5" />
+                                    {capabilityLabel}
+                                  </span>
+                                );
+                              })}
+                              {currentConversationCapabilities.length > 6 && (
+                                <span className="text-[11px] text-slate-400">
+                                  +{currentConversationCapabilities.length - 6}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-              <div className="relative hidden shrink-0 md:flex md:flex-col md:items-end md:gap-2">
-                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+              <div className="relative hidden shrink-0 self-end md:flex md:flex-row md:items-center md:justify-end md:gap-2">
+                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium shadow-sm ${
                   currentConversation.type === ConversationType.TEAM
                     ? 'bg-violet-100 text-violet-700'
                     : 'bg-blue-100 text-blue-700'
@@ -4328,10 +4353,10 @@ const ChatPage: React.FC = () => {
                 </span>
                 {messages.length > 0 && (
                   <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setIsHistorySearchOpen((prev) => !prev)}
-                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium shadow-sm transition-colors ${
+                      <button
+                        type="button"
+                        onClick={() => setIsHistorySearchOpen((prev) => !prev)}
+                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-sm transition-colors ${
                         isHistorySearchOpen || historySearchQuery
                           ? 'border-sky-200 bg-white text-sky-700'
                           : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
@@ -4381,6 +4406,21 @@ const ChatPage: React.FC = () => {
                     )}
                   </div>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setIsConversationHeaderCollapsed((prev) => !prev)}
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
+                  aria-label={isConversationHeaderCollapsed ? t('chat.expandHeader') : t('chat.collapseHeader')}
+                  title={isConversationHeaderCollapsed ? t('chat.expandHeader') : t('chat.collapseHeader')}
+                  data-testid="chat-header-collapse-toggle"
+                >
+                  {isConversationHeaderCollapsed ? (
+                    <ChevronsDown className="h-3.5 w-3.5" strokeWidth={2} />
+                  ) : (
+                    <ChevronsUp className="h-3.5 w-3.5" strokeWidth={2} />
+                  )}
+                  {isConversationHeaderCollapsed ? t('chat.expandHeader') : t('chat.collapseHeader')}
+                </button>
               </div>
             </div>
             {batonNavigationNotice && (

@@ -219,6 +219,36 @@ describe('ChatPage', () => {
     );
   });
 
+  it('collapses the conversation header and persists the preference', async () => {
+    seedConversationStore({
+      id: 'dm_agent-a',
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    const toggle = await screen.findByTestId('chat-header-collapse-toggle');
+
+    expect(screen.getByText(/适合直接问答|Best for direct Q&A/)).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    expect(window.localStorage.getItem('horbot.chat.conversationHeaderCollapsed')).toBe('true');
+    expect(screen.getByTestId('chat-conversation-header-details')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByRole('button', { name: /展开|Expand/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开|Expand/ }));
+
+    expect(window.localStorage.getItem('horbot.chat.conversationHeaderCollapsed')).toBe('false');
+    expect(screen.getByTestId('chat-conversation-header-details')).toHaveAttribute('aria-hidden', 'false');
+    expect(screen.getByText(/适合直接问答|Best for direct Q&A/)).toBeInTheDocument();
+  });
+
   it('sticks to the bottom after initial history load completes', async () => {
     const conversationId = 'dm_agent-a';
     const scrollToMock = vi.fn();
