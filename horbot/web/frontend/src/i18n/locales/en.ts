@@ -1694,6 +1694,7 @@ const messages = {
     'skills.graph.loading': 'Loading skill graph...',
     'skills.graph.persistedHint': 'This graph is persisted in the current agent workspace.',
     'skills.graph.ephemeralHint': 'This graph is generated in memory. Rebuild it to persist the latest relationships.',
+    'skills.graph.autoRebuiltHint': 'The persisted graph was stale and has been refreshed automatically.',
     'skills.graph.skillNodes': 'Skills',
     'skills.graph.referenceNodes': 'References',
     'skills.graph.referenceEdges': 'Reference links',

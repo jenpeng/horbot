@@ -882,6 +882,7 @@ const messages = {
     'skills.graph.loading': 'กำลังโหลดกราฟทักษะ...',
     'skills.graph.persistedHint': 'กราฟนี้ถูกบันทึกไว้ในเวิร์กสเปซของ Agent ปัจจุบันแล้ว',
     'skills.graph.ephemeralHint': 'กราฟนี้ถูกสร้างในหน่วยความจำ กดสร้างใหม่เพื่อบันทึกความสัมพันธ์ล่าสุด',
+    'skills.graph.autoRebuiltHint': 'กราฟที่บันทึกไว้ล้าสมัยและถูกรีเฟรชอัตโนมัติแล้ว',
     'skills.graph.skillNodes': 'ทักษะ',
     'skills.graph.referenceNodes': 'เอกสารอ้างอิง',
     'skills.graph.referenceEdges': 'ลิงก์อ้างอิง',

@@ -23,6 +23,13 @@ const truncateGraphLabel = (value: string, maxLength = 24) => {
   return `${value.slice(0, maxLength - 1)}…`;
 };
 
+const pickGraphFocusSkillId = (graph: SkillGraph, current: string | null): string | null => {
+  if (current && graph.nodes.some((node) => node.kind === 'skill' && node.id === current)) {
+    return current;
+  }
+  return graph.nodes.find((node) => node.kind === 'skill')?.id ?? null;
+};
+
 interface SkillEditorState {
   isOpen: boolean;
   mode: 'create' | 'edit';
@@ -141,7 +148,7 @@ const SkillsPage: React.FC = () => {
       if (graphData) {
         setSkillGraph(graphData);
         setGraphLoadedOnce(true);
-        setSelectedGraphSkill((current) => current ?? graphData.nodes.find((node) => node.kind === 'skill')?.id ?? null);
+        setSelectedGraphSkill((current) => pickGraphFocusSkillId(graphData, current));
       }
       setError(null);
     } catch (err) {
@@ -173,7 +180,7 @@ const SkillsPage: React.FC = () => {
     try {
       const graph = await skillsService.getSkillGraph();
       setSkillGraph(graph);
-      setSelectedGraphSkill((current) => current ?? graph.nodes.find((node) => node.kind === 'skill')?.id ?? null);
+      setSelectedGraphSkill((current) => pickGraphFocusSkillId(graph, current));
     } catch (err: any) {
       showNotification('error', err.message || t('skills.notification.graphLoadFailed'));
     } finally {
@@ -765,7 +772,7 @@ const SkillsPage: React.FC = () => {
       const graph = await skillsService.rebuildSkillGraph();
       setSkillGraph(graph);
       setGraphLoadedOnce(true);
-      setSelectedGraphSkill(graph.nodes.find((node) => node.kind === 'skill')?.id ?? null);
+      setSelectedGraphSkill((current) => pickGraphFocusSkillId(graph, current));
       showNotification('success', t('skills.notification.graphRebuilt', {
         nodes: graph.node_count,
         edges: graph.edge_count,
@@ -1270,6 +1277,11 @@ const SkillsPage: React.FC = () => {
                       ? t('skills.graph.persistedHint')
                       : t('skills.graph.ephemeralHint')}
                   </p>
+                  {skillGraph?.auto_rebuilt && (
+                    <p className="mt-2 inline-flex rounded-full bg-accent-emerald/10 px-3 py-1 text-xs font-semibold text-accent-emerald">
+                      {t('skills.graph.autoRebuiltHint')}
+                    </p>
+                  )}
                   {skillGraph?.path && (
                     <div className="mt-2">
                       <button

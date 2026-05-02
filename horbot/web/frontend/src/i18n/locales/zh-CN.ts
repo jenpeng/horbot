@@ -1573,6 +1573,7 @@ const messages = {
     'skills.graph.loading': '正在加载技能图谱...',
     'skills.graph.persistedHint': '该图谱已持久化到当前 Agent 工作区。',
     'skills.graph.ephemeralHint': '该图谱由内存即时生成，点击重建可持久化最新关系。',
+    'skills.graph.autoRebuiltHint': '检测到持久化图谱已过期，已自动刷新。',
     'skills.graph.skillNodes': '技能',
     'skills.graph.referenceNodes': '技巧引用',
     'skills.graph.referenceEdges': '引用关系',

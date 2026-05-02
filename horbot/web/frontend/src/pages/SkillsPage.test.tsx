@@ -369,6 +369,43 @@ describe('SkillsPage', () => {
     expect(skillsService.getSkillGraph).toHaveBeenCalledTimes(1);
   });
 
+  it('shows when the persisted skill graph was automatically refreshed', async () => {
+    vi.mocked(skillsService.getSkillGraph).mockResolvedValueOnce({
+      version: 1,
+      generated_at: '2026-05-02T00:00:00Z',
+      workspace: '/tmp/workspace',
+      skills_dir: '/tmp/workspace/.horbot-agent/skills',
+      path: '/tmp/workspace/.horbot-agent/skill_graph.json',
+      persisted: true,
+      auto_rebuilt: true,
+      node_count: 1,
+      edge_count: 0,
+      nodes: [
+        {
+          id: 'fresh-skill',
+          name: 'fresh-skill',
+          kind: 'skill',
+          source: 'user',
+          source_group: 'custom',
+          origin_kind: 'manual',
+          origin_agent_id: null,
+          description: 'Fresh graph skill.',
+          path: '/tmp/fresh-skill/SKILL.md',
+          reference_count: 0,
+          updated_at: '2026-05-02T00:00:00Z',
+        },
+      ],
+      edges: [],
+    });
+
+    renderWithI18n(<SkillsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Graph (0)' }));
+
+    expect(await screen.findByText('The persisted graph was stale and has been refreshed automatically.')).toBeInTheDocument();
+    expect((await screen.findAllByText('fresh-skill')).length).toBeGreaterThan(0);
+  });
+
   it('shows the skill storage path and source hint in the detail modal', async () => {
     renderWithI18n(<SkillsPage />);
 
