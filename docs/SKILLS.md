@@ -78,7 +78,7 @@ The persisted skill graph is also agent-scoped:
 
 The agent runtime consumes the persisted graph as compact discovery hints in the skills summary. It does not inline reference contents; it points the agent to nearby skills and `references/` files so the agent can read only the local files needed for the current task.
 
-Horbot refreshes the persisted graph after managed skill mutations, including create, update, import, delete, toggle, generated-skill consolidation, promotion to builtin, and agent `save_skill` / automatic skill evolution writes. Graph refresh failures are logged as warnings and do not roll back the skill operation.
+Horbot refreshes the persisted graph after managed skill mutations, including create, update, import, delete, toggle, generated-skill consolidation, promotion to builtin, and agent `save_skill` / automatic skill evolution writes. Graph refresh failures are logged as warnings and do not roll back the skill operation. When `GET /api/skills/graph` detects that the persisted graph fingerprint is stale, it rebuilds and persists the graph before returning it.
 
 Legacy `.horbot/agents/<agent-id>/skills` and `workspace/skills` assumptions no longer describe the current runtime.
 

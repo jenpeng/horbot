@@ -402,6 +402,7 @@ export interface SkillGraph {
   skills_dir: string;
   path?: string;
   persisted?: boolean;
+  auto_rebuilt?: boolean;
   message?: string;
   node_count: number;
   edge_count: number;

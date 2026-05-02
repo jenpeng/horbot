@@ -91,21 +91,39 @@ def create_skills_router(
 
     @router.get("/skills/graph")
     async def get_skill_graph(agent_id: Optional[str] = None):
-        """Get the current skill graph, building an in-memory graph when none is stored yet."""
-        from horbot.agent.skill_graph import build_skill_graph, load_skill_graph, resolve_skill_graph_path
+        """Get the current skill graph, rebuilding stale persisted graphs when needed."""
+        from horbot.agent.skill_graph import (
+            build_skill_graph,
+            is_skill_graph_stale,
+            load_skill_graph,
+            resolve_skill_graph_path,
+            save_skill_graph,
+        )
         from horbot.agent.skills import SkillsLoader
 
         _, workspace_path, skills_dir = resolve_skill_dir_for_request(agent_id)
+        loader = SkillsLoader(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
+        skills = loader.list_skills(filter_unavailable=False, include_disabled=True)
+        graph_path = resolve_skill_graph_path(workspace_path)
         graph = load_skill_graph(workspace=workspace_path)
         if graph is None:
-            loader = SkillsLoader(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
-            skills = loader.list_skills(filter_unavailable=False, include_disabled=True)
             graph = build_skill_graph(workspace=workspace_path, skills_dir=skills_dir, skills=skills)
             graph["persisted"] = False
-            graph["path"] = str(resolve_skill_graph_path(workspace_path))
+            graph["path"] = str(graph_path)
+            graph["auto_rebuilt"] = False
+        elif is_skill_graph_stale(graph, skills):
+            graph = build_skill_graph(workspace=workspace_path, skills_dir=skills_dir, skills=skills)
+            graph_path = save_skill_graph(graph, workspace=workspace_path)
+            graph["persisted"] = True
+            graph["path"] = str(graph_path)
+            graph["auto_rebuilt"] = True
+            graph["message"] = (
+                f"Refreshed stale skill graph with {graph['node_count']} nodes and {graph['edge_count']} edges."
+            )
         else:
             graph["persisted"] = True
-            graph["path"] = str(resolve_skill_graph_path(workspace_path))
+            graph["path"] = str(graph_path)
+            graph["auto_rebuilt"] = False
         return graph
 
     @router.post("/skills/graph/rebuild")

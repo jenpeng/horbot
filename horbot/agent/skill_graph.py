@@ -96,6 +96,81 @@ def _reference_title(path: Path) -> str:
     return path.stem.replace("-", " ").replace("_", " ").title()
 
 
+def _collect_reference_paths(skill_root: Path, content: str) -> set[Path]:
+    resolved_skill_root = skill_root.resolve()
+    reference_paths: set[Path] = set()
+    references_dir = skill_root / "references"
+    if references_dir.exists():
+        reference_paths.update(ref for ref in references_dir.rglob("*.md") if ref.is_file())
+    for raw_link in MARKDOWN_LINK_PATTERN.findall(content):
+        target = raw_link.strip().split("#", 1)[0].split("?", 1)[0]
+        if not target or target.startswith(("http://", "https://", "mailto:", "#")) or "://" in target:
+            continue
+        candidate = (skill_root / target).resolve()
+        try:
+            candidate.relative_to(resolved_skill_root)
+        except ValueError:
+            continue
+        if candidate.exists() and candidate.is_file():
+            reference_paths.add(candidate)
+    return reference_paths
+
+
+def _file_signature(path: Path) -> dict[str, Any] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return {
+        "path": str(path),
+        "mtime_ns": stat.st_mtime_ns,
+        "size": stat.st_size,
+    }
+
+
+def build_skill_graph_fingerprint(skills: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return a compact filesystem fingerprint for graph staleness checks."""
+    files: dict[str, dict[str, Any]] = {}
+    skill_count = 0
+    reference_count = 0
+    for skill in skills:
+        path = Path(str(skill.get("path") or ""))
+        if not path.exists():
+            continue
+        signature = _file_signature(path)
+        if signature:
+            files[signature["path"]] = signature
+        skill_count += 1
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception:
+            content = ""
+        skill_root = path.parent if path.name == "SKILL.md" else path.parent
+        for reference_path in _collect_reference_paths(skill_root, content):
+            reference_signature = _file_signature(reference_path)
+            if reference_signature:
+                files[reference_signature["path"]] = reference_signature
+                reference_count += 1
+
+    ordered_files = sorted(files.values(), key=lambda item: item["path"])
+    latest_mtime_ns = max((int(item["mtime_ns"]) for item in ordered_files), default=0)
+    return {
+        "skill_count": skill_count,
+        "reference_count": reference_count,
+        "file_count": len(ordered_files),
+        "latest_mtime_ns": latest_mtime_ns,
+        "files": ordered_files,
+    }
+
+
+def is_skill_graph_stale(graph: dict[str, Any] | None, skills: list[dict[str, Any]]) -> bool:
+    """Return true when a persisted graph no longer matches current skill files."""
+    if not graph:
+        return True
+    current_fingerprint = build_skill_graph_fingerprint(skills)
+    return graph.get("source_fingerprint") != current_fingerprint
+
+
 def _source_origin_from_path(skill_path: Path, metadata: dict[str, str]) -> tuple[str, str, str | None]:
     if metadata.get("generated_by") == "skill-evolution":
         agent_id: str | None = None
@@ -120,6 +195,7 @@ def build_skill_graph(
     edges: list[dict[str, Any]] = []
     descriptors: dict[str, str] = {}
     edge_ids: set[str] = set()
+    source_fingerprint = build_skill_graph_fingerprint(skills)
 
     def add_edge(source: str, target: str, edge_type: str, confidence: float, reason: str) -> None:
         if source == target:
@@ -170,21 +246,7 @@ def build_skill_graph(
 
         skill_root = path.parent if path.name == "SKILL.md" else path.parent
         resolved_skill_root = skill_root.resolve()
-        reference_paths: set[Path] = set()
-        references_dir = skill_root / "references"
-        if references_dir.exists():
-            reference_paths.update(ref for ref in references_dir.rglob("*.md") if ref.is_file())
-        for raw_link in MARKDOWN_LINK_PATTERN.findall(content):
-            target = raw_link.strip().split("#", 1)[0].split("?", 1)[0]
-            if not target or target.startswith(("http://", "https://", "mailto:", "#")) or "://" in target:
-                continue
-            candidate = (skill_root / target).resolve()
-            try:
-                candidate.relative_to(resolved_skill_root)
-            except ValueError:
-                continue
-            if candidate.exists() and candidate.is_file():
-                reference_paths.add(candidate)
+        reference_paths = _collect_reference_paths(skill_root, content)
 
         node["reference_count"] = len(reference_paths)
         for reference_path in sorted(reference_paths):
@@ -229,6 +291,7 @@ def build_skill_graph(
         "generated_at": _now_iso(),
         "workspace": str(Path(workspace)),
         "skills_dir": str(Path(skills_dir)),
+        "source_fingerprint": source_fingerprint,
         "node_count": len(nodes),
         "edge_count": len(edges),
         "nodes": nodes,

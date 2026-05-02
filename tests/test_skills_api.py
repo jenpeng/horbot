@@ -233,6 +233,70 @@ generated_by: skill-evolution
         self.assertEqual(get_response.status_code, 200)
         self.assertTrue(get_response.json()["persisted"])
 
+    async def test_get_skill_graph_auto_rebuilds_stale_persisted_graph(self):
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            skills_dir = Path(tmpdir) / "agent-skills"
+            skill_dir = skills_dir / "auto-officecli-ppt"
+            references_dir = skill_dir / "references"
+            references_dir.mkdir(parents=True, exist_ok=True)
+            skill_file = skill_dir / "SKILL.md"
+            skill_file.write_text(
+                """---
+name: auto-officecli-ppt
+description: PowerPoint editing workflow.
+generated_by: skill-evolution
+---
+
+# OfficeCLI PPT
+""",
+                encoding="utf-8",
+            )
+
+            with patch(
+                "horbot.web.api._resolve_skill_dir_for_request",
+                return_value=(None, workspace, skills_dir),
+            ):
+                async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                    rebuild_response = await client.post("/api/skills/graph/rebuild")
+
+                    skill_file.write_text(
+                        """---
+name: auto-officecli-ppt
+description: PowerPoint editing workflow with layout repair references.
+generated_by: skill-evolution
+---
+
+# OfficeCLI PPT
+
+- [Layout Repair](references/layout-repair.md)
+""",
+                        encoding="utf-8",
+                    )
+                    (references_dir / "layout-repair.md").write_text(
+                        "# Layout Repair\n\nUse this when slide layout fidelity matters.\n",
+                        encoding="utf-8",
+                    )
+
+                    get_response = await client.get("/api/skills/graph")
+
+        self.assertEqual(rebuild_response.status_code, 200)
+        initial_node_count = rebuild_response.json()["node_count"]
+        self.assertGreaterEqual(initial_node_count, 1)
+        self.assertEqual(get_response.status_code, 200)
+        payload = get_response.json()
+        self.assertTrue(payload["persisted"])
+        self.assertTrue(payload["auto_rebuilt"])
+        self.assertGreater(payload["node_count"], initial_node_count)
+        self.assertIn("source_fingerprint", payload)
+        self.assertIn("Refreshed stale skill graph", payload["message"])
+        edge_types = {edge["type"] for edge in payload["edges"]}
+        self.assertIn("has_reference", edge_types)
+
     async def test_import_skill_package_accepts_valid_skill_archive(self):
         app = FastAPI()
         app.include_router(api_router, prefix="/api")
