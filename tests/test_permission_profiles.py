@@ -8,6 +8,7 @@ class PermissionProfileTests(unittest.TestCase):
         manager = PermissionManager(profile="balanced")
 
         self.assertEqual(manager.check_permission("read_file"), PermissionLevel.ALLOW)
+        self.assertEqual(manager.check_permission("save_skill"), PermissionLevel.ALLOW)
         self.assertEqual(manager.check_permission("web_search"), PermissionLevel.ALLOW)
         self.assertEqual(manager.check_permission("exec"), PermissionLevel.CONFIRM)
         self.assertEqual(manager.check_permission("task"), PermissionLevel.DENY)
@@ -18,6 +19,7 @@ class PermissionProfileTests(unittest.TestCase):
         self.assertEqual(manager.check_permission("read_file"), PermissionLevel.ALLOW)
         self.assertEqual(manager.check_permission("write_file"), PermissionLevel.DENY)
         self.assertEqual(manager.check_permission("edit_file"), PermissionLevel.DENY)
+        self.assertEqual(manager.check_permission("save_skill"), PermissionLevel.DENY)
         self.assertEqual(manager.check_permission("exec"), PermissionLevel.DENY)
 
 

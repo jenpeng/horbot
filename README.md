@@ -61,6 +61,7 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 - Build teams with ordered members, responsibilities, and lead assignment
 - Support direct chat and team relay conversations in the same UI
 - Let agents silently review completed work and distill reusable workflows into skill families with reference notes
+- Let agents save user-requested reusable experience through a managed `save_skill` tool instead of direct skill-path writes
 
 ### Workspace And Memory
 

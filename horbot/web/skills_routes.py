@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import re
 import shutil
+import tempfile
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 
@@ -128,6 +131,46 @@ def create_skills_router(
             "compatibility": compatibility,
             **source_meta,
         }
+
+    @router.get("/skills/{skill_name}/export")
+    async def export_skill(skill_name: str, agent_id: Optional[str] = None):
+        """Export a skill as a .skill package."""
+        from horbot.agent.skill_package import export_skill_directory_bytes
+        from horbot.agent.skills import SkillsLoader
+
+        _, workspace_path, skills_dir = resolve_skill_dir_for_request(agent_id)
+        loader = SkillsLoader(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
+        skills = loader.list_skills(filter_unavailable=False, include_disabled=True)
+        skill_info = next((s for s in skills if s["name"] == skill_name), None)
+
+        if not skill_info:
+            raise HTTPException(status_code=404, detail=f"Skill '{skill_name}' not found")
+
+        skill_path = Path(skill_info["path"])
+        if not skill_path.exists():
+            raise HTTPException(status_code=404, detail=f"Skill file for '{skill_name}' not found")
+
+        if skill_path.name == "SKILL.md":
+            package = export_skill_directory_bytes(skill_path.parent, expected_name=skill_name)
+        else:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                temp_root = Path(tmpdir) / skill_name
+                temp_root.mkdir(parents=True, exist_ok=True)
+                (temp_root / "SKILL.md").write_text(skill_path.read_text(encoding="utf-8"), encoding="utf-8")
+                package = export_skill_directory_bytes(temp_root, expected_name=skill_name)
+
+        if not package["valid"]:
+            raise HTTPException(status_code=400, detail="Skill export failed: " + " ".join(package["issues"]))
+
+        filename = package["filename"] or f"{skill_name}.skill"
+        return StreamingResponse(
+            BytesIO(package["data"]),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Skill-Name": skill_name,
+            },
+        )
 
     @router.post("/skills")
     async def create_skill(request: SkillCreateRequest, agent_id: Optional[str] = None):

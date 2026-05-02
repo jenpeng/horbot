@@ -57,6 +57,17 @@ const getCompatibilityBadge = (
   return { label: t('skills.compatibility.incompatible'), className: 'bg-semantic-error-light text-semantic-error' };
 };
 
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+};
+
 const SkillsPage: React.FC = () => {
   const { t } = useI18n();
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -310,16 +321,34 @@ const SkillsPage: React.FC = () => {
                   </span>
                 )}
               </div>
-              {skill.source === 'user' && (
-                <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); void handleExportSkill(skill.name); }}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-surface-200 bg-white text-surface-600 shadow-sm transition-colors hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  title={t('skills.action.export')}
+                  aria-label={t('skills.action.export')}
+                  disabled={saving}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v10m0 0l-4-4m4 4l4-4M4 20h16" />
+                  </svg>
+                </button>
+                {skill.source === 'user' && (
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); void handlePromoteSkill(skill.name); }}
-                    className="inline-flex items-center rounded-md border border-accent-indigo/25 bg-accent-indigo/10 px-3 py-1.5 text-xs font-semibold text-accent-indigo transition-colors hover:bg-accent-indigo/15"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-accent-indigo/25 bg-accent-indigo/10 text-accent-indigo shadow-sm transition-colors hover:bg-accent-indigo/15 disabled:cursor-not-allowed disabled:opacity-50"
                     title={t('skills.action.promoteBuiltin')}
+                    aria-label={t('skills.action.promoteBuiltin')}
+                    disabled={saving}
                   >
-                    {t('skills.action.promoteBuiltin')}
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                    </svg>
                   </button>
+                )}
+                {skill.source === 'user' && (
                   <div className="flex gap-1 opacity-70 transition-opacity group-hover:opacity-100">
                     <IconButton
                       variant="ghost"
@@ -342,8 +371,8 @@ const SkillsPage: React.FC = () => {
                       </svg>
                     </IconButton>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             {((skill.missing_requirements && skill.missing_requirements.length > 0) || (skill.install && skill.install.length > 0 && !skill.available)) &&
@@ -523,6 +552,23 @@ const SkillsPage: React.FC = () => {
         err.message ||
         err.response?.data?.detail ||
         t('skills.notification.promoteBuiltinFailed');
+      showNotification('error', message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleExportSkill = async (skillName: string) => {
+    setSaving(true);
+    try {
+      const blob = await skillsService.exportSkill(skillName);
+      downloadBlob(blob, `${skillName}.skill`);
+      showNotification('success', t('skills.notification.exported', { name: skillName }));
+    } catch (err: any) {
+      const message =
+        err.message ||
+        err.response?.data?.detail ||
+        t('skills.notification.exportFailed');
       showNotification('error', message);
     } finally {
       setSaving(false);
@@ -1175,11 +1221,20 @@ const SkillsPage: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => { void handleExportSkill(selectedSkill.name); }}
+                        disabled={saving}
+                      >
+                        {t('skills.action.export')}
+                      </Button>
                       {selectedSkill.source === 'user' && (
                         <Button
                           variant="secondary"
                           size="sm"
                           onClick={() => { void handlePromoteSkill(selectedSkill.name); }}
+                          disabled={saving}
                         >
                           {t('skills.action.promoteBuiltin')}
                         </Button>

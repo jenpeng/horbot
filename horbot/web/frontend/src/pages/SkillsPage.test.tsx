@@ -16,6 +16,7 @@ vi.mock('../services/skills', () => ({
     deleteSkill: vi.fn(),
     toggleSkill: vi.fn(),
     importSkill: vi.fn(),
+    exportSkill: vi.fn(),
     promoteSkill: vi.fn(),
     consolidateGeneratedSkills: vi.fn(),
     getMcpServers: vi.fn(),
@@ -112,6 +113,7 @@ describe('SkillsPage', () => {
     vi.mocked(skillsService.getSkills).mockResolvedValue([skillFixture, builtinSkillFixture]);
     vi.mocked(skillsService.getSkill).mockResolvedValue(skillDetailFixture);
     vi.mocked(skillsService.getMcpServers).mockResolvedValue({});
+    vi.mocked(skillsService.exportSkill).mockResolvedValue(new Blob(['demo'], { type: 'application/zip' }));
   });
 
   it('renders the shared page loading state while skills are loading', () => {
@@ -266,6 +268,40 @@ describe('SkillsPage', () => {
     });
 
     expect(await screen.findByText('Skill "research-helper" promoted to builtin')).toBeInTheDocument();
+  });
+
+  it('exports a skill package from the card action', async () => {
+    const createObjectURL = vi.fn(() => 'blob:skill-export');
+    const revokeObjectURL = vi.fn();
+    const click = vi.fn();
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      configurable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(window.URL, 'revokeObjectURL', {
+      configurable: true,
+      value: revokeObjectURL,
+    });
+
+    renderWithI18n(<SkillsPage />);
+
+    expect(await screen.findByText('research-helper')).toBeInTheDocument();
+
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(click);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+
+    await waitFor(() => {
+      expect(skillsService.exportSkill).toHaveBeenCalledWith('research-helper');
+    });
+    const downloadAnchor = clickSpy.mock.instances[0] as HTMLAnchorElement;
+    expect(downloadAnchor.download).toBe('research-helper.skill');
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('Skill "research-helper" exported')).toBeInTheDocument();
+
+    clickSpy.mockRestore();
   });
 
   it('shows the skill storage path and source hint in the detail modal', async () => {

@@ -1303,6 +1303,14 @@ GET /api/skills/{skill_name}
 
 详情接口同样返回 `missing_requirements`、`install` 和 `compatibility`。
 
+### 导出技能包
+
+```http
+GET /api/skills/{skill_name}/export
+```
+
+返回标准 `.skill` 包，`Content-Disposition` 文件名为 `{skill_name}.skill`。目录型技能会包含完整的 `SKILL.md`、`references/`、`scripts/`、`assets/`、`agents/` 等文件；旧的单文件技能会被整理成标准技能包结构后导出。
+
 ### 创建技能
 
 ```http
@@ -1443,6 +1451,8 @@ POST /api/skills/{skill_name}/promote
   "message": "Skill 'demo-skill' promoted to builtin successfully"
 }
 ```
+
+Agent 侧还提供受控的 `save_skill` 工具，用于处理用户在聊天中明确提出的“把经验总结/沉淀为技能”请求。它不是公开 HTTP API，但会写入同一个当前 Agent 技能目录，并沿用自动沉淀的“技能家族 + references 技巧库”结构。
 
 ---
 

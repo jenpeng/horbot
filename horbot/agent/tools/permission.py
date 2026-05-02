@@ -55,7 +55,7 @@ class PermissionResult:
 TOOL_GROUPS: dict[str, ToolGroup] = {
     "fs": ToolGroup(
         name="fs",
-        tools=["read_file", "write_file", "edit_file", "list_dir"],
+        tools=["read_file", "write_file", "edit_file", "list_dir", "save_skill"],
         description="File system tools for reading, writing, and listing files"
     ),
     "web": ToolGroup(
@@ -105,7 +105,7 @@ PROFILES: dict[str, dict[str, list[str]]] = {
     },
     "readonly": {
         "allow": ["read_file", "list_dir", "group:web"],
-        "deny": ["write_file", "edit_file", "group:runtime", "group:automation"],
+        "deny": ["write_file", "edit_file", "save_skill", "group:runtime", "group:automation"],
     },
 }
 

@@ -57,10 +57,13 @@ The current loop is:
 3. reusable workflow becomes a skill family or updates an existing family
 4. reflection and history memory are updated
 
+When a user explicitly asks an agent to summarize prior experience into a skill, the agent should use the managed `save_skill` tool. This tool writes only to the current agent skill store, validates the generated `SKILL.md`, and keeps detailed techniques under `references/`. Agents should not use raw `write_file` calls for skill persistence.
+
 The Web UI also exposes:
 
 - `Consolidate Generated`: manually merge related `auto-*` skills into broader families
 - `Promote to Builtin`: turn a custom workspace skill into a built-in system skill
+- `Export`: download a system or custom skill as a re-importable `.skill` package, including `references/` and other standard skill files
 
 ## Storage
 

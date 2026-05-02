@@ -25,6 +25,7 @@ from horbot.agent.tools.cron import CronTool, TaskToolWrapper
 from horbot.agent.tools.filesystem import ListDirTool, ReadFileTool
 from horbot.agent.tools.safe_editor import SafeWriteFileTool, SafeEditFileTool
 from horbot.agent.tools.message import MessageTool
+from horbot.agent.tools.skills import SaveSkillTool
 from horbot.agent.tools.registry import (
     ToolRegistry,
     ConfirmationRequiredError,
@@ -654,6 +655,7 @@ class AgentLoop:
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         for cls in (ReadFileTool, SafeWriteFileTool, SafeEditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(SaveSkillTool(workspace=self.workspace, agent_id=self._agent_id))
         self.tools.register(ExecTool(
             working_dir=str(self.workspace),
             timeout=self.exec_config.timeout,

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from horbot.agent.loop import AgentLoop
 from horbot.agent.skill_evolution import SkillEvolutionEngine
+from horbot.agent.tools.skills import SaveSkillTool
 from horbot.bus.events import InboundMessage
 from horbot.bus.queue import MessageBus
 from horbot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -196,6 +197,43 @@ class LoopSkillProvider(LLMProvider):
 
 
 class SkillEvolutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_save_skill_tool_persists_manual_skill_request_to_managed_store(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir)
+            tool = SaveSkillTool(workspace=workspace, agent_id="writer")
+
+            result = await tool.safe_execute(
+                skill_name="PPT preview troubleshooting",
+                description="Capture reusable checks for diagnosing PowerPoint preview rendering problems.",
+                reference_name="LibreOffice preview fidelity",
+                reference_title="LibreOffice Preview Fidelity Checks",
+                trigger_cues=[
+                    "A PPT preview differs from the original PowerPoint layout.",
+                    "A converted slide image or PDF loses expected formatting.",
+                ],
+                body_markdown=(
+                    "# LibreOffice Preview Fidelity Checks\n\n"
+                    "## When to use\n"
+                    "- When a PowerPoint preview does not match the original slide layout.\n\n"
+                    "## Steps\n"
+                    "1. Confirm the source PPTX opens locally before conversion.\n"
+                    "2. Convert through the managed preview pipeline instead of ad hoc screenshots.\n"
+                    "3. Compare fonts, image placement, and slide dimensions before reporting success.\n\n"
+                    "## Pitfalls\n"
+                    "- Do not persist temporary preview PNG files beyond the configured retention window.\n"
+                ),
+                reason="The user explicitly asked the agent to retain this reusable preview debugging workflow.",
+            )
+
+            self.assertIn("Saved skill family `auto-ppt-preview-troubleshooting`", result)
+            skill_dir = workspace / ".horbot-agent" / "skills" / "auto-ppt-preview-troubleshooting"
+            skill_path = skill_dir / "SKILL.md"
+            reference_path = skill_dir / "references" / "libreoffice-preview-fidelity.md"
+            self.assertTrue(skill_path.exists())
+            self.assertTrue(reference_path.exists())
+            self.assertIn("generated_by: skill-evolution", skill_path.read_text(encoding="utf-8"))
+            self.assertIn("LibreOffice Preview Fidelity Checks", reference_path.read_text(encoding="utf-8"))
+
     async def test_skill_evolution_creates_skill_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir)

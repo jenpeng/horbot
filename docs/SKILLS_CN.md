@@ -63,10 +63,13 @@ Horbot 可以在工具驱动任务完成后，后台判断这次工作是否具�
 
 例如，一个 `auto-officecli-ppt` 家族下可以包含多份 `references/officecli-ppt-*.md` 技巧笔记。
 
+当用户在聊天中明确要求 Agent “把刚才/之前的经验总结成技能”时，Agent 应使用受控的 `save_skill` 工具，而不是直接用 `write_file` 写技能目录。`save_skill` 只会写入当前 Agent 的规范技能目录，会校验生成的 `SKILL.md`，并把具体技巧放到 `references/` 下，因此不会因为 Agent 猜错路径而反馈“无权限写入技能路径”。
+
 Skills 页面当前还提供两个手动入口：
 
 - `整理自动技能`：把相关的自动技能手动收敛整理为技能家族
 - `转为系统技能`：把当前工作区下的自定义技能转成项目内置系统技能
+- `导出`：把系统技能或自定义技能下载为可再次导入的 `.skill` 包，包含 `references/` 等标准技能目录
 
 ### SKILL.md 格式
 
@@ -386,3 +389,11 @@ Content-Type: multipart/form-data
 
 - `file`: `.skill` 或 `.zip`
 - `replace_existing`: 可选，是否覆盖同名 skill
+
+### 导出技能包
+
+```http
+GET /api/skills/{skill_name}/export
+```
+
+返回标准 `.skill` 包。目录型技能会包含完整的 `SKILL.md`、`references/`、`scripts/`、`assets/`、`agents/` 等文件；旧的单文件技能会被整理成标准技能包结构后导出。

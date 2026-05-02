@@ -325,6 +325,129 @@ class SkillEvolutionEngine:
             changed=changed,
         )
 
+    def save_skill_draft(
+        self,
+        *,
+        skill_name: str,
+        description: str,
+        reference_name: str = "",
+        reference_title: str = "",
+        trigger_cues: list[str] | None = None,
+        body_markdown: str,
+        reason: str = "manual_skill_request",
+        action: str = "update",
+        trigger: str = "manual_request",
+    ) -> SkillEvolutionResult | None:
+        """Create or update a generated skill family from an already prepared draft."""
+        raw_name = str(skill_name or "").strip()
+        description = str(description or "").strip()
+        body_markdown = str(body_markdown or "").strip()
+        if not raw_name or not description or not body_markdown:
+            self._append_review_log({
+                "timestamp": self._now_iso(),
+                "trigger": trigger,
+                "status": "skipped",
+                "reason": "incomplete_skill_draft",
+            })
+            return None
+
+        normalized_action = "create" if str(action or "").strip().lower() == "create" else "update"
+        trigger_cues = [
+            str(item).strip()
+            for item in (trigger_cues or [])
+            if str(item).strip()
+        ]
+        resolved_skill_name = self._resolve_skill_family_name(raw_name, description)
+        if not resolved_skill_name:
+            self._append_review_log({
+                "timestamp": self._now_iso(),
+                "trigger": trigger,
+                "status": "skipped",
+                "reason": "invalid_skill_name",
+            })
+            return None
+
+        skill_dir = self.skills_dir / resolved_skill_name
+        skill_path = skill_dir / "SKILL.md"
+        previous = skill_path.read_text(encoding="utf-8") if skill_path.exists() else None
+        migrated = self._migrate_existing_generated_skill_to_references(resolved_skill_name, previous)
+        consolidated_skill_names = self._consolidate_related_generated_skills(
+            target_skill_name=resolved_skill_name,
+            description=description,
+        )
+
+        reference_slug = self._normalize_reference_name(reference_name or reference_title or raw_name or resolved_skill_name)
+        if not reference_slug:
+            reference_slug = f"note-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        reference_path, reference_changed = self._write_reference_file(
+            skill_name=resolved_skill_name,
+            reference_slug=reference_slug,
+            reference_title=reference_title,
+            body_markdown=body_markdown,
+        )
+        content = self._build_skill_content(
+            skill_name=resolved_skill_name,
+            description=description,
+            trigger_cues=trigger_cues,
+        )
+        validation = validate_skill_content(content, expected_name=resolved_skill_name, root=skill_dir)
+        if not validation["valid"]:
+            logger.warning(
+                "Manual skill draft produced invalid skill {} for {}: {}",
+                resolved_skill_name,
+                self.agent_id,
+                validation["issues"],
+            )
+            self._append_review_log({
+                "timestamp": self._now_iso(),
+                "trigger": trigger,
+                "status": "invalid",
+                "skill_name": resolved_skill_name,
+                "reason": " ".join(validation["issues"]),
+            })
+            return None
+
+        skill_changed = previous != content
+        changed = migrated or bool(consolidated_skill_names) or reference_changed or skill_changed
+        if skill_changed:
+            skill_path.parent.mkdir(parents=True, exist_ok=True)
+            skill_path.write_text(content, encoding="utf-8")
+        if changed:
+            logger.info(
+                "Manual skill draft {}d skill family for {}: {} (reference: {})",
+                "create" if previous is None else "update",
+                self.agent_id,
+                resolved_skill_name,
+                reference_path.name,
+            )
+
+        self._append_review_log({
+            "timestamp": self._now_iso(),
+            "trigger": trigger,
+            "status": "saved" if changed else "unchanged",
+            "action": normalized_action,
+            "skill_name": resolved_skill_name,
+            "path": str(skill_path),
+            "reference_path": str(reference_path),
+            "merged_skills": consolidated_skill_names,
+            "reason": reason,
+            "source": "manual_agent_tool",
+        })
+        self._record_memory_feedback(
+            action=normalized_action,
+            skill_name=resolved_skill_name,
+            description=description,
+            reason=reason,
+            changed=changed,
+        )
+        return SkillEvolutionResult(
+            action=normalized_action,
+            skill_name=resolved_skill_name,
+            path=skill_path,
+            reason=reason,
+            changed=changed,
+        )
+
     def _record_memory_feedback(
         self,
         *,

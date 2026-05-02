@@ -10,7 +10,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
-from zipfile import BadZipFile, ZipFile
+from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 from horbot.agent.skill_metadata_adapter import parse_skill_metadata
 
@@ -312,6 +312,41 @@ def import_skill_archive_bytes(
     return {
         **validation,
         "path": str(target_dir / "SKILL.md"),
+    }
+
+
+def export_skill_directory_bytes(root: Path, *, expected_name: str | None = None) -> dict[str, Any]:
+    """Validate and package a skill directory as .skill-compatible zip bytes."""
+    root = Path(root)
+    validation = validate_skill_directory(root, expected_name=expected_name)
+    if not validation["valid"]:
+        return {
+            **validation,
+            "data": b"",
+            "filename": "",
+        }
+
+    skill_name = validation["skill_name"] or expected_name or root.name
+    buffer = io.BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
+        for path in sorted(root.rglob("*")):
+            if path.is_dir():
+                continue
+            if path.is_symlink():
+                return {
+                    **validation,
+                    "valid": False,
+                    "issues": [f"Skill export rejected symbolic link '{path.relative_to(root)}'."],
+                    "data": b"",
+                    "filename": "",
+                }
+            relative = path.relative_to(root).as_posix()
+            archive.write(path, f"{skill_name}/{relative}")
+
+    return {
+        **validation,
+        "data": buffer.getvalue(),
+        "filename": f"{skill_name}.skill",
     }
 
 

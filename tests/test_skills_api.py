@@ -9,6 +9,7 @@ import httpx
 from fastapi import FastAPI
 
 from horbot.web.api import _describe_skill_source, router as api_router
+from horbot.agent.skill_package import validate_skill_archive_bytes
 
 
 class SkillsApiTests(unittest.IsolatedAsyncioTestCase):
@@ -233,6 +234,48 @@ metadata: {"horbot":{"requires":{"bins":["definitely-missing-horbot-bin"]}}}
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("Skill import failed", response.json()["detail"])
+
+    async def test_export_skill_package_returns_reimportable_skill_archive(self):
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            skills_dir = Path(tmpdir) / "agent-skills"
+            skill_dir = skills_dir / "demo-skill"
+            references_dir = skill_dir / "references"
+            references_dir.mkdir(parents=True, exist_ok=True)
+            skill_file = skill_dir / "SKILL.md"
+            skill_file.write_text(
+                """---
+name: demo-skill
+description: Demo export skill
+---
+
+# Demo Skill
+
+## Reference Library
+- [Demo Reference](references/demo.md)
+""",
+                encoding="utf-8",
+            )
+            (references_dir / "demo.md").write_text("# Demo Reference\n\nReusable details.\n", encoding="utf-8")
+
+            with patch(
+                "horbot.web.api._resolve_skill_dir_for_request",
+                return_value=(None, workspace, skills_dir),
+            ):
+                async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                    response = await client.get("/api/skills/demo-skill/export")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "application/zip")
+        self.assertIn('filename="demo-skill.skill"', response.headers["content-disposition"])
+        validation = validate_skill_archive_bytes(response.content, "demo-skill.skill")
+        self.assertTrue(validation["valid"], validation["issues"])
+        self.assertEqual(validation["skill_name"], "demo-skill")
+        self.assertIn("references/demo.md", validation["files"])
 
     async def test_promote_skill_moves_user_skill_to_builtin_directory(self):
         app = FastAPI()

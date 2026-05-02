@@ -85,6 +85,13 @@ export const skillsService = {
     return response.data;
   },
 
+  exportSkill: async (name: string): Promise<Blob> => {
+    const response = await api.get<Blob>(`/api/skills/${name}/export`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+
   importSkill: async (file: File, replaceExisting = false): Promise<SkillImportResult> => {
     const formData = new FormData();
     formData.append('file', file);
