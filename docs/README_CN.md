@@ -30,10 +30,12 @@
 - Agent 级别隔离的 workspace、memory、sessions 与 skills
 - 支持把重复完成的工作沉淀成可复用技能
 - 自动技能会尽量收敛为“技能家族 + references 技巧库”，并可在 Skills 页面手动整理或转为系统技能
+- 当前 Agent 的技能会自动构建技能图谱，把技能、references 文件和相关能力连接起来，并在运行时提供轻量召回提示
 - Web UI 支持英文、简体中文、泰语三种界面语言切换，并在浏览器中持久化记忆当前选择
 
 ## 📢 最新动态
 
+- **2026-05-02** 🕸️ Skills 页面新增技能图谱：支持查看当前 Agent 的技能、引用文件和相关关系，技能变更后自动刷新，也可手动重建。
 - **2026-04-28** 📎 PPTX 预览已改为 LibreOffice 高保真链路：先无头导出 PDF，再按页懒加载 PNG，关闭预览时会清理中间 PDF。
 - **2026-04-28** 💬 聊天历史接口和前端加载链路已补充 `no-store` 与增量回退策略，刷新页面或切换模块后会重新拉取最新窗口，避免最近消息偶发缺失。
 - **2026-04-27** 🔌 External Agent 已调整为入站 Bot 优先的可插拔 adapter 架构；Channels 也新增 Horbot 入站机器人通道实例，Horbot 可生成 App ID、Token 与 Inbound URL，WorkBuddy 或其他平台像飞书/Discord 机器人一样推送消息进来；`generic-agent-api` 仅保留为兼容旧 URL 调用模式。
@@ -70,6 +72,7 @@
 | 👀 **历史预览** | 历史消息中的图片、音频、PDF、Office、文本附件可直接内联预览；PPTX 使用 LibreOffice 转 PDF 后按页渲染；远程图片链接会尽量自动转成统一图片卡片；多图弹窗支持底部缩略条快速切换 |
 | 🌐 **浏览器与联网工具** | Agent 默认使用 `browser` / `web_search` / `web_fetch` 处理网页交互、搜索与抓取，浏览器 MCP 默认走 Playwright |
 | 🔁 **团队接力可视化** | 聊天区会直接显示接力棒次、交棒来源、继续讨论/返回总结状态 |
+| 🕸️ **技能图谱** | Skills 页面可查看当前 Agent 的技能关系、references 引用和相关能力，并把图谱作为运行时轻量提示 |
 | 🌐 **外部 Agent 接入** | 支持 adapter 化接入、连接探测、团队成员编排和 capability tags 管理 |
 | 🛡️ **Agent 治理与审计** | 支持 `AGENTS.md` / `SOUL.md` / `USER.md` 资产管理、工具审计摘要与风险筛选 |
 | 🌐 **三语界面切换** | 当前 Web UI 支持英文、简体中文、泰语切换，适合跨语言团队协作与演示 |
@@ -102,7 +105,7 @@
     <td align="center"><p align="center"><img src="./assets/preview-teams.png" width="420"></p></td>
   </tr>
   <tr>
-    <td align="center">导入校验 • 兼容性 • MCP</td>
+    <td align="center">导入校验 • 图谱关系 • 兼容性</td>
     <td align="center">Agent 管理 • 团队编排 • 记忆画像</td>
   </tr>
 </table>

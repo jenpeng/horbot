@@ -100,7 +100,8 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 ### Operational Tooling
 
 - Web admin UI for configuration, agents, teams, status, skills, channels, tasks, and token usage
-- Skills UI support for custom vs system grouping, auto-skill consolidation, and promoting custom skills into built-in system skills
+- Skills UI support for custom vs system grouping, auto-skill consolidation, promoting custom skills into built-in system skills, and focused skill graph visualization
+- Agent-scoped skill graphs connect skills to references and related skills, auto-refresh after managed skill changes, and feed compact runtime hints back into agent skill summaries
 - Configuration now exposes remote-image cache stats and a manual clear action for runtime-generated image-card cache files
 - Built-in UI locale switcher for English, Simplified Chinese, and Thai, with the selection persisted in browser storage
 - Smoke scripts for browser, chat, configuration, and agent asset flows

@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 from pathlib import Path
+from typing import Any
 
 from horbot.agent.skill_metadata_adapter import parse_skill_metadata
 from horbot.workspace.manager import AGENT_METADATA_DIRNAME
@@ -167,6 +168,8 @@ class SkillsLoader:
         all_skills = self.list_skills(filter_unavailable=False)
         if not all_skills:
             return ""
+
+        graph_hints = self._build_graph_runtime_hints()
         
         def escape_xml(s: str) -> str:
             return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -183,6 +186,9 @@ class SkillsLoader:
             lines.append(f"    <name>{name}</name>")
             lines.append(f"    <description>{desc}</description>")
             lines.append(f"    <location>{path}</location>")
+            graph_hint = graph_hints.get(s["name"])
+            if graph_hint:
+                self._append_graph_hint_xml(lines, graph_hint, escape_xml)
             
             # Show missing requirements for unavailable skills
             if not available:
@@ -194,6 +200,43 @@ class SkillsLoader:
         lines.append("</skills>")
         
         return "\n".join(lines)
+
+    def _build_graph_runtime_hints(self) -> dict[str, dict[str, list[dict[str, Any]]]]:
+        """Load compact persisted skill-graph hints for runtime skill discovery."""
+        try:
+            from horbot.agent.skill_graph import build_skill_graph_runtime_hints, load_skill_graph
+
+            return build_skill_graph_runtime_hints(load_skill_graph(workspace=self.workspace))
+        except Exception:
+            return {}
+
+    def _append_graph_hint_xml(
+        self,
+        lines: list[str],
+        graph_hint: dict[str, list[dict[str, Any]]],
+        escape_xml,
+    ) -> None:
+        references = graph_hint.get("references") or []
+        related = graph_hint.get("related") or []
+
+        if references:
+            lines.append("    <references>")
+            for reference in references:
+                name = escape_xml(str(reference.get("name") or "reference"))
+                path = escape_xml(str(reference.get("path") or ""))
+                lines.append(f"      <reference name=\"{name}\" location=\"{path}\" />")
+            lines.append("    </references>")
+
+        if related:
+            lines.append("    <related>")
+            for item in related:
+                name = escape_xml(str(item.get("name") or ""))
+                relation = escape_xml(str(item.get("type") or "related_to"))
+                confidence = float(item.get("confidence") or 0)
+                lines.append(
+                    f"      <skill name=\"{name}\" relation=\"{relation}\" confidence=\"{confidence:.2f}\" />"
+                )
+            lines.append("    </related>")
     
     def _get_missing_requirements(self, skill_meta: dict) -> list[str]:
         """Get a description of missing requirements."""

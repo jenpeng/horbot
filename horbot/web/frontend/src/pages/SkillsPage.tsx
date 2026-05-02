@@ -6,10 +6,22 @@ import Tabs from '../components/ui/Tabs';
 import { PageErrorState, PageLoadingState } from '../components/state';
 import { useI18n } from '../contexts/I18nContext';
 import skillsService from '../services/skills';
-import type { Skill, SkillDetail, MCPServerConfig, SkillInstallOption, SkillCompatibility } from '../types';
+import type { Skill, SkillDetail, MCPServerConfig, SkillInstallOption, SkillCompatibility, SkillGraph, SkillGraphEdge, SkillGraphNode } from '../types';
 import { lazyWithReload } from '../utils/lazyWithReload';
 
 const MarkdownRenderer = lazyWithReload('MarkdownRenderer', () => import('../components/MarkdownRenderer'));
+
+type PositionedGraphNode = SkillGraphNode & {
+  x: number;
+  y: number;
+};
+
+const truncateGraphLabel = (value: string, maxLength = 24) => {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength - 1)}…`;
+};
 
 interface SkillEditorState {
   isOpen: boolean;
@@ -74,8 +86,13 @@ const SkillsPage: React.FC = () => {
   const [mcpServers, setMcpServers] = useState<Record<string, MCPServerConfig>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'skills' | 'mcp'>('skills');
+  const [activeTab, setActiveTab] = useState<'skills' | 'graph' | 'mcp'>('skills');
   const [skillsView, setSkillsView] = useState<'all' | 'system' | 'custom'>('custom');
+  const [skillGraph, setSkillGraph] = useState<SkillGraph | null>(null);
+  const [graphLoading, setGraphLoading] = useState(false);
+  const [graphLoadedOnce, setGraphLoadedOnce] = useState(false);
+  const [showGraphPath, setShowGraphPath] = useState(false);
+  const [selectedGraphSkill, setSelectedGraphSkill] = useState<string | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<SkillDetail | null>(null);
   const [editor, setEditor] = useState<SkillEditorState>({
     isOpen: false,
@@ -114,12 +131,18 @@ const SkillsPage: React.FC = () => {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [skillsData, mcpData] = await Promise.all([
+      const [skillsData, mcpData, graphData] = await Promise.all([
         skillsService.getSkills(),
-        skillsService.getMcpServers()
+        skillsService.getMcpServers(),
+        skillsService.getSkillGraph().catch(() => null),
       ]);
       setSkills(skillsData || []);
       setMcpServers(mcpData || {});
+      if (graphData) {
+        setSkillGraph(graphData);
+        setGraphLoadedOnce(true);
+        setSelectedGraphSkill((current) => current ?? graphData.nodes.find((node) => node.kind === 'skill')?.id ?? null);
+      }
       setError(null);
     } catch (err) {
       setError(t('skills.notification.fetchFailed'));
@@ -133,9 +156,30 @@ const SkillsPage: React.FC = () => {
     void fetchData();
   }, []);
 
+  useEffect(() => {
+    if (activeTab !== 'graph' || graphLoadedOnce || graphLoading) {
+      return;
+    }
+    void fetchSkillGraph();
+  }, [activeTab, graphLoadedOnce, graphLoading]);
+
   const showNotification = (type: 'success' | 'error', message: string) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 3000);
+  };
+
+  const fetchSkillGraph = async () => {
+    setGraphLoading(true);
+    try {
+      const graph = await skillsService.getSkillGraph();
+      setSkillGraph(graph);
+      setSelectedGraphSkill((current) => current ?? graph.nodes.find((node) => node.kind === 'skill')?.id ?? null);
+    } catch (err: any) {
+      showNotification('error', err.message || t('skills.notification.graphLoadFailed'));
+    } finally {
+      setGraphLoadedOnce(true);
+      setGraphLoading(false);
+    }
   };
 
   const systemSkills = useMemo(
@@ -176,6 +220,90 @@ const SkillsPage: React.FC = () => {
     ],
     [customSkills.length, skills.length, systemSkills.length, t],
   );
+  const graphStats = useMemo(() => {
+    const graph = skillGraph;
+    if (!graph) {
+      return {
+        skillNodes: 0,
+        referenceNodes: 0,
+        similarEdges: 0,
+        referenceEdges: 0,
+      };
+    }
+    return {
+      skillNodes: graph.nodes.filter((node) => node.kind === 'skill').length,
+      referenceNodes: graph.nodes.filter((node) => node.kind === 'reference').length,
+      similarEdges: graph.edges.filter((edge) => edge.type === 'similar_to').length,
+      referenceEdges: graph.edges.filter((edge) => edge.type === 'has_reference').length,
+    };
+  }, [skillGraph]);
+  const graphVisualization = useMemo(() => {
+    const graph = skillGraph;
+    if (!graph) {
+      return {
+        nodes: [] as PositionedGraphNode[],
+        edges: [] as SkillGraphEdge[],
+        selectedNode: null as SkillGraphNode | null,
+        focusSkills: [] as SkillGraphNode[],
+        referenceNodes: [] as SkillGraphNode[],
+        relatedNodes: [] as SkillGraphNode[],
+      };
+    }
+
+    const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+    const focusSkills = graph.nodes
+      .filter((node) => node.kind === 'skill')
+      .sort((left, right) => right.reference_count - left.reference_count || left.name.localeCompare(right.name))
+      .slice(0, 18);
+    const maybeSelected = nodeById.get(selectedGraphSkill || '');
+    const selectedNode = maybeSelected?.kind === 'skill' ? maybeSelected : focusSkills[0] ?? null;
+
+    if (!selectedNode) {
+      return {
+        nodes: [] as PositionedGraphNode[],
+        edges: [] as SkillGraphEdge[],
+        selectedNode: null as SkillGraphNode | null,
+        focusSkills,
+        referenceNodes: [] as SkillGraphNode[],
+        relatedNodes: [] as SkillGraphNode[],
+      };
+    }
+
+    const referenceNodes = graph.edges
+      .filter((edge) => edge.type === 'has_reference' && edge.source === selectedNode.id)
+      .map((edge) => nodeById.get(edge.target))
+      .filter((node): node is SkillGraphNode => Boolean(node && node.kind === 'reference'))
+      .slice(0, 8);
+
+    const relatedNodes = graph.edges
+      .filter((edge) => edge.type !== 'has_reference' && (edge.source === selectedNode.id || edge.target === selectedNode.id))
+      .sort((left, right) => right.confidence - left.confidence)
+      .map((edge) => nodeById.get(edge.source === selectedNode.id ? edge.target : edge.source))
+      .filter((node): node is SkillGraphNode => Boolean(node && node.kind === 'skill' && node.id !== selectedNode.id));
+    const dedupedRelatedNodes = Array.from(new Map(relatedNodes.map((node) => [node.id, node])).values()).slice(0, 6);
+
+    const positionColumn = (nodes: SkillGraphNode[], x: number, top = 70, height = 280): PositionedGraphNode[] => {
+      const gap = nodes.length > 1 ? height / (nodes.length - 1) : 0;
+      return nodes.map((node, index) => ({
+        ...node,
+        x,
+        y: nodes.length > 1 ? top + gap * index : 210,
+      }));
+    };
+
+    const nodes = [
+      ...positionColumn(dedupedRelatedNodes, 170, 85, 250),
+      { ...selectedNode, x: 450, y: 210 },
+      ...positionColumn(referenceNodes, 730, 70, 280),
+    ];
+    const visibleIds = new Set(nodes.map((node) => node.id));
+    const edges = graph.edges
+      .filter((edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target))
+      .filter((edge) => edge.source === selectedNode.id || edge.target === selectedNode.id)
+      .slice(0, 18);
+
+    return { nodes, edges, selectedNode, focusSkills, referenceNodes, relatedNodes: dedupedRelatedNodes };
+  }, [selectedGraphSkill, skillGraph]);
 
   const getSkillOriginLabel = (skill: Skill) => {
     if (skill.source === 'builtin' || skill.source_origin_kind === 'builtin') {
@@ -630,6 +758,30 @@ const SkillsPage: React.FC = () => {
     }
   };
 
+  const handleRebuildSkillGraph = async () => {
+    setGraphLoading(true);
+    setSaving(true);
+    try {
+      const graph = await skillsService.rebuildSkillGraph();
+      setSkillGraph(graph);
+      setGraphLoadedOnce(true);
+      setSelectedGraphSkill(graph.nodes.find((node) => node.kind === 'skill')?.id ?? null);
+      showNotification('success', t('skills.notification.graphRebuilt', {
+        nodes: graph.node_count,
+        edges: graph.edge_count,
+      }));
+    } catch (err: any) {
+      const message =
+        err.message ||
+        err.response?.data?.detail ||
+        t('skills.notification.graphRebuildFailed');
+      showNotification('error', message);
+    } finally {
+      setSaving(false);
+      setGraphLoading(false);
+    }
+  };
+
   const handleBatchToggle = async (enable: boolean) => {
     const skillsToToggle = Array.from(selectedSkills);
     setSaving(true);
@@ -814,6 +966,11 @@ const SkillsPage: React.FC = () => {
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
       </svg>
     )},
+    { id: 'graph', label: t('skills.tabGraph', { count: skillGraph?.edge_count ?? 0 }), icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M17 7h.01M12 17h.01M7.05 7.05l4.9 9.9m4.9-9.9l-4.9 9.9M7 7h10" />
+      </svg>
+    )},
     { id: 'mcp', label: t('skills.tabMcpServers', { count: Object.keys(mcpServers).length }), icon: (
       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
@@ -920,6 +1077,36 @@ const SkillsPage: React.FC = () => {
                   </Button>
                 </>
               )}
+              {activeTab === 'graph' && (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => { void fetchSkillGraph(); }}
+                    disabled={graphLoading}
+                    leftIcon={
+                      <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 ${graphLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    }
+                  >
+                    {t('skills.graph.refresh')}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => { void handleRebuildSkillGraph(); }}
+                    disabled={saving || graphLoading}
+                    leftIcon={
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12h6l3-8 3 16 3-8h3" />
+                      </svg>
+                    }
+                  >
+                    {t('skills.graph.rebuild')}
+                  </Button>
+                </>
+              )}
               {activeTab === 'mcp' && (
                 <Button
                   variant="primary"
@@ -941,7 +1128,7 @@ const SkillsPage: React.FC = () => {
         <Tabs
           tabs={tabs}
           activeTab={activeTab}
-          onChange={(id) => setActiveTab(id as 'skills' | 'mcp')}
+          onChange={(id) => setActiveTab(id as 'skills' | 'graph' | 'mcp')}
           variant="underline"
         />
 
@@ -1067,6 +1254,302 @@ const SkillsPage: React.FC = () => {
                   </p>
                 </div>
                 {renderSkillCards(filteredSkills)}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'graph' && (
+          <div className="space-y-5">
+            <Card padding="md" className="overflow-hidden">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-surface-900">{t('skills.graph.title')}</h3>
+                  <p className="text-sm text-surface-600 mt-1">
+                    {skillGraph?.persisted
+                      ? t('skills.graph.persistedHint')
+                      : t('skills.graph.ephemeralHint')}
+                  </p>
+                  {skillGraph?.path && (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-surface-500 underline decoration-surface-300 underline-offset-4 transition-colors hover:text-surface-800"
+                        onClick={() => setShowGraphPath((value) => !value)}
+                      >
+                        {showGraphPath ? t('skills.graph.hidePath') : t('skills.graph.showPath')}
+                      </button>
+                      {showGraphPath && (
+                        <p className="mt-2 rounded-lg bg-surface-50 px-3 py-2 text-xs text-surface-500 font-mono break-all">
+                          {skillGraph.path}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="rounded-xl border border-surface-200 bg-surface-50 px-4 py-3 text-center">
+                    <div className="text-xl font-bold text-surface-900">{graphStats.skillNodes}</div>
+                    <div className="text-xs text-surface-500">{t('skills.graph.skillNodes')}</div>
+                  </div>
+                  <div className="rounded-xl border border-surface-200 bg-surface-50 px-4 py-3 text-center">
+                    <div className="text-xl font-bold text-surface-900">{graphStats.referenceNodes}</div>
+                    <div className="text-xs text-surface-500">{t('skills.graph.referenceNodes')}</div>
+                  </div>
+                  <div className="rounded-xl border border-surface-200 bg-surface-50 px-4 py-3 text-center">
+                    <div className="text-xl font-bold text-surface-900">{graphStats.referenceEdges}</div>
+                    <div className="text-xs text-surface-500">{t('skills.graph.referenceEdges')}</div>
+                  </div>
+                  <div className="rounded-xl border border-surface-200 bg-surface-50 px-4 py-3 text-center">
+                    <div className="text-xl font-bold text-surface-900">{graphStats.similarEdges}</div>
+                    <div className="text-xs text-surface-500">{t('skills.graph.similarEdges')}</div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            {graphLoading && !skillGraph ? (
+              <div className="flex h-56 items-center justify-center rounded-2xl border border-surface-200 bg-white text-sm text-surface-500">
+                {t('skills.graph.loading')}
+              </div>
+            ) : !skillGraph || skillGraph.nodes.length === 0 ? (
+              <div className="flex h-56 flex-col items-center justify-center rounded-2xl border border-surface-200 bg-white text-center">
+                <p className="font-medium text-surface-700">{t('skills.graph.emptyTitle')}</p>
+                <p className="mt-1 text-sm text-surface-500">{t('skills.graph.emptySubtitle')}</p>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="mt-4"
+                  onClick={() => { void handleRebuildSkillGraph(); }}
+                  disabled={saving || graphLoading}
+                >
+                  {t('skills.graph.rebuild')}
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                <Card padding="md" className="overflow-hidden">
+                  <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <h4 className="font-semibold text-surface-900">{t('skills.graph.visualTitle')}</h4>
+                      <p className="text-xs text-surface-500">{t('skills.graph.visualSubtitle')}</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-surface-500">
+                      <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-primary-500" />{t('skills.graph.legend.skill')}</span>
+                      <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-accent-emerald" />{t('skills.graph.legend.reference')}</span>
+                      <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-5 rounded-full bg-primary-300" />{t('skills.graph.legend.referenceEdge')}</span>
+                      <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-5 rounded-full bg-accent-indigo/70" />{t('skills.graph.legend.relatedEdge')}</span>
+                    </div>
+                  </div>
+                  <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)_260px]">
+                    <div className="rounded-2xl border border-surface-200 bg-surface-50/80 p-3">
+                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-surface-500">
+                        {t('skills.graph.focusList')}
+                      </div>
+                      <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                        {graphVisualization.focusSkills.map((node) => (
+                          <button
+                            key={node.id}
+                            type="button"
+                            onClick={() => setSelectedGraphSkill(node.id)}
+                            className={`w-full rounded-xl border px-3 py-2 text-left transition-colors ${
+                              graphVisualization.selectedNode?.id === node.id
+                                ? 'border-primary-200 bg-white text-primary-700 shadow-sm'
+                                : 'border-transparent bg-transparent text-surface-600 hover:bg-white hover:text-surface-900'
+                            }`}
+                          >
+                            <div className="truncate text-sm font-semibold">{node.name}</div>
+                            <div className="mt-1 text-xs text-surface-500">
+                              {t('skills.graph.referencesCount', { count: node.reference_count })}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="relative overflow-hidden rounded-2xl border border-surface-200 bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,0.12),transparent_34%),linear-gradient(135deg,rgba(248,250,252,1),rgba(255,255,255,1))]">
+                      <svg
+                        role="img"
+                        aria-label={t('skills.graph.visualTitle')}
+                        viewBox="0 0 900 420"
+                        className="h-[390px] w-full"
+                      >
+                        <defs>
+                          <marker id="skillGraphArrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+                            <path d="M0,0 L0,6 L8,3 z" fill="#93a4bd" />
+                          </marker>
+                          <filter id="skillGraphShadow" x="-20%" y="-20%" width="140%" height="140%">
+                            <feDropShadow dx="0" dy="8" stdDeviation="8" floodColor="#0f172a" floodOpacity="0.10" />
+                          </filter>
+                        </defs>
+                        {graphVisualization.edges.map((edge) => {
+                          const source = graphVisualization.nodes.find((node) => node.id === edge.source);
+                          const target = graphVisualization.nodes.find((node) => node.id === edge.target);
+                          if (!source || !target) {
+                            return null;
+                          }
+                          const stroke = edge.type === 'has_reference' ? '#93c5fd' : '#818cf8';
+                          const dash = edge.type === 'has_reference' ? undefined : '7 7';
+                          const midX = (source.x + target.x) / 2;
+                          return (
+                            <path
+                              key={edge.id}
+                              d={`M ${source.x + 74} ${source.y} C ${midX} ${source.y}, ${midX} ${target.y}, ${target.x - 74} ${target.y}`}
+                              fill="none"
+                              stroke={stroke}
+                              strokeWidth={Math.max(1.5, edge.confidence * 3)}
+                              strokeDasharray={dash}
+                              opacity="0.72"
+                              markerEnd="url(#skillGraphArrow)"
+                            />
+                          );
+                        })}
+                        {graphVisualization.nodes.map((node) => {
+                          const isReference = node.kind === 'reference';
+                          const isSelected = graphVisualization.selectedNode?.id === node.id;
+                          return (
+                            <g
+                              key={node.id}
+                              transform={`translate(${node.x}, ${node.y})`}
+                              filter="url(#skillGraphShadow)"
+                              className={isReference ? '' : 'cursor-pointer'}
+                              onClick={() => {
+                                if (!isReference) {
+                                  setSelectedGraphSkill(node.id);
+                                }
+                              }}
+                            >
+                              <rect
+                                x={isSelected ? '-104' : '-86'}
+                                y={isSelected ? '-34' : '-28'}
+                                width={isSelected ? '208' : '172'}
+                                height={isSelected ? '68' : '56'}
+                                rx="18"
+                                className={
+                                  isReference
+                                    ? 'fill-emerald-50 stroke-emerald-200'
+                                    : isSelected
+                                      ? 'fill-primary-600 stroke-primary-700'
+                                      : 'fill-white stroke-primary-200'
+                                }
+                                strokeWidth="1.5"
+                              />
+                              <circle
+                                cx={isSelected ? '-78' : '-62'}
+                                cy="0"
+                                r="10"
+                                className={isReference ? 'fill-accent-emerald' : isSelected ? 'fill-white' : 'fill-primary-500'}
+                              />
+                              <text x={isSelected ? '-60' : '-44'} y="-4" className={`${isSelected ? 'fill-white' : 'fill-surface-900'} text-[12px] font-semibold`}>
+                                {truncateGraphLabel(node.name, isSelected ? 26 : 22)}
+                              </text>
+                              <text x={isSelected ? '-60' : '-44'} y="14" className={`${isSelected ? 'fill-primary-100' : 'fill-surface-500'} text-[10px]`}>
+                                {isReference ? t('skills.graph.legend.reference') : isSelected ? t('skills.graph.focusNode') : t('skills.graph.legend.skill')}
+                              </text>
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+                    <div className="rounded-2xl border border-surface-200 bg-surface-50/80 p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-surface-500">
+                        {t('skills.graph.focusDetail')}
+                      </div>
+                      <div className="mt-2 break-words text-sm font-semibold text-surface-900">
+                        {graphVisualization.selectedNode?.name}
+                      </div>
+                      <p className="mt-2 line-clamp-4 text-sm text-surface-600">
+                        {graphVisualization.selectedNode?.description}
+                      </p>
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <div className="rounded-xl bg-white p-3 text-center ring-1 ring-surface-200">
+                          <div className="text-lg font-bold text-surface-900">{graphVisualization.referenceNodes.length}</div>
+                          <div className="text-xs text-surface-500">{t('skills.graph.legend.reference')}</div>
+                        </div>
+                        <div className="rounded-xl bg-white p-3 text-center ring-1 ring-surface-200">
+                          <div className="text-lg font-bold text-surface-900">{graphVisualization.relatedNodes.length}</div>
+                          <div className="text-xs text-surface-500">{t('skills.graph.legend.relatedEdge')}</div>
+                        </div>
+                      </div>
+                      <div className="mt-4 space-y-2">
+                        {graphVisualization.relatedNodes.map((node) => (
+                          <button
+                            key={node.id}
+                            type="button"
+                            onClick={() => setSelectedGraphSkill(node.id)}
+                            className="w-full truncate rounded-lg bg-white px-3 py-2 text-left text-xs font-semibold text-primary-700 ring-1 ring-primary-100 hover:bg-primary-50"
+                          >
+                            {node.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+
+                <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+                <Card padding="md">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <h4 className="font-semibold text-surface-900">{t('skills.graph.nodesTitle')}</h4>
+                      <p className="text-xs text-surface-500">{t('skills.graph.nodesSubtitle')}</p>
+                    </div>
+                    <Badge variant="default" size="sm">{skillGraph.node_count}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {skillGraph.nodes.filter((node) => node.kind === 'skill').slice(0, 24).map((node) => (
+                      <div key={node.id} className="rounded-xl border border-surface-200 bg-white p-4 transition-colors hover:border-primary-200 hover:bg-primary-50/40">
+                        <div className="flex items-start gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-semibold text-surface-900">{node.name}</p>
+                            <p className="mt-1 line-clamp-2 text-sm text-surface-600">{node.description}</p>
+                          </div>
+                          <span className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold leading-none ring-1 ${
+                            node.source_group === 'system'
+                              ? 'bg-accent-indigo/10 text-accent-indigo ring-accent-indigo/15'
+                              : 'bg-primary-50 text-primary-700 ring-primary-100'
+                          }`}>
+                            {node.source_group === 'system' ? t('skills.badge.system') : t('skills.badge.custom')}
+                          </span>
+                        </div>
+                        <div className="mt-3 flex items-center gap-2 text-xs text-surface-500">
+                          <span>{t('skills.graph.referencesCount', { count: node.reference_count })}</span>
+                          {node.origin_agent_id && <span>· Agent {node.origin_agent_id}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+
+                <Card padding="md">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <h4 className="font-semibold text-surface-900">{t('skills.graph.edgesTitle')}</h4>
+                      <p className="text-xs text-surface-500">{t('skills.graph.edgesSubtitle')}</p>
+                    </div>
+                    <Badge variant="default" size="sm">{skillGraph.edge_count}</Badge>
+                  </div>
+                  <div className="max-h-[560px] space-y-3 overflow-y-auto pr-1">
+                    {skillGraph.edges.slice(0, 80).map((edge) => (
+                      <div key={edge.id} className="rounded-xl border border-surface-200 bg-surface-50 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-primary-700 ring-1 ring-primary-100">
+                            {t(`skills.graph.edge.${edge.type}`)}
+                          </span>
+                          <span className="text-xs font-medium text-surface-500">
+                            {Math.round(edge.confidence * 100)}%
+                          </span>
+                        </div>
+                        <div className="mt-2 text-sm font-medium text-surface-800">
+                          <span className="break-all">{edge.source}</span>
+                          <span className="mx-2 text-surface-400">→</span>
+                          <span className="break-all">{edge.target}</span>
+                        </div>
+                        <p className="mt-2 text-xs text-surface-500">{edge.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+                </div>
               </div>
             )}
           </div>

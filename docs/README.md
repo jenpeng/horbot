@@ -25,7 +25,8 @@ Horbot is a lightweight multi-agent assistant stack with:
 - Playwright-backed browser tooling with `browser`, `web_search`, and `web_fetch` as the standard web tool path
 - background skill distillation from reusable work into skill families plus `references/` notes
 - validated `.skill` / `.zip` imports with compatibility checks
-- Skills UI actions for consolidating auto-generated skills and promoting custom skills into built-in system skills
+- Skills UI actions for consolidating auto-generated skills, promoting custom skills into built-in system skills, and inspecting a focused skill graph
+- agent-scoped skill graphs that link skills, reference files, and related capabilities, then provide compact runtime hints without loading full reference content
 - WeCom AI Bot channel support with reply streaming and media handling
 
 ## Interface Preview

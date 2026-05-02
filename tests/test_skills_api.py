@@ -140,9 +140,11 @@ generated_by: skill-evolution
 
             self.assertTrue((skills_dir / "demo-skill" / "SKILL.md").exists())
             self.assertFalse((workspace / "skills" / "demo-skill" / "SKILL.md").exists())
+            self.assertTrue((workspace / ".horbot-agent" / "skill_graph.json").exists())
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["name"], "demo-skill")
+        self.assertTrue(response.json()["skill_graph_refreshed"])
 
     async def test_get_skill_detail_includes_resolved_path(self):
         app = FastAPI()
@@ -179,6 +181,58 @@ description: Demo skill
         self.assertEqual(payload["path"], str(skill_file))
         self.assertEqual(payload["source"], "user")
 
+    async def test_skill_graph_rebuild_persists_graph_with_reference_edges(self):
+        app = FastAPI()
+        app.include_router(api_router, prefix="/api")
+        transport = httpx.ASGITransport(app=app)
+
+        with TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir) / "workspace"
+            skills_dir = Path(tmpdir) / "agent-skills"
+            skill_dir = skills_dir / "auto-officecli-ppt"
+            references_dir = skill_dir / "references"
+            references_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(
+                """---
+name: auto-officecli-ppt
+description: Reusable PowerPoint editing and layout repair workflows.
+generated_by: skill-evolution
+---
+
+# OfficeCLI PPT
+
+## Reference Library
+- [Layout Repair](references/layout-repair.md)
+""",
+                encoding="utf-8",
+            )
+            (references_dir / "layout-repair.md").write_text(
+                "# Layout Repair\n\nUse this when PPT text boxes overflow.\n",
+                encoding="utf-8",
+            )
+
+            with patch(
+                "horbot.web.api._resolve_skill_dir_for_request",
+                return_value=(None, workspace, skills_dir),
+            ):
+                async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+                    rebuild_response = await client.post("/api/skills/graph/rebuild")
+                    get_response = await client.get("/api/skills/graph")
+
+            graph_path = workspace / ".horbot-agent" / "skill_graph.json"
+            self.assertTrue(graph_path.exists())
+
+        self.assertEqual(rebuild_response.status_code, 200)
+        payload = rebuild_response.json()
+        self.assertTrue(payload["persisted"])
+        self.assertGreaterEqual(payload["node_count"], 2)
+        self.assertIn("Rebuilt skill graph", payload["message"])
+        edge_types = {edge["type"] for edge in payload["edges"]}
+        self.assertIn("has_reference", edge_types)
+
+        self.assertEqual(get_response.status_code, 200)
+        self.assertTrue(get_response.json()["persisted"])
+
     async def test_import_skill_package_accepts_valid_skill_archive(self):
         app = FastAPI()
         app.include_router(api_router, prefix="/api")
@@ -208,11 +262,13 @@ metadata: {"horbot":{"requires":{"bins":["definitely-missing-horbot-bin"]}}}
                     )
 
             self.assertTrue((workspace / ".horbot-agent" / "skills" / "demo-skill" / "SKILL.md").exists())
+            self.assertTrue((workspace / ".horbot-agent" / "skill_graph.json").exists())
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["name"], "demo-skill")
         self.assertEqual(payload["compatibility"]["status"], "incompatible")
+        self.assertTrue(payload["skill_graph_refreshed"])
 
     async def test_import_skill_package_rejects_invalid_archive(self):
         app = FastAPI()

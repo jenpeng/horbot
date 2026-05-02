@@ -1,5 +1,5 @@
 import api from './api';
-import type { Skill, SkillDetail, MCPServerConfig, SkillImportResult } from '../types';
+import type { Skill, SkillDetail, MCPServerConfig, SkillImportResult, SkillGraph } from '../types';
 
 interface SkillsListResponse {
   skills: Skill[];
@@ -106,6 +106,16 @@ export const skillsService = {
 
   consolidateGeneratedSkills: async (): Promise<ConsolidateGeneratedSkillsResponse> => {
     const response = await api.post<ConsolidateGeneratedSkillsResponse>('/api/skills/consolidate-generated');
+    return response.data;
+  },
+
+  getSkillGraph: async (): Promise<SkillGraph> => {
+    const response = await api.get<SkillGraph>('/api/skills/graph');
+    return response.data;
+  },
+
+  rebuildSkillGraph: async (): Promise<SkillGraph> => {
+    const response = await api.post<SkillGraph>('/api/skills/graph/rebuild');
     return response.data;
   },
 

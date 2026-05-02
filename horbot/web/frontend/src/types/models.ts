@@ -368,6 +368,47 @@ export interface SkillImportResult {
   compatibility: SkillCompatibility;
 }
 
+export type SkillGraphNodeKind = 'skill' | 'reference';
+
+export type SkillGraphEdgeType = 'has_reference' | 'similar_to' | 'related_to' | 'depends_on' | 'composes_with' | 'supersedes';
+
+export interface SkillGraphNode {
+  id: string;
+  name: string;
+  kind: SkillGraphNodeKind;
+  source: 'builtin' | 'user';
+  source_group: 'system' | 'custom';
+  origin_kind: 'builtin' | 'agent' | 'manual' | null;
+  origin_agent_id?: string | null;
+  description: string;
+  path: string;
+  reference_count: number;
+  updated_at: string;
+}
+
+export interface SkillGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  type: SkillGraphEdgeType;
+  confidence: number;
+  reason: string;
+}
+
+export interface SkillGraph {
+  version: number;
+  generated_at: string;
+  workspace: string;
+  skills_dir: string;
+  path?: string;
+  persisted?: boolean;
+  message?: string;
+  node_count: number;
+  edge_count: number;
+  nodes: SkillGraphNode[];
+  edges: SkillGraphEdge[];
+}
+
 export interface ProviderConfig {
   apiKey: string;
   hasApiKey?: boolean;

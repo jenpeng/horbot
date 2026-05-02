@@ -168,6 +168,22 @@ The Skills page also includes two manual management actions:
 - `Consolidate Generated`: merge related `auto-*` skills into broader families
 - `Promote to Builtin`: move a custom workspace skill into the built-in system skill set
 
+### Skill Graph
+
+The `Graph` tab shows an agent-scoped graph built from the current skill set.
+
+It includes:
+
+- skill nodes from system and custom skills
+- reference nodes for files under `references/`
+- `has_reference`, `similar_to`, and `related_to` edges
+- summary cards for node and edge counts
+- a focused one-hop graph view so dense relationships do not collapse into an unreadable cluster
+
+Horbot automatically refreshes the persisted graph after managed skill changes such as create, update, import, delete, enable/disable, generated-skill consolidation, promotion to builtin, and automatic skill evolution writes. Use `Rebuild Graph` when files were changed outside the UI or when the graph needs to be regenerated immediately.
+
+The persisted graph is stored under the current agent workspace as `.horbot-agent/skill_graph.json`. The agent runtime also reads it as compact skill-summary hints, so related skills and nearby `references/` files can be suggested without loading full reference content into every request.
+
 ## Team Relay Behavior
 
 Current team relay behavior is intentionally ordered, not parallel:

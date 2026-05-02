@@ -64,12 +64,21 @@ The Web UI also exposes:
 - `Consolidate Generated`: manually merge related `auto-*` skills into broader families
 - `Promote to Builtin`: turn a custom workspace skill into a built-in system skill
 - `Export`: download a system or custom skill as a re-importable `.skill` package, including `references/` and other standard skill files
+- `Graph`: inspect and rebuild the current agent skill graph. The graph records skill nodes, reference nodes, `has_reference`, `similar_to`, and `related_to` edges.
 
 ## Storage
 
 The active skill path is agent-scoped:
 
 - `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`
+
+The persisted skill graph is also agent-scoped:
+
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/skill_graph.json`
+
+The agent runtime consumes the persisted graph as compact discovery hints in the skills summary. It does not inline reference contents; it points the agent to nearby skills and `references/` files so the agent can read only the local files needed for the current task.
+
+Horbot refreshes the persisted graph after managed skill mutations, including create, update, import, delete, toggle, generated-skill consolidation, promotion to builtin, and agent `save_skill` / automatic skill evolution writes. Graph refresh failures are logged as warnings and do not roll back the skill operation.
 
 Legacy `.horbot/agents/<agent-id>/skills` and `workspace/skills` assumptions no longer describe the current runtime.
 

@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from horbot.agent.skill_graph import build_skill_graph, save_skill_graph
 from horbot.agent.skill_metadata_adapter import parse_skill_metadata
 from horbot.agent.skills import SkillsLoader
 
@@ -120,6 +121,54 @@ metadata: {"openclaw":{"enabled":"false"}}
             missing,
             ["CLI: definitely-missing-horbot-bin", "ENV: DEFINITELY_MISSING_HORBOT_ENV"],
         )
+
+    def test_skills_summary_includes_compact_skill_graph_hints(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir)
+            skills_dir = workspace / ".horbot-agent" / "skills"
+
+            ppt_dir = skills_dir / "auto-officecli-ppt"
+            ppt_refs = ppt_dir / "references"
+            ppt_refs.mkdir(parents=True, exist_ok=True)
+            (ppt_dir / "SKILL.md").write_text(
+                """---
+description: PowerPoint layout repair workflows.
+---
+
+# OfficeCLI PPT
+
+Use PowerPoint layout repair workflows.
+""",
+                encoding="utf-8",
+            )
+            (ppt_refs / "layout-repair.md").write_text("# Layout Repair\n\nFix overflow.", encoding="utf-8")
+
+            ppt_alt_dir = skills_dir / "officecli-ppt-layout"
+            ppt_alt_dir.mkdir(parents=True, exist_ok=True)
+            (ppt_alt_dir / "SKILL.md").write_text(
+                """---
+description: PowerPoint layout repair and overflow workflows.
+---
+
+# OfficeCLI PPT Layout
+""",
+                encoding="utf-8",
+            )
+
+            loader = SkillsLoader(workspace=workspace, builtin_skills_dir=workspace / "missing-builtin")
+            graph = build_skill_graph(
+                workspace=workspace,
+                skills_dir=skills_dir,
+                skills=loader.list_skills(filter_unavailable=False),
+            )
+            save_skill_graph(graph, workspace=workspace)
+
+            summary = loader.build_skills_summary()
+
+        self.assertIn("<references>", summary)
+        self.assertIn("layout-repair.md", summary)
+        self.assertIn("<related>", summary)
+        self.assertIn('name="officecli-ppt-layout"', summary)
 
 
 if __name__ == '__main__':

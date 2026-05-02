@@ -19,6 +19,8 @@ vi.mock('../services/skills', () => ({
     exportSkill: vi.fn(),
     promoteSkill: vi.fn(),
     consolidateGeneratedSkills: vi.fn(),
+    getSkillGraph: vi.fn(),
+    rebuildSkillGraph: vi.fn(),
     getMcpServers: vi.fn(),
     addMcpServer: vi.fn(),
     updateMcpServer: vi.fn(),
@@ -114,6 +116,54 @@ describe('SkillsPage', () => {
     vi.mocked(skillsService.getSkill).mockResolvedValue(skillDetailFixture);
     vi.mocked(skillsService.getMcpServers).mockResolvedValue({});
     vi.mocked(skillsService.exportSkill).mockResolvedValue(new Blob(['demo'], { type: 'application/zip' }));
+    vi.mocked(skillsService.getSkillGraph).mockResolvedValue({
+      version: 1,
+      generated_at: '2026-05-02T00:00:00Z',
+      workspace: '/tmp/workspace',
+      skills_dir: '/tmp/workspace/.horbot-agent/skills',
+      path: '/tmp/workspace/.horbot-agent/skill_graph.json',
+      persisted: false,
+      node_count: 2,
+      edge_count: 1,
+      nodes: [
+        {
+          id: 'research-helper',
+          name: 'research-helper',
+          kind: 'skill',
+          source: 'user',
+          source_group: 'custom',
+          origin_kind: 'manual',
+          origin_agent_id: null,
+          description: 'Helps with research.',
+          path: '/tmp/research-helper/SKILL.md',
+          reference_count: 1,
+          updated_at: '2026-05-02T00:00:00Z',
+        },
+        {
+          id: 'research-helper::references/guide.md',
+          name: 'Guide',
+          kind: 'reference',
+          source: 'user',
+          source_group: 'custom',
+          origin_kind: 'manual',
+          origin_agent_id: null,
+          description: 'Reference note for research-helper',
+          path: '/tmp/research-helper/references/guide.md',
+          reference_count: 0,
+          updated_at: '2026-05-02T00:00:00Z',
+        },
+      ],
+      edges: [
+        {
+          id: 'has_reference:research-helper->research-helper::references/guide.md',
+          source: 'research-helper',
+          target: 'research-helper::references/guide.md',
+          type: 'has_reference',
+          confidence: 1,
+          reason: 'Reference file is linked or stored under this skill family.',
+        },
+      ],
+    });
   });
 
   it('renders the shared page loading state while skills are loading', () => {
@@ -302,6 +352,21 @@ describe('SkillsPage', () => {
     expect(await screen.findByText('Skill "research-helper" exported')).toBeInTheDocument();
 
     clickSpy.mockRestore();
+  });
+
+  it('loads the skill graph tab and shows graph relationships', async () => {
+    renderWithI18n(<SkillsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Graph (1)' }));
+
+    expect(await screen.findByText('Skill Graph')).toBeInTheDocument();
+    expect(await screen.findByText('Skill Graph Map')).toBeInTheDocument();
+    expect((await screen.findAllByText('research-helper')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('has reference')).toBeInTheDocument();
+    expect(screen.queryByText('/tmp/workspace/.horbot-agent/skill_graph.json')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show graph storage path' }));
+    expect(screen.getByText('/tmp/workspace/.horbot-agent/skill_graph.json')).toBeInTheDocument();
+    expect(skillsService.getSkillGraph).toHaveBeenCalledTimes(1);
   });
 
   it('shows the skill storage path and source hint in the detail modal', async () => {

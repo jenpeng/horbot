@@ -31,7 +31,8 @@ horbot 采用模块化设计，核心组件包括：
 - PPTX 中间 PDF 属于临时预览文件，关闭预览时会清理；按页生成的 PNG 会保留在 `.horbot/data/uploads/.previews` 作为短期缓存，并在 3 天未使用后自动清理
 - Live Artifact 能力会把 Agent 输出的结构化渲染规格临时转换成 sandbox HTML 视图，运行文件统一落在 `.horbot/runtime/rendered-artifacts`，刷新历史后可从消息中的规格重新生成
 - Configuration 页面新增“远程图片缓存”状态区块，直接读取后端缓存统计，并支持手动清理自动落盘的远程图片缓存
-- Skills 页面当前支持系统技能/自定义技能分组展示、自动技能手动整理，以及把自定义技能转为系统技能
+- Skills 页面当前支持系统技能/自定义技能分组展示、自动技能手动整理、把自定义技能转为系统技能，以及查看当前 Agent 的技能图谱
+- 技能图谱会把技能、`references/` 引用文件和相关技能连接起来，持久化到当前 Agent workspace 的 `.horbot-agent/skill_graph.json`，并作为 Agent 运行时技能摘要的轻量召回提示
 - Web 聊天历史接口和前端加载链路已统一采用 no-store 策略，并在增量锚点失效时回退拉取最新窗口，减少刷新或切换模块后最近消息偶发缺失的问题
 
 ### 架构概览图
@@ -131,6 +132,7 @@ horbot/
 │   ├── context.py           # 上下文构建器
 │   ├── memory.py            # 记忆存储
 │   ├── skills.py            # 技能加载器
+│   ├── skill_graph.py       # 技能图谱构建与持久化
 │   ├── subagent.py          # 子 Agent 管理
 │   ├── planner.py           # 规划器入口
 │   ├── planner/             # 规划模块

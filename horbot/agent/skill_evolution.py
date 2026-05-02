@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from horbot.agent.memory import MemoryStore
+from horbot.agent.skill_graph import refresh_skill_graph_safely
 from horbot.agent.skill_package import validate_skill_content
 from horbot.agent.skills import SkillsLoader, resolve_skills_dir
 from horbot.providers.base import LLMProvider
@@ -317,6 +318,8 @@ class SkillEvolutionEngine:
             reason=reason,
             changed=changed,
         )
+        if changed:
+            self._refresh_skill_graph("skill_evolution_review")
         return SkillEvolutionResult(
             action=action,
             skill_name=skill_name,
@@ -440,6 +443,8 @@ class SkillEvolutionEngine:
             reason=reason,
             changed=changed,
         )
+        if changed:
+            self._refresh_skill_graph("manual_save_skill_tool")
         return SkillEvolutionResult(
             action=normalized_action,
             skill_name=resolved_skill_name,
@@ -1003,12 +1008,23 @@ Call save_skill_review exactly once."""
             processed.add(target_name)
 
         family_count_after = len(self._list_generated_skill_families())
-        return {
+        result = {
             "family_count_before": family_count_before,
             "family_count_after": family_count_after,
             "merged_skill_count": sum(len(item["merged_skills"]) for item in updated_families),
             "updated_families": updated_families,
         }
+        if updated_families:
+            self._refresh_skill_graph("skill_consolidate_generated")
+        return result
+
+    def _refresh_skill_graph(self, reason: str) -> None:
+        refresh_skill_graph_safely(
+            workspace=self.workspace,
+            skills_dir=self.skills_dir,
+            agent_id=self.agent_id,
+            reason=reason,
+        )
 
     def _collect_reference_entries(self, skill_name: str) -> list[dict[str, str]]:
         skill_dir = self.skills_dir / skill_name

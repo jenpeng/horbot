@@ -1303,6 +1303,26 @@ GET /api/skills/{skill_name}
 
 详情接口同样返回 `missing_requirements`、`install` 和 `compatibility`。
 
+### 获取技能图谱
+
+```http
+GET /api/skills/graph
+```
+
+返回当前 Agent 的技能图谱。若尚未持久化图谱，后端会基于当前技能目录即时构建内存图谱。
+
+### 重建技能图谱
+
+```http
+POST /api/skills/graph/rebuild
+```
+
+重新扫描当前 Agent 技能目录，生成技能节点、引用节点、`has_reference`、`similar_to`、`related_to` 等关系，并写入 `.horbot-agent/skill_graph.json`。
+
+持久化后的技能图谱也会被 Agent 运行时读取为技能摘要里的轻量提示，用于提示相邻技能和相关 `references/` 文件位置。
+
+受管技能变更接口会在成功写入后尝试自动刷新持久化图谱，并可能返回 `skill_graph_refreshed`。图谱刷新失败不影响技能接口主流程。
+
 ### 导出技能包
 
 ```http

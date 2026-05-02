@@ -70,6 +70,7 @@ Skills 页面当前还提供两个手动入口：
 - `整理自动技能`：把相关的自动技能手动收敛整理为技能家族
 - `转为系统技能`：把当前工作区下的自定义技能转成项目内置系统技能
 - `导出`：把系统技能或自定义技能下载为可再次导入的 `.skill` 包，包含 `references/` 等标准技能目录
+- `图谱`：查看并重建当前 Agent 的技能图谱。MVP 阶段会记录技能节点、引用节点、`has_reference`、`similar_to`、`related_to` 等关系。
 
 ### SKILL.md 格式
 
@@ -285,12 +286,15 @@ SkillHub / ClawHub 解决的是“发现和下载 skill”，但不能天然保�
 当前 Agent 运行时技能目录位于：
 
 - `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`
+- `.horbot/agents/<agent-id>/workspace/.horbot-agent/skill_graph.json`
 
 其中：
 
 - 手动创建或导入的自定义技能写入当前 Agent 的上述目录
 - 自动沉淀技能也写入同一目录，只是通常以 `auto-*` 形式命名
 - 旧的 `.horbot/agents/<agent-id>/skills` 和 `workspace/skills` 只作为兼容迁移来源，不应再作为新的运行时写入位置
+- 当前技能图谱会作为 Agent 运行时技能摘要里的轻量召回提示使用，只提示相关技能和 `references/` 文件位置，不直接把引用内容塞进上下文；Agent 会按当前任务再读取需要的本地文件。
+- Horbot 会在受管技能发生变更后自动刷新持久化图谱，包括新建、编辑、导入、删除、启停、整理自动技能、转为系统技能，以及 Agent 通过 `save_skill` 或自动沉淀写入技能。图谱刷新失败只记录 warning，不回滚技能操作。
 
 ### 技能最佳实践
 

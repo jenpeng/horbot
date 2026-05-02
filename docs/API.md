@@ -72,8 +72,10 @@
 ### Skills
 
 - `GET /api/skills`
+- `GET /api/skills/graph`
 - `GET /api/skills/{skill_name}`
 - `GET /api/skills/{skill_name}/export`
+- `POST /api/skills/graph/rebuild`
 - `POST /api/skills`
 - `PUT /api/skills/{skill_name}`
 - `DELETE /api/skills/{skill_name}`
@@ -237,6 +239,10 @@ Supported templates are `dashboard`, `chart-story`, `data-workbench`, `map-story
 - Skills APIs resolve to the current agent skill directory, not a generic legacy workspace path.
 - The current agent skill directory is `.horbot/agents/<agent-id>/workspace/.horbot-agent/skills`.
 - `GET /api/skills` and `GET /api/skills/{skill_name}` also return skill source metadata such as `source_group`, `source_origin_kind`, and `source_origin_agent_id` so the UI can distinguish built-in, manual, and agent-generated skills.
+- `GET /api/skills/graph` returns the current agent skill graph. If no persisted graph exists yet, Horbot builds an in-memory graph from the current skills.
+- `POST /api/skills/graph/rebuild` rebuilds and persists `.horbot-agent/skill_graph.json`.
+- Persisted skill graphs are also consumed by the agent runtime as compact skill-summary hints for nearby references and related skills.
+- Managed skill mutation APIs attempt to refresh the persisted graph automatically and may return `skill_graph_refreshed`. A failed graph refresh is non-fatal.
 - `GET /api/skills/{skill_name}/export` returns a `.skill` package containing `SKILL.md` and any standard skill subdirectories such as `references/`, `scripts/`, `assets/`, and `agents/`.
 - `PATCH /api/config/web-search` can update the global web-search `enabled` flag, the active search provider, provider-specific toggles such as `tavilyEnabled` and `langsearchEnabled`, provider-scoped search API keys, plus other runtime search defaults used by the Configuration page.
 - `POST /api/chat/sessions` returns UUID-based session keys such as `session_4f0c...`, avoiding timestamp collisions.

@@ -233,6 +233,7 @@ class SkillEvolutionTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(reference_path.exists())
             self.assertIn("generated_by: skill-evolution", skill_path.read_text(encoding="utf-8"))
             self.assertIn("LibreOffice Preview Fidelity Checks", reference_path.read_text(encoding="utf-8"))
+            self.assertTrue((workspace / ".horbot-agent" / "skill_graph.json").exists())
 
     async def test_skill_evolution_creates_skill_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -271,6 +272,7 @@ class SkillEvolutionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("## Trigger Cues", content)
             reference_content = reference_path.read_text(encoding="utf-8")
             self.assertIn("# Shell Retry Checklist", reference_content)
+            self.assertTrue((workspace / ".horbot-agent" / "skill_graph.json").exists())
             self.assertEqual(len(memory_store.reflection_calls), 1)
             self.assertIn("auto-shell-troubleshooting", memory_store.reflection_calls[0]["reusable_strategies"][0])
             self.assertEqual(len(memory_store.history_entries), 1)

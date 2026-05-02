@@ -35,6 +35,16 @@ def create_skills_router(
 
     router = APIRouter()
 
+    def refresh_skill_graph(workspace_path: Path, skills_dir: Path, agent_id: Optional[str], reason: str):
+        from horbot.agent.skill_graph import refresh_skill_graph_safely
+
+        return refresh_skill_graph_safely(
+            workspace=workspace_path,
+            skills_dir=skills_dir,
+            agent_id=agent_id,
+            reason=reason,
+        )
+
     @router.get("/skills")
     async def get_skills(agent_id: Optional[str] = None):
         """Get all skills."""
@@ -78,6 +88,43 @@ def create_skills_router(
             })
 
         return {"skills": result}
+
+    @router.get("/skills/graph")
+    async def get_skill_graph(agent_id: Optional[str] = None):
+        """Get the current skill graph, building an in-memory graph when none is stored yet."""
+        from horbot.agent.skill_graph import build_skill_graph, load_skill_graph, resolve_skill_graph_path
+        from horbot.agent.skills import SkillsLoader
+
+        _, workspace_path, skills_dir = resolve_skill_dir_for_request(agent_id)
+        graph = load_skill_graph(workspace=workspace_path)
+        if graph is None:
+            loader = SkillsLoader(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
+            skills = loader.list_skills(filter_unavailable=False, include_disabled=True)
+            graph = build_skill_graph(workspace=workspace_path, skills_dir=skills_dir, skills=skills)
+            graph["persisted"] = False
+            graph["path"] = str(resolve_skill_graph_path(workspace_path))
+        else:
+            graph["persisted"] = True
+            graph["path"] = str(resolve_skill_graph_path(workspace_path))
+        return graph
+
+    @router.post("/skills/graph/rebuild")
+    async def rebuild_skill_graph(agent_id: Optional[str] = None):
+        """Rebuild and persist the skill graph for the current agent workspace."""
+        from horbot.agent.skill_graph import build_skill_graph, save_skill_graph
+        from horbot.agent.skills import SkillsLoader
+
+        _, workspace_path, skills_dir = resolve_skill_dir_for_request(agent_id)
+        loader = SkillsLoader(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
+        skills = loader.list_skills(filter_unavailable=False, include_disabled=True)
+        graph = build_skill_graph(workspace=workspace_path, skills_dir=skills_dir, skills=skills)
+        path = save_skill_graph(graph, workspace=workspace_path)
+        graph["persisted"] = True
+        graph["path"] = str(path)
+        graph["message"] = (
+            f"Rebuilt skill graph with {graph['node_count']} nodes and {graph['edge_count']} edges."
+        )
+        return graph
 
     @router.get("/skills/{skill_name}")
     async def get_skill_detail(skill_name: str, agent_id: Optional[str] = None):
@@ -192,11 +239,13 @@ def create_skills_router(
 
         skill_dir.mkdir(parents=True, exist_ok=True)
         skill_file.write_text(request.content, encoding="utf-8")
+        graph = refresh_skill_graph(workspace_path, skills_dir, agent_id, "skill_create")
 
         return {
             "name": request.name,
             "path": str(skill_file),
             "source": "user",
+            "skill_graph_refreshed": graph is not None,
             "message": f"Skill '{request.name}' created successfully",
         }
 
@@ -222,9 +271,11 @@ def create_skills_router(
             raise HTTPException(status_code=400, detail="Skill validation failed: " + " ".join(validation["issues"]))
 
         skill_path.write_text(request.content, encoding="utf-8")
+        graph = refresh_skill_graph(workspace_path, skills_dir, agent_id, "skill_update")
         return {
             "name": skill_name,
             "path": str(skill_path),
+            "skill_graph_refreshed": graph is not None,
             "message": f"Skill '{skill_name}' updated successfully",
         }
 
@@ -237,7 +288,7 @@ def create_skills_router(
         """Import a skill package from .skill or .zip."""
         from horbot.agent.skill_package import build_skill_compatibility, import_skill_archive_bytes
 
-        _, _workspace_path, skills_dir = resolve_skill_dir_for_request(agent_id)
+        _, workspace_path, skills_dir = resolve_skill_dir_for_request(agent_id)
         skills_dir.mkdir(parents=True, exist_ok=True)
 
         payload = await file.read()
@@ -260,6 +311,7 @@ def create_skills_router(
             meta=result.get("meta") if isinstance(result.get("meta"), dict) else {},
             normalized_from_legacy=bool(compat.get("normalized_from_legacy", False)),
         )
+        graph = refresh_skill_graph(workspace_path, skills_dir, agent_id, "skill_import")
 
         return {
             "name": result["skill_name"],
@@ -269,6 +321,7 @@ def create_skills_router(
             "description": result.get("description", ""),
             "warnings": result.get("warnings", []),
             "compatibility": compatibility,
+            "skill_graph_refreshed": graph is not None,
         }
 
     @router.post("/skills/consolidate-generated")
@@ -279,8 +332,10 @@ def create_skills_router(
         _, workspace_path, skills_dir = resolve_skill_dir_for_request(agent_id)
         engine = SkillEvolutionEngine(workspace=workspace_path, agent_id=agent_id, skills_dir=skills_dir)
         result = engine.consolidate_generated_skills()
+        graph = refresh_skill_graph(workspace_path, skills_dir, agent_id, "skill_consolidate_generated")
         return {
             **result,
+            "skill_graph_refreshed": graph is not None,
             "message": (
                 f"Consolidated {result['merged_skill_count']} generated skills "
                 f"across {len(result['updated_families'])} skill families."
@@ -316,11 +371,13 @@ def create_skills_router(
             target_dir.mkdir(parents=True, exist_ok=True)
             target_file.write_text(source_path.read_text(encoding="utf-8"), encoding="utf-8")
             source_path.unlink()
+        graph = refresh_skill_graph(workspace_path, skills_dir, agent_id, "skill_promote")
 
         return {
             "name": skill_name,
             "path": str(target_file),
             "source": "builtin",
+            "skill_graph_refreshed": graph is not None,
             "message": f"Skill '{skill_name}' promoted to builtin successfully",
         }
 
@@ -344,9 +401,11 @@ def create_skills_router(
             shutil.rmtree(skill_path.parent)
         else:
             skill_path.unlink()
+        graph = refresh_skill_graph(workspace_path, skills_dir, agent_id, "skill_delete")
 
         return {
             "name": skill_name,
+            "skill_graph_refreshed": graph is not None,
             "message": f"Skill '{skill_name}' deleted successfully",
         }
 
@@ -383,10 +442,12 @@ def create_skills_router(
         skill_info = next((s for s in skills if s["name"] == skill_name), None)
         if skill_info:
             Path(skill_info["path"]).write_text(new_content)
+        graph = refresh_skill_graph(workspace_path, skills_dir, agent_id, "skill_toggle")
 
         return {
             "name": skill_name,
             "enabled": new_enabled,
+            "skill_graph_refreshed": graph is not None,
             "message": f"Skill '{skill_name}' {'enabled' if new_enabled else 'disabled'} successfully",
         }
 

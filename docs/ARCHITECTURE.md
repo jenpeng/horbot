@@ -27,8 +27,24 @@ Horbot keeps the runtime intentionally small:
 - `SessionManager` for conversation persistence
 - `MemoryStore` for agent-scoped memory
 - `SkillsLoader` for built-in and user skills
+- `skill_graph.py` for building and persisting agent-scoped skill/reference relationship graphs
 - Live Artifact renderer for converting structured render specs into temporary sandboxed HTML runtime files
 - PPTX preview renderer that uses LibreOffice headless export plus PyMuPDF page rasterization instead of browser-side PPTX layout reconstruction
+
+### Skill Graph Runtime
+
+Each agent can maintain a persisted skill graph at `.horbot-agent/skill_graph.json` inside its workspace.
+
+The graph builder reads the current built-in and workspace skills and emits:
+
+- skill nodes
+- reference nodes for `references/*`
+- `has_reference` edges from skills to reference files
+- `similar_to` and `related_to` edges between nearby skills
+
+Managed skill mutations trigger a safe background-style refresh path: create, update, import, delete, enable/disable, generated-skill consolidation, promotion to builtin, agent `save_skill`, and automatic skill evolution writes. Refresh failures are logged and do not roll back the original skill operation.
+
+The runtime consumes the graph as compact hints in the skill summary. It points the model to related skills and reference file paths, but it does not eagerly inject full reference content. The Web Skills page uses the same API data for its focused graph view and manual rebuild action.
 
 ### Multi-Agent Layer
 
