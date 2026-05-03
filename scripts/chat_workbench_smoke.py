@@ -117,6 +117,10 @@ async def run_chat_workbench_smoke(
 
             await expect(page.get_by_text("Task Workbench")).to_be_visible(timeout=30000)
             await expect(page.get_by_text(f"Latest request: {LATEST_REQUEST}")).to_be_visible(timeout=30000)
+            await page.get_by_test_id("chat-scroll-container").evaluate(
+                "(element) => { element.scrollTop = element.scrollHeight; }"
+            )
+            await expect(page.get_by_text("Task Workbench")).to_be_visible(timeout=10000)
             result["workbench_visible"] = True
 
             textarea = page.locator("textarea").first

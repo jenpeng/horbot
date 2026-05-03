@@ -4655,6 +4655,7 @@ const ChatPage: React.FC = () => {
             <div className="relative min-h-0 flex-1">
               <div
                 ref={chatContainerRef}
+                data-testid="chat-scroll-container"
                 className="min-h-0 h-full overflow-y-auto bg-slate-50 px-3 py-3 space-y-3"
               >
               {messages.length === 0 ? (
@@ -4805,7 +4806,7 @@ const ChatPage: React.FC = () => {
                 </div>
               ) : (
                 <>
-                  <div className="rounded-[28px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                  <div className="sticky top-0 z-10 rounded-[28px] border border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
