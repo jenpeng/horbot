@@ -84,6 +84,7 @@ async def run_chat_workbench_smoke(
     url: str = DEFAULT_URL,
     *,
     headless: bool = True,
+    screenshot_path: str | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "ok": False,
@@ -145,6 +146,10 @@ async def run_chat_workbench_smoke(
                 raise AssertionError("Review files quick action did not include the file category")
             result["quick_action_prefilled"] = True
 
+            if screenshot_path:
+                await page.screenshot(path=screenshot_path, full_page=True)
+                result["screenshot"] = screenshot_path
+
             result["ok"] = True
         except Exception as exc:  # pragma: no cover - smoke diagnostics path
             result["errors"].append(str(exc))
@@ -159,9 +164,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run chat task workbench browser smoke test in Chrome.")
     parser.add_argument("--url", default=DEFAULT_URL)
     parser.add_argument("--headed", action="store_true", help="Run with a visible browser window.")
+    parser.add_argument("--screenshot", default=None, help="Optional path for a full-page browser screenshot.")
     args = parser.parse_args()
 
-    result = asyncio.run(run_chat_workbench_smoke(args.url, headless=not args.headed))
+    result = asyncio.run(
+        run_chat_workbench_smoke(
+            args.url,
+            headless=not args.headed,
+            screenshot_path=args.screenshot,
+        )
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["ok"] else 1
 

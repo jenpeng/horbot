@@ -56,6 +56,12 @@
 ./horbot.sh smoke bound-channel-dispatch
 ```
 
+如果需要人工核对浏览器页面效果，任务工作台烟测也支持输出 Playwright 截图：
+
+```bash
+./horbot.sh smoke chat-workbench --screenshot /tmp/horbot-chat-workbench.png
+```
+
 聊天与附件相关回归目前覆盖：
 
 - Assistant Markdown 渲染依赖链

@@ -235,3 +235,9 @@ Useful smoke commands:
 ./horbot.sh smoke team-chat
 ./horbot.sh smoke chat-error-retry
 ```
+
+For visual verification, the chat workbench smoke also accepts a Playwright screenshot path:
+
+```bash
+./horbot.sh smoke chat-workbench --screenshot /tmp/horbot-chat-workbench.png
+```
