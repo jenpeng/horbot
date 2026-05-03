@@ -192,6 +192,53 @@ class ChatHistoryApiTests(unittest.TestCase):
         self.assertEqual(merged[1]["content"], "补全后的助手回复")
         self.assertEqual(merged[1]["metadata"]["agent_name"], "小项 🐎")
 
+    def test_load_merged_session_messages_refreshes_when_another_manager_writes_latest_turn(self):
+        session_key = "web:dm_main"
+
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            reader_manager = SessionManager(workspace=root / ".horbot-agent" / "sessions")
+            writer_manager = SessionManager(workspace=root / ".horbot-agent" / "sessions")
+
+            initial_session = writer_manager.get_or_create(session_key)
+            initial_session.messages = [
+                {
+                    "id": "old-user",
+                    "role": "user",
+                    "content": "旧请求",
+                    "timestamp": "2026-05-03T10:00:00",
+                },
+            ]
+            writer_manager.save(initial_session)
+
+            first_read = _load_merged_session_messages(session_key, [reader_manager])
+            self.assertEqual([message["id"] for message in first_read], ["old-user"])
+
+            latest_session = writer_manager.get_or_create(session_key)
+            latest_session.messages = [
+                *latest_session.messages,
+                {
+                    "id": "latest-user",
+                    "role": "user",
+                    "content": "最近一次请求",
+                    "timestamp": "2026-05-03T10:01:00",
+                },
+                {
+                    "id": "latest-assistant",
+                    "role": "assistant",
+                    "content": "最近一次回复",
+                    "timestamp": "2026-05-03T10:01:01",
+                    "execution_steps": [{"id": "step-latest"}],
+                },
+            ]
+            writer_manager.save(latest_session)
+
+            refreshed = _load_merged_session_messages(session_key, [reader_manager])
+
+        self.assertEqual([message["id"] for message in refreshed], ["old-user", "latest-user", "latest-assistant"])
+        self.assertEqual(refreshed[-1]["content"], "最近一次回复")
+        self.assertEqual(refreshed[-1]["execution_steps"][0]["id"], "step-latest")
+
     def test_conversation_history_paginates_visible_messages_not_raw_tool_events(self):
         raw_messages = [
             {

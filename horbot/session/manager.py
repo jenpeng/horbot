@@ -174,11 +174,30 @@ class SessionManager:
             else:
                 self.sessions_dir = ensure_dir(workspace / "sessions")
         self._cache: dict[str, Session] = {}
+        self._cache_signatures: dict[str, tuple[int, int] | None] = {}
     
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
         safe_key = safe_filename(key.replace(":", "_"))
         return self.sessions_dir / f"{safe_key}.jsonl"
+
+    def _get_session_file_signature(self, key: str) -> tuple[int, int] | None:
+        """Return a cheap file signature used to detect external writes."""
+        path = self._get_session_path(key)
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            return None
+        return (stat.st_mtime_ns, stat.st_size)
+
+    def _invalidate_if_stale(self, key: str) -> None:
+        """Drop a cached session when the persisted file changed elsewhere."""
+        if key not in self._cache:
+            return
+        cached_signature = self._cache_signatures.get(key)
+        current_signature = self._get_session_file_signature(key)
+        if cached_signature != current_signature:
+            self.invalidate(key)
     
     def get(self, key: str) -> Session | None:
         """
@@ -190,12 +209,14 @@ class SessionManager:
         Returns:
             The session or None if not found.
         """
+        self._invalidate_if_stale(key)
         if key in self._cache:
             return self._cache[key]
         
         session = self._load(key)
         if session:
             self._cache[key] = session
+            self._cache_signatures[key] = self._get_session_file_signature(key)
         return session
     
     def get_or_create(self, key: str) -> Session:
@@ -212,6 +233,7 @@ class SessionManager:
         if session is None:
             session = Session(key=key)
             self._cache[key] = session
+            self._cache_signatures[key] = self._get_session_file_signature(key)
         return session
     
     def _load(self, key: str) -> Session | None:
@@ -276,6 +298,7 @@ class SessionManager:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
         self._cache[session.key] = session
+        self._cache_signatures[session.key] = self._get_session_file_signature(session.key)
     
     async def async_save(self, session: Session) -> None:
         """Save a session to disk asynchronously."""
@@ -300,10 +323,12 @@ class SessionManager:
                 await f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
         self._cache[session.key] = session
+        self._cache_signatures[session.key] = self._get_session_file_signature(session.key)
     
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
+        self._cache_signatures.pop(key, None)
     
     def list_sessions(self, key_prefix: str | None = None) -> list[dict[str, Any]]:
         """
