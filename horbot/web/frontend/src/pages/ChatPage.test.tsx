@@ -29,16 +29,19 @@ vi.mock('../components/MessageInput', () => ({
     conversationType,
     onSend,
     sessionStatus,
+    draftPresetText,
   }: {
     agents: Array<{ id: string }>;
     conversationType: string;
     onSend?: (message: string, mentionedAgents: string[], files?: unknown[]) => void | Promise<void>;
     sessionStatus?: { message?: string; detailLabel?: string; detailValue?: string } | null;
+    draftPresetText?: string;
   }) => (
     <div
       data-testid="mock-message-input"
       data-conversation-type={conversationType}
       data-agent-ids={agents.map((agent) => agent.id).join(',')}
+      data-draft-preset={draftPresetText || ''}
     >
       <button type="button" data-testid="mock-send-button" onClick={() => onSend?.('hello', [], [])}>
         send
@@ -419,6 +422,11 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Details|详情/ }));
     expect(screen.getByTestId('chat-workbench-details')).toBeInTheDocument();
     expect(screen.getByText('officecli')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Continue|继续推进/ }));
+    expect(screen.getByTestId('mock-message-input')).toHaveAttribute(
+      'data-draft-preset',
+      expect.stringContaining('Create a clean PPT summary'),
+    );
     expect(window.localStorage.getItem('horbot.chat.workbenchExpanded')).toBe('true');
   });
 

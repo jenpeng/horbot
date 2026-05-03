@@ -3582,6 +3582,33 @@ const ChatPage: React.FC = () => {
     messages,
     t,
   ]);
+  const workbenchQuickActions = useMemo(() => {
+    const actions = [
+      {
+        id: 'continue',
+        label: t('chat.workbenchActionContinue'),
+        prompt: t('chat.workbenchActionContinuePrompt', { request: conversationWorkbench.latestRequest }),
+      },
+      {
+        id: 'summarize',
+        label: t('chat.workbenchActionSummarize'),
+        prompt: t('chat.workbenchActionSummarizePrompt'),
+      },
+      {
+        id: 'explain',
+        label: t('chat.workbenchActionExplain'),
+        prompt: t('chat.workbenchActionExplainPrompt'),
+      },
+    ];
+    if (conversationWorkbench.failedSteps > 0) {
+      actions.unshift({
+        id: 'review-failure',
+        label: t('chat.workbenchActionReviewFailure'),
+        prompt: t('chat.workbenchActionReviewFailurePrompt'),
+      });
+    }
+    return actions;
+  }, [conversationWorkbench.failedSteps, conversationWorkbench.latestRequest, t]);
   const currentConversationHealth = useMemo<ConversationHealth | null>(() => {
     const turnCount = messageTurns.length;
     const approxTokens = estimateConversationTokens(messages);
@@ -4737,6 +4764,23 @@ const ChatPage: React.FC = () => {
                     </div>
                     {isWorkbenchExpanded && (
                       <div className="mt-3 space-y-3" data-testid="chat-workbench-details">
+                        <div>
+                          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            {t('chat.workbenchNextActions')}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {workbenchQuickActions.map((action) => (
+                              <button
+                                key={action.id}
+                                type="button"
+                                onClick={() => applyInputDraftPreset(action.prompt)}
+                                className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:border-sky-300 hover:bg-sky-100"
+                              >
+                                {action.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                         <div className="flex max-w-full flex-wrap gap-2">
                           {conversationWorkbench.activeAgents.slice(0, 4).map((name) => (
                             <span key={name} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
