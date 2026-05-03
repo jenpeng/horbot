@@ -4468,7 +4468,7 @@ const ChatPage: React.FC = () => {
                       className={`absolute left-0 right-0 top-full z-30 border-b border-slate-200 bg-white px-4 pb-3 pt-0 transition-[opacity,transform,visibility] duration-200 ease-out ${
                         isConversationHeaderCollapsed
                           ? 'invisible -translate-y-1 opacity-0 pointer-events-none'
-                          : 'visible translate-y-0 opacity-100'
+                          : 'visible pointer-events-none translate-y-0 opacity-100'
                       }`}
                     >
                       <div className="ml-[3rem] min-w-0">

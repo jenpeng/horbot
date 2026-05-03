@@ -230,6 +230,7 @@ Useful smoke commands:
 ```bash
 ./horbot.sh smoke browser-e2e
 ./horbot.sh smoke agent-assets
+./horbot.sh smoke chat-workbench
 ./horbot.sh smoke dm-chat
 ./horbot.sh smoke team-chat
 ./horbot.sh smoke chat-error-retry

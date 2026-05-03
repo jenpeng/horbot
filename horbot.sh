@@ -1767,6 +1767,28 @@ smoke_live_artifact() {
     PLAYWRIGHT_BROWSERS_PATH="$browser_path" "$python_cmd" "$script" "$@"
 }
 
+smoke_chat_workbench() {
+    ensure_dirs
+
+    local script="$PROJECT_ROOT/scripts/chat_workbench_smoke.py"
+    if [ ! -f "$script" ]; then
+        print_error "聊天任务工作台烟测脚本不存在: $script"
+        return 1
+    fi
+
+    local python_cmd="python3"
+    if [ -x "$VENV_DIR/bin/python" ]; then
+        python_cmd="$VENV_DIR/bin/python"
+    fi
+
+    local browser_path="$PROJECT_ROOT/.playwright-browsers"
+    mkdir -p "$browser_path"
+
+    ensure_browser_services_ready
+    print_info "运行聊天任务工作台真实浏览器烟雾测试..."
+    PLAYWRIGHT_BROWSERS_PATH="$browser_path" "$python_cmd" "$script" "$@"
+}
+
 smoke_team_chat() {
     smoke_chat_ui "$@"
 }
@@ -2193,6 +2215,7 @@ smoke_browser_e2e() {
     smoke_skills "$@" || exit_code=$?
     smoke_performance "$@" || exit_code=$?
     smoke_live_artifact "$@" || exit_code=$?
+    smoke_chat_workbench "$@" || exit_code=$?
     smoke_chat_error_retry "$@" || exit_code=$?
     smoke_chat_memory_trace "$@" || exit_code=$?
     smoke_chat_interrupt "$@" || exit_code=$?
@@ -2232,6 +2255,9 @@ smoke_test() {
             ;;
         live-artifact)
             smoke_live_artifact "$@"
+            ;;
+        chat-workbench)
+            smoke_chat_workbench "$@"
             ;;
         browser-e2e)
             smoke_browser_e2e "$@"
@@ -2339,7 +2365,8 @@ show_help() {
     echo "  smoke bound-channel-dispatch  运行单聊 -> Agent 工具调用 -> 绑定外部渠道路由烟雾测试"
     echo "  smoke officecli    运行 OfficeCLI 的 docx/xlsx/pptx 直接烟雾测试"
     echo "  smoke live-artifact  运行聊天 Live Artifact 渲染真实浏览器烟雾测试"
-    echo "  smoke browser-e2e  运行真实浏览器端到端回归（Configuration + Agent 资产 + Dashboard + Skills + Performance + Live Artifact + 失败重试 + 记忆引用 + 接力中断 + 附件上传 + 办公附件上传 + 图片/音频识别 + 粘贴上传 + 拖拽上传 + 附件重试 + 附件顺序 + 单聊 + 团队接力）"
+    echo "  smoke chat-workbench  运行聊天任务工作台真实浏览器烟雾测试"
+    echo "  smoke browser-e2e  运行真实浏览器端到端回归（Configuration + Agent 资产 + Dashboard + Skills + Performance + Live Artifact + 任务工作台 + 失败重试 + 记忆引用 + 接力中断 + 附件上传 + 办公附件上传 + 图片/音频识别 + 粘贴上传 + 拖拽上传 + 附件重试 + 附件顺序 + 单聊 + 团队接力）"
     echo "  smoke config       运行 Configuration 页面烟雾测试"
     echo "  smoke agent-assets 运行多 Agent 页面资产管理烟雾测试"
     echo "  smoke dashboard    运行 Dashboard 页面烟雾测试"

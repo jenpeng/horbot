@@ -35,6 +35,7 @@
 - Configuration 页面加载、重新加载与保存回归
 - 多 Agent 页面中的 `SOUL.md`、`USER.md` 与“配置摘要”保存/刷新回归
 - Dashboard、Skills 与关键页面性能采样
+- 聊天任务工作台、摘要预填、最近请求历史搜索与快捷动作
 - 聊天失败态与重试
 - 团队接力停止/打断
 - 单聊消息发送与返回
@@ -45,6 +46,7 @@
 ```bash
 ./horbot.sh smoke config
 ./horbot.sh smoke agent-assets
+./horbot.sh smoke chat-workbench
 ./horbot.sh smoke dm-chat
 ./horbot.sh smoke dm-team-dispatch
 ./horbot.sh smoke team-chat

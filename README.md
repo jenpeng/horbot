@@ -141,6 +141,7 @@ Common commands:
 ./horbot.sh check libreoffice
 ./horbot.sh smoke officecli
 ./horbot.sh logs backend
+./horbot.sh smoke chat-workbench
 ./horbot.sh smoke browser-e2e
 ```
 
