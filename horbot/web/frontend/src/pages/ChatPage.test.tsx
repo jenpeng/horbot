@@ -422,10 +422,11 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Details|详情/ }));
     expect(screen.getByTestId('chat-workbench-details')).toBeInTheDocument();
     expect(screen.getByText('officecli')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Continue|继续推进/ }));
+    expect(screen.getByRole('button', { name: /Review files|梳理附件/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Review files|梳理附件/ }));
     expect(screen.getByTestId('mock-message-input')).toHaveAttribute(
       'data-draft-preset',
-      expect.stringContaining('Create a clean PPT summary'),
+      expect.stringMatching(/attached files|附件/),
     );
     expect(window.localStorage.getItem('horbot.chat.workbenchExpanded')).toBe('true');
   });

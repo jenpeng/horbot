@@ -3542,6 +3542,12 @@ const ChatPage: React.FC = () => {
         .filter(Boolean),
     ));
     const fileCount = messages.reduce((total, message) => total + (message.files?.length || 0), 0);
+    const fileCategories = Array.from(new Set(
+      messages
+        .flatMap((message) => message.files || [])
+        .map((file) => file.category || file.mimeType || '')
+        .filter(Boolean),
+    ));
     const activeStreamingCount = messages.filter((message) => message.role === 'assistant' && message.isStreaming).length;
     const activeAgents = currentConversation?.type === ConversationType.TEAM
       ? currentTeamMembers.map((agent) => agent.name)
@@ -3564,6 +3570,7 @@ const ChatPage: React.FC = () => {
       stage,
       activeAgents,
       fileCount,
+      fileCategories,
       executionSteps: executionSteps.length,
       runningSteps,
       failedSteps,
@@ -3582,33 +3589,6 @@ const ChatPage: React.FC = () => {
     messages,
     t,
   ]);
-  const workbenchQuickActions = useMemo(() => {
-    const actions = [
-      {
-        id: 'continue',
-        label: t('chat.workbenchActionContinue'),
-        prompt: t('chat.workbenchActionContinuePrompt', { request: conversationWorkbench.latestRequest }),
-      },
-      {
-        id: 'summarize',
-        label: t('chat.workbenchActionSummarize'),
-        prompt: t('chat.workbenchActionSummarizePrompt'),
-      },
-      {
-        id: 'explain',
-        label: t('chat.workbenchActionExplain'),
-        prompt: t('chat.workbenchActionExplainPrompt'),
-      },
-    ];
-    if (conversationWorkbench.failedSteps > 0) {
-      actions.unshift({
-        id: 'review-failure',
-        label: t('chat.workbenchActionReviewFailure'),
-        prompt: t('chat.workbenchActionReviewFailurePrompt'),
-      });
-    }
-    return actions;
-  }, [conversationWorkbench.failedSteps, conversationWorkbench.latestRequest, t]);
   const currentConversationHealth = useMemo<ConversationHealth | null>(() => {
     const turnCount = messageTurns.length;
     const approxTokens = estimateConversationTokens(messages);
@@ -3631,6 +3611,67 @@ const ChatPage: React.FC = () => {
 
     return null;
   }, [messageTurns.length, messages]);
+  const workbenchQuickActions = useMemo(() => {
+    const actions = [];
+    if (conversationWorkbench.failedSteps > 0) {
+      actions.push({
+        id: 'review-failure',
+        label: t('chat.workbenchActionReviewFailure'),
+        prompt: t('chat.workbenchActionReviewFailurePrompt'),
+      });
+    }
+    if (conversationWorkbench.fileCount > 0) {
+      actions.push({
+        id: 'review-files',
+        label: t('chat.workbenchActionReviewFiles'),
+        prompt: t('chat.workbenchActionReviewFilesPrompt', {
+          count: conversationWorkbench.fileCount,
+          categories: conversationWorkbench.fileCategories.join(', ') || t('chat.workbenchFilesGeneric'),
+        }),
+      });
+    }
+    if (currentConversationHealth) {
+      actions.push({
+        id: 'compress-context',
+        label: t('chat.workbenchActionCompress'),
+        prompt: t('chat.workbenchActionCompressPrompt'),
+      });
+    }
+    if (currentConversation?.type === ConversationType.TEAM || conversationWorkbench.relayCount > 1) {
+      actions.push({
+        id: 'finalize-relay',
+        label: t('chat.workbenchActionFinalizeRelay'),
+        prompt: t('chat.workbenchActionFinalizeRelayPrompt'),
+      });
+    }
+    actions.push(
+      {
+        id: 'continue',
+        label: t('chat.workbenchActionContinue'),
+        prompt: t('chat.workbenchActionContinuePrompt', { request: conversationWorkbench.latestRequest }),
+      },
+      {
+        id: 'summarize',
+        label: t('chat.workbenchActionSummarize'),
+        prompt: t('chat.workbenchActionSummarizePrompt'),
+      },
+      {
+        id: 'explain',
+        label: t('chat.workbenchActionExplain'),
+        prompt: t('chat.workbenchActionExplainPrompt'),
+      },
+    );
+    return actions.slice(0, 6);
+  }, [
+    conversationWorkbench.failedSteps,
+    conversationWorkbench.fileCategories,
+    conversationWorkbench.fileCount,
+    conversationWorkbench.latestRequest,
+    conversationWorkbench.relayCount,
+    currentConversation?.type,
+    currentConversationHealth,
+    t,
+  ]);
 
   const shouldVirtualizeTurns = useMemo(() => (
     messageTurns.length >= TURN_VIRTUALIZATION_THRESHOLD
