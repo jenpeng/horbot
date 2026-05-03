@@ -115,12 +115,16 @@ async def run_chat_workbench_smoke(
             await page.route("**/api/conversations/dm_main/messages**", mock_messages)
             await page.goto(url, wait_until="domcontentloaded", timeout=120000)
 
-            await expect(page.get_by_text("Task Workbench")).to_be_visible(timeout=30000)
-            await expect(page.get_by_text(f"Latest request: {LATEST_REQUEST}")).to_be_visible(timeout=30000)
+            workbench_trigger = page.get_by_test_id("chat-workbench-trigger")
+            await expect(workbench_trigger).to_be_visible(timeout=30000)
             await page.get_by_test_id("chat-scroll-container").evaluate(
                 "(element) => { element.scrollTop = element.scrollHeight; }"
             )
-            await expect(page.get_by_text("Task Workbench")).to_be_visible(timeout=10000)
+            await expect(workbench_trigger).to_be_visible(timeout=10000)
+            await workbench_trigger.click(timeout=10000)
+            workbench_panel = page.get_by_test_id("chat-workbench-panel")
+            await expect(workbench_panel).to_be_visible(timeout=10000)
+            await expect(workbench_panel.get_by_text(f"Latest request: {LATEST_REQUEST}")).to_be_visible(timeout=30000)
             result["workbench_visible"] = True
 
             textarea = page.locator("textarea").first
@@ -137,10 +141,10 @@ async def run_chat_workbench_smoke(
             await expect(page.get_by_text("1 matches in loaded history")).to_be_visible(timeout=10000)
             result["search_request_prefilled"] = True
 
-            await page.get_by_role("button", name="Details").click(timeout=10000)
-            workbench_details = page.get_by_test_id("chat-workbench-details")
-            await expect(workbench_details).to_be_visible(timeout=10000)
-            await expect(workbench_details.get_by_text("officecli")).to_be_visible(timeout=10000)
+            await workbench_trigger.click(timeout=10000)
+            workbench_panel = page.get_by_test_id("chat-workbench-panel")
+            await expect(workbench_panel).to_be_visible(timeout=10000)
+            await expect(workbench_panel.get_by_text("officecli")).to_be_visible(timeout=10000)
             result["details_expanded"] = True
 
             await page.get_by_role("button", name="Review files").click(timeout=10000)

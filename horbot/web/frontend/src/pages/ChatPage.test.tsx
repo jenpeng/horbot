@@ -419,7 +419,10 @@ describe('ChatPage', () => {
 
     renderWithProviders(<ChatPage />);
 
-    expect(await screen.findByText(/Task Workbench|任务工作台/)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Task Workbench|任务工作台/ })).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-workbench-panel')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Task Workbench|任务工作台/ }));
+    expect(screen.getByTestId('chat-workbench-panel')).toBeInTheDocument();
     expect(screen.getByText(/Latest request: Create a clean PPT summary|最近请求：Create a clean PPT summary/)).toBeInTheDocument();
     expect(screen.getByText(/1 files|1 个文件/)).toBeInTheDocument();
     expect(screen.getByText(/1 execution steps|1 个执行步骤/)).toBeInTheDocument();
@@ -435,9 +438,8 @@ describe('ChatPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Search request|搜索请求/ }));
     const historySearchInput = await screen.findByPlaceholderText(/Type keywords|输入关键词/);
     expect(historySearchInput).toHaveValue('Create a clean PPT summary');
-    expect(screen.queryByTestId('chat-workbench-details')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Details|详情/ }));
-    expect(screen.getByTestId('chat-workbench-details')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-workbench-panel')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Task Workbench|任务工作台/ }));
     expect(screen.getByText('officecli')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Review files|梳理附件/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Review files|梳理附件/ }));
@@ -445,7 +447,6 @@ describe('ChatPage', () => {
       'data-draft-preset',
       expect.stringMatching(/attached files|附件/),
     );
-    expect(window.localStorage.getItem('horbot.chat.workbenchExpanded')).toBe('true');
   });
 
   it('keeps assistant history messages that only contain image files', async () => {

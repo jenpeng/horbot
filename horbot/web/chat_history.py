@@ -143,6 +143,9 @@ def _legacy_agent_session_managers(agent) -> list[SessionManager]:
 def _load_merged_session_messages(session_key: str, managers: list[SessionManager]) -> list[dict[str, Any]]:
     message_groups: list[list[dict[str, Any]]] = []
     for manager in _unique_session_managers(managers):
+        # History endpoints must reflect the latest persisted conversation even
+        # when another SessionManager instance saved the same session.
+        manager.invalidate(session_key)
         session = manager.get(session_key)
         if session and session.messages:
             message_groups.append(list(session.messages))
