@@ -3709,6 +3709,10 @@ const ChatPage: React.FC = () => {
     }
   }, [toast, t, workbenchClipboardSummary]);
 
+  const handleUseWorkbenchSummary = useCallback(() => {
+    applyInputDraftPreset(t('chat.workbenchUseSummaryPrompt', { summary: workbenchClipboardSummary }));
+  }, [applyInputDraftPreset, t, workbenchClipboardSummary]);
+
   const shouldVirtualizeTurns = useMemo(() => (
     messageTurns.length >= TURN_VIRTUALIZATION_THRESHOLD
     && !historySearchQuery.trim()
@@ -4824,6 +4828,15 @@ const ChatPage: React.FC = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleUseWorkbenchSummary}
+                          className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 shadow-sm transition-colors hover:bg-sky-100"
+                          title={t('chat.workbenchUseSummary')}
+                        >
+                          <PencilLine className="h-3.5 w-3.5" strokeWidth={2} />
+                          {t('chat.workbenchUseSummary')}
+                        </button>
                         <button
                           type="button"
                           onClick={() => void handleCopyWorkbenchSummary()}

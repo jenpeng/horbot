@@ -524,6 +524,8 @@ const messages = {
     'chat.workbenchCopySummary': '复制摘要',
     'chat.workbenchCopySuccess': '任务工作台摘要已复制',
     'chat.workbenchCopyFailed': '复制任务工作台摘要失败',
+    'chat.workbenchUseSummary': '填入摘要',
+    'chat.workbenchUseSummaryPrompt': '请基于下面这份任务工作台摘要继续推进，先确认当前状态，再给出下一步行动：\n\n{summary}',
     'chat.workbenchNoRequest': '还没有用户请求',
     'chat.workbenchLatestRequest': '最近请求：{preview}',
     'chat.workbenchTurns': '{count} 轮',

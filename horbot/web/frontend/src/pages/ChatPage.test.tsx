@@ -427,6 +427,11 @@ describe('ChatPage', () => {
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('officecli'));
     });
+    fireEvent.click(screen.getByRole('button', { name: /Use summary|填入摘要/ }));
+    expect(screen.getByTestId('mock-message-input')).toHaveAttribute(
+      'data-draft-preset',
+      expect.stringMatching(/Task Workbench|任务工作台/),
+    );
     expect(screen.queryByTestId('chat-workbench-details')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Details|详情/ }));
     expect(screen.getByTestId('chat-workbench-details')).toBeInTheDocument();

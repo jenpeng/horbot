@@ -515,6 +515,8 @@ const messages = {
     'chat.workbenchCopySummary': 'คัดลอกสรุป',
     'chat.workbenchCopySuccess': 'คัดลอกสรุปเวิร์กเบนช์งานแล้ว',
     'chat.workbenchCopyFailed': 'คัดลอกสรุปเวิร์กเบนช์งานไม่สำเร็จ',
+    'chat.workbenchUseSummary': 'ใช้สรุป',
+    'chat.workbenchUseSummaryPrompt': 'ทำงานต่อจากสรุปเวิร์กเบนช์งานด้านล่างนี้ โปรดยืนยันสถานะปัจจุบันก่อน แล้วเสนอการกระทำถัดไป:\n\n{summary}',
     'chat.workbenchNoRequest': 'ยังไม่มีคำขอจากผู้ใช้',
     'chat.workbenchLatestRequest': 'คำขอล่าสุด: {preview}',
     'chat.workbenchTurns': '{count} เทิร์น',
