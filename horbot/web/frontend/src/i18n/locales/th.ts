@@ -505,6 +505,8 @@ const messages = {
     'chat.workbenchStageRunning': 'กำลังทำงาน',
     'chat.workbenchStageDone': 'เสร็จแล้ว',
     'chat.workbenchStageNeedsReview': 'ต้องตรวจสอบ',
+    'chat.workbenchExpand': 'รายละเอียด',
+    'chat.workbenchCollapse': 'ซ่อนรายละเอียด',
     'chat.workbenchNoRequest': 'ยังไม่มีคำขอจากผู้ใช้',
     'chat.workbenchLatestRequest': 'คำขอล่าสุด: {preview}',
     'chat.workbenchTurns': '{count} เทิร์น',

@@ -326,6 +326,9 @@ const ChatPage: React.FC = () => {
   const [isConversationHeaderCollapsed, setIsConversationHeaderCollapsed] = useState(() => (
     window.localStorage.getItem('horbot.chat.conversationHeaderCollapsed') === 'true'
   ));
+  const [isWorkbenchExpanded, setIsWorkbenchExpanded] = useState(() => (
+    window.localStorage.getItem('horbot.chat.workbenchExpanded') === 'true'
+  ));
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [externalAgents, setExternalAgents] = useState<AgentInfo[]>([]);
   const [teams, setTeams] = useState<TeamInfo[]>([]);
@@ -377,6 +380,13 @@ const ChatPage: React.FC = () => {
       isConversationHeaderCollapsed ? 'true' : 'false',
     );
   }, [isConversationHeaderCollapsed]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      'horbot.chat.workbenchExpanded',
+      isWorkbenchExpanded ? 'true' : 'false',
+    );
+  }, [isWorkbenchExpanded]);
 
   const directAgents = useMemo(
     () => [...agents, ...externalAgents],
@@ -4709,33 +4719,52 @@ const ChatPage: React.FC = () => {
                           )}
                         </div>
                       </div>
-                      <div className="flex max-w-full flex-wrap justify-end gap-2 lg:max-w-[45%]">
-                        {conversationWorkbench.activeAgents.slice(0, 4).map((name) => (
-                          <span key={name} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
-                            {name}
-                          </span>
-                        ))}
-                        {conversationWorkbench.toolNames.slice(0, 4).map((name) => (
-                          <span key={name} className="rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">
-                            {name}
-                          </span>
-                        ))}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsWorkbenchExpanded((prev) => !prev)}
+                          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
+                          aria-expanded={isWorkbenchExpanded}
+                        >
+                          {isWorkbenchExpanded ? (
+                            <ChevronsUp className="h-3.5 w-3.5" strokeWidth={2} />
+                          ) : (
+                            <ChevronsDown className="h-3.5 w-3.5" strokeWidth={2} />
+                          )}
+                          {isWorkbenchExpanded ? t('chat.workbenchCollapse') : t('chat.workbenchExpand')}
+                        </button>
                       </div>
                     </div>
-                    {conversationWorkbench.executionSteps > 0 && (
-                      <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-                          <div className="text-lg font-semibold text-slate-900">{conversationWorkbench.completedSteps}</div>
-                          <div className="text-xs text-slate-500">{t('chat.workbenchStepsDone')}</div>
+                    {isWorkbenchExpanded && (
+                      <div className="mt-3 space-y-3" data-testid="chat-workbench-details">
+                        <div className="flex max-w-full flex-wrap gap-2">
+                          {conversationWorkbench.activeAgents.slice(0, 4).map((name) => (
+                            <span key={name} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+                              {name}
+                            </span>
+                          ))}
+                          {conversationWorkbench.toolNames.slice(0, 4).map((name) => (
+                            <span key={name} className="rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">
+                              {name}
+                            </span>
+                          ))}
                         </div>
-                        <div className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2">
-                          <div className="text-lg font-semibold text-sky-800">{conversationWorkbench.runningSteps}</div>
-                          <div className="text-xs text-sky-600">{t('chat.workbenchStepsRunning')}</div>
-                        </div>
-                        <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2">
-                          <div className="text-lg font-semibold text-red-700">{conversationWorkbench.failedSteps}</div>
-                          <div className="text-xs text-red-600">{t('chat.workbenchStepsFailed')}</div>
-                        </div>
+                        {conversationWorkbench.executionSteps > 0 && (
+                          <div className="grid gap-2 sm:grid-cols-3">
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+                              <div className="text-lg font-semibold text-slate-900">{conversationWorkbench.completedSteps}</div>
+                              <div className="text-xs text-slate-500">{t('chat.workbenchStepsDone')}</div>
+                            </div>
+                            <div className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2">
+                              <div className="text-lg font-semibold text-sky-800">{conversationWorkbench.runningSteps}</div>
+                              <div className="text-xs text-sky-600">{t('chat.workbenchStepsRunning')}</div>
+                            </div>
+                            <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2">
+                              <div className="text-lg font-semibold text-red-700">{conversationWorkbench.failedSteps}</div>
+                              <div className="text-xs text-red-600">{t('chat.workbenchStepsFailed')}</div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                     {currentConversation.type === ConversationType.TEAM && (

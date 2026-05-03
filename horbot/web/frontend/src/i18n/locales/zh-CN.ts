@@ -514,6 +514,8 @@ const messages = {
     'chat.workbenchStageRunning': '执行中',
     'chat.workbenchStageDone': '已完成',
     'chat.workbenchStageNeedsReview': '需复核',
+    'chat.workbenchExpand': '详情',
+    'chat.workbenchCollapse': '收起详情',
     'chat.workbenchNoRequest': '还没有用户请求',
     'chat.workbenchLatestRequest': '最近请求：{preview}',
     'chat.workbenchTurns': '{count} 轮',

@@ -415,7 +415,11 @@ describe('ChatPage', () => {
     expect(screen.getByText(/Latest request: Create a clean PPT summary|最近请求：Create a clean PPT summary/)).toBeInTheDocument();
     expect(screen.getByText(/1 files|1 个文件/)).toBeInTheDocument();
     expect(screen.getByText(/1 execution steps|1 个执行步骤/)).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-workbench-details')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Details|详情/ }));
+    expect(screen.getByTestId('chat-workbench-details')).toBeInTheDocument();
     expect(screen.getByText('officecli')).toBeInTheDocument();
+    expect(window.localStorage.getItem('horbot.chat.workbenchExpanded')).toBe('true');
   });
 
   it('keeps assistant history messages that only contain image files', async () => {

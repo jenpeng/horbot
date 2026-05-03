@@ -514,6 +514,8 @@ const messages = {
     'chat.workbenchStageRunning': 'Running',
     'chat.workbenchStageDone': 'Done',
     'chat.workbenchStageNeedsReview': 'Needs review',
+    'chat.workbenchExpand': 'Details',
+    'chat.workbenchCollapse': 'Hide details',
     'chat.workbenchNoRequest': 'No user request yet',
     'chat.workbenchLatestRequest': 'Latest request: {preview}',
     'chat.workbenchTurns': '{count} turns',
