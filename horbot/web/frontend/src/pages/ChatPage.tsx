@@ -3713,6 +3713,18 @@ const ChatPage: React.FC = () => {
     applyInputDraftPreset(t('chat.workbenchUseSummaryPrompt', { summary: workbenchClipboardSummary }));
   }, [applyInputDraftPreset, t, workbenchClipboardSummary]);
 
+  const handleSearchWorkbenchRequest = useCallback(() => {
+    const request = conversationWorkbench.latestRequest.trim();
+    if (!request || request === t('chat.workbenchNoRequest')) {
+      return;
+    }
+    setHistorySearchQuery(request);
+    setHistorySearchIndex(0);
+    setActiveHistoryResultKey(null);
+    setActiveRemoteHistoryResultId(null);
+    setIsHistorySearchOpen(true);
+  }, [conversationWorkbench.latestRequest, t]);
+
   const shouldVirtualizeTurns = useMemo(() => (
     messageTurns.length >= TURN_VIRTUALIZATION_THRESHOLD
     && !historySearchQuery.trim()
@@ -4836,6 +4848,15 @@ const ChatPage: React.FC = () => {
                         >
                           <PencilLine className="h-3.5 w-3.5" strokeWidth={2} />
                           {t('chat.workbenchUseSummary')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSearchWorkbenchRequest}
+                          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
+                          title={t('chat.workbenchSearchRequest')}
+                        >
+                          <Search className="h-3.5 w-3.5" strokeWidth={2} />
+                          {t('chat.workbenchSearchRequest')}
                         </button>
                         <button
                           type="button"

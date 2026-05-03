@@ -526,6 +526,7 @@ const messages = {
     'chat.workbenchCopyFailed': 'Failed to copy task workbench summary',
     'chat.workbenchUseSummary': 'Use summary',
     'chat.workbenchUseSummaryPrompt': 'Continue from this task workbench summary. Confirm the current state first, then propose the next action:\n\n{summary}',
+    'chat.workbenchSearchRequest': 'Search request',
     'chat.workbenchNoRequest': 'No user request yet',
     'chat.workbenchLatestRequest': 'Latest request: {preview}',
     'chat.workbenchTurns': '{count} turns',

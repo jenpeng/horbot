@@ -432,6 +432,9 @@ describe('ChatPage', () => {
       'data-draft-preset',
       expect.stringMatching(/Task Workbench|任务工作台/),
     );
+    fireEvent.click(screen.getByRole('button', { name: /Search request|搜索请求/ }));
+    const historySearchInput = await screen.findByPlaceholderText(/Type keywords|输入关键词/);
+    expect(historySearchInput).toHaveValue('Create a clean PPT summary');
     expect(screen.queryByTestId('chat-workbench-details')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Details|详情/ }));
     expect(screen.getByTestId('chat-workbench-details')).toBeInTheDocument();
