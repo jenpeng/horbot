@@ -26,6 +26,10 @@ export interface RawConversationHistoryMessage {
     turn_id?: string;
     request_id?: string;
     _provider_error?: unknown;
+    _confirmation_required?: boolean;
+    confirmation_id?: string;
+    tool_name?: string;
+    tool_arguments?: Record<string, unknown>;
   };
   files?: unknown[];
   tool_calls?: unknown[];
@@ -151,6 +155,10 @@ export const formatConversationHistoryMessages = (
         isError: Boolean(providerError) || normalizedError.isProviderError,
         errorKind: (providerError || normalizedError.isProviderError) ? ('provider' as const) : undefined,
         retryable: providerError?.retryable ?? normalizedError.isProviderError,
+        confirmationId: msg.metadata?._confirmation_required ? msg.metadata.confirmation_id : undefined,
+        confirmationHandled: false,
+        toolName: msg.metadata?._confirmation_required ? msg.metadata.tool_name : undefined,
+        toolArguments: msg.metadata?._confirmation_required ? msg.metadata.tool_arguments : undefined,
       };
     });
 

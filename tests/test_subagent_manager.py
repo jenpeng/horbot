@@ -70,6 +70,43 @@ class SubagentManagerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(manager._task_info[task_id].status, "cancelled")
             self.assertNotIn(task_id, manager._running_tasks)
 
+    async def test_spawn_emits_lifecycle_events(self):
+        with TemporaryDirectory() as tmpdir:
+            events = []
+
+            async def on_event(event):
+                events.append(event)
+
+            manager = SubagentManager(
+                provider=DummyProvider(),
+                bus=MessageBus(),
+                workspace=Path(tmpdir),
+                event_callback=on_event,
+            )
+
+            async def fast_run(task_id, *_args, **_kwargs):
+                await manager._emit_event(task_id, "completed", result="finished")
+
+            manager._run_subagent = fast_run  # type: ignore[method-assign]
+
+            await manager.spawn(
+                "summarize project",
+                label="summary",
+                origin_channel="web",
+                origin_chat_id="dm_main",
+                session_key="web:dm_main",
+                metadata={"request_id": "req-1"},
+            )
+            await asyncio.sleep(0)
+
+            self.assertGreaterEqual(len(events), 2)
+            self.assertEqual(events[0]["event"], "subagent_update")
+            self.assertEqual(events[0]["status"], "running")
+            self.assertEqual(events[0]["session_key"], "web:dm_main")
+            self.assertEqual(events[0]["metadata"]["request_id"], "req-1")
+            self.assertEqual(events[-1]["status"], "completed")
+            self.assertEqual(events[-1]["result"], "finished")
+
 
 if __name__ == "__main__":
     unittest.main()

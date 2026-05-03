@@ -63,6 +63,9 @@ export const inferExecutionStepTitle = (
   if (normalizedType.includes('compression')) {
     return t('chat.executionCompressing');
   }
+  if (normalizedType.includes('background')) {
+    return t('chat.executionBackgroundTask');
+  }
   return t('chat.executionStep');
 };
 

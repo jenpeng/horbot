@@ -347,6 +347,7 @@ const ChatPage: React.FC = () => {
   const [streamState, setStreamState] = useState<StreamState | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [showReconnect, setShowReconnect] = useState(false);
+  const [confirmingMessageId, setConfirmingMessageId] = useState<string | null>(null);
   const [lastFailedRequest, setLastFailedRequest] = useState<RetryRequest | null>(null);
   const [lastFailedTurnId, setLastFailedTurnId] = useState<string | null>(null);
   const [lastInterruptedRequest, setLastInterruptedRequest] = useState<RetryRequest | null>(null);
@@ -419,6 +420,8 @@ const ChatPage: React.FC = () => {
   } | null>(null);
   const relayHistoryRefreshIntervalsRef = useRef(new Map<string, ReturnType<typeof setInterval>>());
   const relayHistoryRefreshStopTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const backgroundTaskRefreshIntervalsRef = useRef(new Map<string, ReturnType<typeof setInterval>>());
+  const backgroundTaskRefreshStopTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const conversationReconcileTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>[]>());
   const pendingInitialBottomScrollConversationIdRef = useRef<string | null>(null);
   const pendingHistoryPrependScrollRef = useRef<{
@@ -616,6 +619,10 @@ const ChatPage: React.FC = () => {
       relayHistoryRefreshIntervalsRef.current.clear();
       relayHistoryRefreshStopTimersRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
       relayHistoryRefreshStopTimersRef.current.clear();
+      backgroundTaskRefreshIntervalsRef.current.forEach((intervalId) => clearInterval(intervalId));
+      backgroundTaskRefreshIntervalsRef.current.clear();
+      backgroundTaskRefreshStopTimersRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+      backgroundTaskRefreshStopTimersRef.current.clear();
       conversationReconcileTimersRef.current.forEach((timerIds) => timerIds.forEach((timerId) => clearTimeout(timerId)));
       conversationReconcileTimersRef.current.clear();
     };
@@ -1365,6 +1372,76 @@ const ChatPage: React.FC = () => {
     relayHistoryRefreshStopTimersRef.current.set(convId, stopTimerId);
   }, [clearRelayHistoryRefresh, loadConversationHistory]);
 
+  const clearBackgroundTaskHistoryRefresh = useCallback((convId: string) => {
+    const intervalId = backgroundTaskRefreshIntervalsRef.current.get(convId);
+    if (intervalId) {
+      clearInterval(intervalId);
+      backgroundTaskRefreshIntervalsRef.current.delete(convId);
+    }
+
+    const timeoutId = backgroundTaskRefreshStopTimersRef.current.get(convId);
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      backgroundTaskRefreshStopTimersRef.current.delete(convId);
+    }
+  }, []);
+
+  const ensureBackgroundTaskHistoryRefresh = useCallback((convId: string) => {
+    const existingStopTimer = backgroundTaskRefreshStopTimersRef.current.get(convId);
+    if (existingStopTimer) {
+      clearTimeout(existingStopTimer);
+    }
+
+    if (!backgroundTaskRefreshIntervalsRef.current.has(convId)) {
+      const intervalId = window.setInterval(() => {
+        void loadConversationHistory(convId, { forceRefreshLatest: true });
+      }, 1500);
+      backgroundTaskRefreshIntervalsRef.current.set(convId, intervalId);
+    }
+
+    const stopTimerId = window.setTimeout(() => {
+      clearBackgroundTaskHistoryRefresh(convId);
+    }, 180000);
+    backgroundTaskRefreshStopTimersRef.current.set(convId, stopTimerId);
+  }, [clearBackgroundTaskHistoryRefresh, loadConversationHistory]);
+
+  const handleConfirmAction = useCallback(async (message: UIMessage, action: 'confirm' | 'cancel') => {
+    if (!message.confirmationId || !currentConversationIdRef.current) {
+      return;
+    }
+    const conversationId = currentConversationIdRef.current;
+    const sessionKey = conversationIdToSessionKey(conversationId);
+    setConfirmingMessageId(message.confirmationId);
+    try {
+      await chatService.confirmAction({
+        confirmation_id: message.confirmationId,
+        action,
+        session_key: sessionKey,
+      });
+      updateMessage(conversationId, message.id, {
+        confirmationHandled: true,
+        isStreaming: action === 'confirm',
+        isThinking: action === 'confirm',
+        statusMessage: action === 'confirm' ? t('messageGroup.confirmation.processing') : undefined,
+      });
+      await loadConversationHistory(conversationId, { forceRefreshLatest: true });
+      if (action === 'confirm') {
+        ensureBackgroundTaskHistoryRefresh(conversationId);
+      }
+    } catch (error) {
+      console.error('Failed to handle tool confirmation:', error);
+      toast.error(t('chat.genericErrorRetry'));
+    } finally {
+      setConfirmingMessageId(null);
+    }
+  }, [
+    ensureBackgroundTaskHistoryRefresh,
+    loadConversationHistory,
+    t,
+    toast,
+    updateMessage,
+  ]);
+
   const openDispatchedWebConversation = useCallback((
     dispatchArgs?: Record<string, unknown>,
     options?: { activate?: boolean },
@@ -1635,6 +1712,59 @@ const ChatPage: React.FC = () => {
         });
       }
       addTypingAgent(conversationId, agentId);
+    }
+
+    if (eventType === 'subagent_update') {
+      const messageId = messageIdFromEvent || `subagent-${String(eventData.subagent_task_id || Math.random().toString(36).substring(2, 15))}`;
+      const status = String(eventData.subagent_status || '');
+      const isRunning = status === 'running';
+      if (isRunning) {
+        ensureBackgroundTaskHistoryRefresh(conversationId);
+      } else {
+        clearBackgroundTaskHistoryRefresh(conversationId);
+        void loadConversationHistory(conversationId, { forceRefreshLatest: true });
+      }
+      const currentMessage = existingMessage(messageId);
+      const nextExecutionSteps = mergeLocalizedExecutionSteps(
+        currentMessage?.executionSteps || incomingExecutionSteps,
+        incomingExecutionSteps,
+      );
+      const nextMessage = {
+        id: messageId,
+        role: 'assistant' as const,
+        content: String(eventData.content || currentMessage?.content || ''),
+        turnId,
+        requestId: (eventData.request_id as string | undefined) || currentMessage?.requestId,
+        agentId,
+        agentName,
+        isStreaming: isRunning,
+        isThinking: isRunning,
+        statusMessage: isRunning ? t('chat.batonStarted') : undefined,
+        executionSteps: nextExecutionSteps,
+        metadata: {
+          ...(currentMessage?.metadata || {}),
+          _relay_phase: isRunning ? 'active' : 'done',
+          dispatch_origin: 'subagent_lifecycle',
+          subagent_task_id: eventData.subagent_task_id,
+          subagent_status: eventData.subagent_status,
+        },
+        timestamp: currentMessage?.timestamp || new Date().toISOString(),
+      };
+      if (currentMessage) {
+        updateMessage(conversationId, messageId, nextMessage);
+      } else {
+        addMessage(conversationId, nextMessage);
+      }
+      if (agentId) {
+        if (isRunning) {
+          addTypingAgent(conversationId, agentId);
+        } else {
+          removeTypingAgent(conversationId, agentId);
+        }
+      }
+      armBottomStickForConversation(conversationId);
+      stickConversationToBottom(conversationId);
+      return;
     }
 
     if (!resolvedStreamEntry) {
@@ -1950,14 +2080,18 @@ const ChatPage: React.FC = () => {
   }, [
     addMessage,
     addTypingAgent,
+    armBottomStickForConversation,
     findPendingStreamEntry,
     getConversationStreamRegistry,
     getMessages,
+    clearBackgroundTaskHistoryRefresh,
+    ensureBackgroundTaskHistoryRefresh,
     loadConversationHistory,
     mergeLocalizedExecutionSteps,
     openDispatchedWebConversation,
     reconcileConversationAfterDone,
     removeTypingAgent,
+    stickConversationToBottom,
     t,
     upsertLocalizedExecutionStep,
     updateMessage,
@@ -1968,7 +2102,8 @@ const ChatPage: React.FC = () => {
       const sessionKey = typeof eventData.session_key === 'string' ? eventData.session_key : '';
       const dispatchOrigin = typeof eventData.dispatch_origin === 'string' ? eventData.dispatch_origin : '';
       const isSummaryMirror = dispatchOrigin === 'message_tool_summary_mirror';
-      if (!sessionKey || (sessionKey === activePrimarySessionKeyRef.current && !isSummaryMirror)) {
+      const isSubagentLifecycle = dispatchOrigin === 'subagent_lifecycle' || eventData.event === 'subagent_update';
+      if (!sessionKey || (sessionKey === activePrimarySessionKeyRef.current && !isSummaryMirror && !isSubagentLifecycle)) {
         return;
       }
 
@@ -2338,6 +2473,14 @@ const ChatPage: React.FC = () => {
           },
           onChunk: (event) => {
           const eventData = event as unknown as Record<string, unknown>;
+          if ((eventData.event || eventData.type) === 'subagent_update') {
+            websocketEventHandlerRef.current?.({
+              ...eventData,
+              session_key: sessionKey,
+              dispatch_origin: 'subagent_lifecycle',
+            });
+            return;
+          }
           const eventType = (eventData.event as string) || (eventData.type as string);
           const agentId = eventData.agent_id as string | undefined;
           const turnId = eventData.turn_id as string | undefined;
@@ -2419,6 +2562,52 @@ const ChatPage: React.FC = () => {
             }
             if (agentId) {
               addTypingAgent(currentConversation.id, agentId);
+            }
+          }
+          else if (eventType === 'confirmation_required') {
+            const messageId = messageIdFromEvent || generateId();
+            const currentEntry = matchedStreamEntry || agentMessages.get(streamKey);
+            const targetMessageId = currentEntry?.messageId || messageId;
+            if (currentEntry) {
+              currentEntry.phase = 'done';
+              currentEntry.content = String(eventData.content || currentEntry.content || '');
+            }
+            const currentMessage = getMessages(currentConversation.id).find((message) => message.id === targetMessageId);
+            const confirmationUpdates: Partial<UIMessage> = {
+              content: String(eventData.content || currentMessage?.content || ''),
+              turnId,
+              requestId: requestRef.id || currentMessage?.requestId,
+              agentId,
+              agentName: eventData.agent_name as string | undefined,
+              isStreaming: false,
+              isThinking: false,
+              statusMessage: undefined,
+              confirmationId: eventData.confirmation_id as string | undefined,
+              confirmationHandled: false,
+              toolName: eventData.tool_name as string | undefined,
+              toolArguments: eventData.tool_arguments as Record<string, unknown> | undefined,
+              metadata: {
+                ...(currentMessage?.metadata || {}),
+                _confirmation_required: true,
+                confirmation_id: eventData.confirmation_id,
+                tool_name: eventData.tool_name,
+                tool_arguments: eventData.tool_arguments,
+              },
+            };
+            if (currentMessage) {
+              updateMessage(currentConversation.id, targetMessageId, confirmationUpdates);
+            } else {
+              addMessage(currentConversation.id, {
+                id: targetMessageId,
+                role: 'assistant',
+                timestamp: new Date().toISOString(),
+                executionSteps: [],
+                ...confirmationUpdates,
+                content: confirmationUpdates.content || '',
+              });
+            }
+            if (agentId) {
+              removeTypingAgent(currentConversation.id, agentId);
             }
           }
           // 处理 agent_mentioned 事件 - 当一个 agent 提到另一个 agent 时
@@ -4298,6 +4487,8 @@ const ChatPage: React.FC = () => {
                         isUser={false}
                         formatTime={formatTime}
                         onRetryMessage={(message) => handleRetryMessage(message as UIMessage)}
+                        onConfirmAction={(message, action) => handleConfirmAction(message as UIMessage, action)}
+                        confirmingMessageId={confirmingMessageId}
                         showRetryPending={turnRetryPending}
                       >
                         <MessageExecutionCard
@@ -4331,6 +4522,8 @@ const ChatPage: React.FC = () => {
     getRelayTimelineStepsLocalized,
     handleResumeInterruptedRequest,
     handleRetryMessage,
+    handleConfirmAction,
+    confirmingMessageId,
     highlightedRelayGroupKey,
     highlightedRelayLocation,
     jumpToRelayStep,

@@ -52,6 +52,7 @@ class TestToolExecutor(unittest.IsolatedAsyncioTestCase):
     async def test_execute_tool_calls_with_confirm(self):
         mock_registry = MagicMock()
         mock_registry.check_permission.return_value = PermissionLevel.CONFIRM
+        mock_registry.requires_confirmation.return_value = True
         mock_registry.execute = AsyncMock()
 
         mock_context = MagicMock()
@@ -73,6 +74,26 @@ class TestToolExecutor(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result.final_content)
         self.assertIn("需要确认", result.final_content)
         self.assertEqual(len(result.confirmations), 1)
+
+    async def test_execute_tool_calls_uses_argument_sensitive_confirmation(self):
+        mock_registry = MagicMock()
+        mock_registry.check_permission.return_value = PermissionLevel.ALLOW
+        mock_registry.requires_confirmation.return_value = True
+        mock_registry.execute = AsyncMock()
+
+        mock_context = MagicMock()
+        executor = ToolExecutor(tools=mock_registry, context=mock_context)
+
+        result = await executor.execute_tool_calls(
+            tool_calls=[MockToolCall(id="call_1", name="exec", arguments={"command": "python3 script.py"})],
+            messages=[],
+            tools_used=[],
+            iteration=1,
+        )
+
+        self.assertTrue(result.should_break)
+        self.assertIn("call_1", [conf["tool_call_id"] for conf in result.confirmations.values()])
+        mock_registry.execute.assert_not_awaited()
 
     async def test_execute_message_tool_only_once(self):
         mock_registry = MagicMock()

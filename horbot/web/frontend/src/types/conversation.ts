@@ -37,6 +37,10 @@ export interface Message {
   isError?: boolean;
   errorKind?: 'provider' | 'network' | 'timeout' | 'stream';
   retryable?: boolean;
+  confirmationId?: string;
+  confirmationHandled?: boolean;
+  toolName?: string;
+  toolArguments?: Record<string, unknown>;
   executionSteps?: ExecutionStep[];
   retryPayload?: {
     content: string;

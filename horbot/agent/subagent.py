@@ -5,7 +5,7 @@ import json
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
@@ -13,10 +13,14 @@ from horbot.bus.events import InboundMessage
 from horbot.bus.queue import MessageBus
 from horbot.providers.base import LLMProvider
 from horbot.agent.tools.registry import ToolRegistry
+from horbot.agent.tools.permission import PermissionManager
 from horbot.agent.tools.filesystem import ReadFileTool, ListDirTool
 from horbot.agent.tools.safe_editor import SafeWriteFileTool, SafeEditFileTool
 from horbot.agent.tools.shell import ExecTool
 from horbot.agent.tools.web import WebSearchTool, WebFetchTool
+
+
+SubagentEventCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 
 class SubagentInfo:
@@ -31,6 +35,7 @@ class SubagentInfo:
         started_at: float,
         session_key: str | None = None,
         origin: dict[str, str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ):
         self.task_id = task_id
         self.label = label
@@ -39,6 +44,7 @@ class SubagentInfo:
         self.started_at = started_at
         self.session_key = session_key
         self.origin = origin or {}
+        self.metadata = metadata or {}
     
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API response."""
@@ -51,6 +57,7 @@ class SubagentInfo:
             "running_seconds": time.time() - self.started_at,
             "session_key": self.session_key,
             "origin": self.origin,
+            "metadata": self.metadata,
         }
 
 
@@ -68,6 +75,7 @@ class SubagentManager:
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
+        event_callback: SubagentEventCallback | None = None,
     ):
         from horbot.config.schema import ExecToolConfig
         if workspace is None:
@@ -85,6 +93,11 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
         self._task_info: dict[str, SubagentInfo] = {}  # task_id -> SubagentInfo
+        self._event_callback = event_callback
+
+    def set_event_callback(self, callback: SubagentEventCallback | None) -> None:
+        """Set a lifecycle event callback for subagent observability."""
+        self._event_callback = callback
     
     async def spawn(
         self,
@@ -93,11 +106,13 @@ class SubagentManager:
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         session_key: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id}
+        event_metadata = dict(metadata or {})
 
         # Store task info
         self._task_info[task_id] = SubagentInfo(
@@ -108,6 +123,7 @@ class SubagentManager:
             started_at=time.time(),
             session_key=session_key,
             origin=origin,
+            metadata=event_metadata,
         )
 
         bg_task = asyncio.create_task(
@@ -116,6 +132,8 @@ class SubagentManager:
         self._running_tasks[task_id] = bg_task
         if session_key:
             self._session_tasks.setdefault(session_key, set()).add(task_id)
+
+        await self._emit_event(task_id, "running")
 
         def _cleanup(_: asyncio.Task) -> None:
             self._running_tasks.pop(task_id, None)
@@ -133,6 +151,43 @@ class SubagentManager:
         
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
+
+    async def _emit_event(
+        self,
+        task_id: str,
+        status: str,
+        *,
+        result: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Emit a lifecycle event for UI/history observers."""
+        info = self._task_info.get(task_id)
+        if not info or self._event_callback is None:
+            return
+
+        event: dict[str, Any] = {
+            "event": "subagent_update",
+            "task_id": info.task_id,
+            "label": info.label,
+            "task": info.task,
+            "status": status,
+            "started_at": info.started_at,
+            "running_seconds": time.time() - info.started_at,
+            "session_key": info.session_key,
+            "origin": dict(info.origin),
+            "metadata": dict(info.metadata),
+        }
+        if result is not None:
+            event["result"] = result
+        if error is not None:
+            event["error"] = error
+
+        try:
+            callback_result = self._event_callback(event)
+            if asyncio.iscoroutine(callback_result):
+                await callback_result
+        except Exception as exc:
+            logger.warning("Subagent [{}] lifecycle callback failed: {}", task_id, exc)
     
     async def _run_subagent(
         self,
@@ -146,7 +201,7 @@ class SubagentManager:
         
         try:
             # Build subagent tools (no message tool, no spawn tool)
-            tools = ToolRegistry()
+            tools = ToolRegistry(PermissionManager(profile="full"))
             allowed_dir = self.workspace if self.restrict_to_workspace else None
             tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(SafeWriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
@@ -222,14 +277,24 @@ class SubagentManager:
             if final_result is None:
                 final_result = "Task completed but no final response was generated."
             
+            if task_id in self._task_info:
+                self._task_info[task_id].status = "completed"
             logger.info("Subagent [{}] completed successfully", task_id)
+            await self._emit_event(task_id, "completed", result=final_result)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
             
+        except asyncio.CancelledError:
+            if task_id in self._task_info:
+                self._task_info[task_id].status = "cancelled"
+            logger.info("Subagent [{}] cancelled", task_id)
+            await self._emit_event(task_id, "cancelled")
+            raise
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             if task_id in self._task_info:
                 self._task_info[task_id].status = "error"
             logger.error("Subagent [{}] failed: {}", task_id, e)
+            await self._emit_event(task_id, "error", error=error_msg)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
     
     async def _announce_result(
@@ -314,6 +379,7 @@ When you have completed the task, provide a clear summary of your findings or ac
             task.cancel()
             if task_id in self._task_info:
                 self._task_info[task_id].status = "cancelled"
+            await self._emit_event(task_id, "cancelled")
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -357,6 +423,7 @@ When you have completed the task, provide a clear summary of your findings or ac
         # Update task info status
         if task_id in self._task_info:
             self._task_info[task_id].status = "cancelled"
+        await self._emit_event(task_id, "cancelled")
         
         try:
             await task
@@ -375,6 +442,7 @@ When you have completed the task, provide a clear summary of your findings or ac
                 # Update task info status
                 if task_id in self._task_info:
                     self._task_info[task_id].status = "cancelled"
+                await self._emit_event(task_id, "cancelled")
                 cancelled += 1
                 tasks_to_wait.append(task)
         

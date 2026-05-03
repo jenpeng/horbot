@@ -200,7 +200,8 @@ router.include_router(create_chat_control_router(
     get_config=lambda: get_cached_config(),
     get_stream_manager_fn=lambda: get_stream_manager(),
     get_session_manager_fn=lambda: get_session_manager(),
-    get_agent_loop_fn=lambda: get_agent_loop(),
+    get_agent_loop_fn=lambda agent_id=None: get_agent_loop(agent_id),
+    resolve_chat_session_manager_fn=lambda session_key: _resolve_chat_session_manager(session_key),
 ))
 
 
@@ -823,6 +824,145 @@ async def _dispatch_internal_web_outbound(source_loop: AgentLoop, msg: OutboundM
         )
 
 
+def _build_subagent_chat_content(event: dict[str, Any]) -> str:
+    task_id = str(event.get("task_id") or "")
+    label = str(event.get("label") or event.get("task") or "后台任务").strip()
+    task = str(event.get("task") or "").strip()
+    status = str(event.get("status") or "").strip()
+    result = clean_message_content(str(event.get("result") or "").strip())
+    error = clean_message_content(str(event.get("error") or "").strip())
+
+    if status == "running":
+        return f"后台任务 `{task_id}` 已启动，正在执行：{label}"
+    if status == "completed":
+        return f"后台任务 `{task_id}` 已完成。\n\n{result or '任务已完成，但没有返回额外结果。'}"
+    if status == "cancelled":
+        return f"后台任务 `{task_id}` 已取消。\n\n任务：{task or label}"
+    if status in {"error", "failed"}:
+        return f"后台任务 `{task_id}` 执行失败。\n\n{error or '未返回具体错误。'}"
+    return f"后台任务 `{task_id}` 状态更新：{status or 'unknown'}"
+
+
+def _build_subagent_execution_step(event: dict[str, Any]) -> dict[str, Any]:
+    task_id = str(event.get("task_id") or "")
+    label = str(event.get("label") or event.get("task") or "后台任务").strip()
+    status = str(event.get("status") or "").strip()
+    step_status = {
+        "running": "running",
+        "completed": "completed",
+        "cancelled": "stopped",
+        "error": "error",
+        "failed": "failed",
+    }.get(status, "running")
+    details = {
+        "task_id": task_id,
+        "label": label,
+        "task": event.get("task"),
+        "running_seconds": event.get("running_seconds"),
+        "result": event.get("result"),
+        "error": event.get("error"),
+    }
+    return {
+        "id": f"subagent-{task_id}",
+        "type": "background_task",
+        "title": f"后台任务：{label}",
+        "status": step_status,
+        "timestamp": datetime.now().isoformat(),
+        "details": {key: value for key, value in details.items() if value not in (None, "")},
+    }
+
+
+async def _persist_and_broadcast_subagent_event(agent_loop: AgentLoop, event: dict[str, Any]) -> None:
+    """Persist subagent lifecycle events as visible chat execution bubbles."""
+    from horbot.web.websocket import broadcast_to_session
+
+    origin = event.get("origin") if isinstance(event.get("origin"), dict) else {}
+    origin_channel = str(origin.get("channel") or "").strip()
+    origin_chat_id = str(origin.get("chat_id") or "").strip()
+    raw_session_key = str(event.get("session_key") or "").strip()
+    if origin_channel != "web" and not raw_session_key.startswith("web:"):
+        return
+
+    session_key = raw_session_key or _normalize_web_session_key(origin_chat_id)
+    if not session_key:
+        return
+    normalized_session_key = _normalize_web_session_key(session_key)
+    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    agent_id = str(metadata.get("agent_id") or getattr(agent_loop, "_agent_id", "") or "").strip() or None
+    agent_name = str(metadata.get("agent_name") or getattr(agent_loop, "_agent_name", "") or agent_id or "Agent")
+    task_id = str(event.get("task_id") or "").strip()
+    if not task_id:
+        return
+
+    session_manager, resolved_session_key = await _resolve_chat_session_manager(normalized_session_key)
+    session = session_manager.get_or_create(resolved_session_key)
+    message_id = str(metadata.get("subagent_message_id") or f"subagent-{task_id}")
+    content = _build_subagent_chat_content(event)
+    execution_steps = sanitize_execution_steps([_build_subagent_execution_step(event)])
+    message_metadata = {
+        "agent_id": agent_id,
+        "agent_name": agent_name,
+        "conversation_type": "user_to_agent",
+        "dispatch_origin": "subagent_lifecycle",
+        "subagent_task_id": task_id,
+        "subagent_status": event.get("status"),
+        "subagent_label": event.get("label"),
+        "subagent_task": event.get("task"),
+        **({"request_id": metadata.get("request_id")} if metadata.get("request_id") else {}),
+        **({"turn_id": metadata.get("turn_id")} if metadata.get("turn_id") else {}),
+        **({"parent_assistant_message_id": metadata.get("assistant_message_id") or metadata.get("message_id")} if (metadata.get("assistant_message_id") or metadata.get("message_id")) else {}),
+    }
+
+    existing_idx = _find_session_message_index(
+        session,
+        message_id=message_id,
+        role="assistant",
+    )
+    if existing_idx >= 0:
+        session.messages[existing_idx]["content"] = content
+        session.messages[existing_idx]["execution_steps"] = execution_steps
+        session.messages[existing_idx].setdefault("metadata", {}).update(message_metadata)
+    else:
+        session.add_message(
+            "assistant",
+            content,
+            dedup=True,
+            message_id=message_id,
+            execution_steps=execution_steps,
+            metadata=message_metadata,
+        )
+    session.updated_at = datetime.now()
+    await session_manager.async_save(session)
+
+    await broadcast_to_session(
+        resolved_session_key,
+        _build_chat_stream_event(
+            "subagent_update",
+            agent_id=agent_id,
+            agent_name=agent_name,
+            message_id=message_id,
+            content=content,
+            execution_steps=execution_steps,
+            session_key=resolved_session_key,
+            dispatch_origin="subagent_lifecycle",
+            subagent_task_id=task_id,
+            subagent_status=event.get("status"),
+            subagent_label=event.get("label"),
+            subagent_task=event.get("task"),
+        ),
+    )
+
+
+def _configure_web_subagent_observability(agent_loop: AgentLoop) -> None:
+    if not hasattr(agent_loop, "subagents"):
+        return
+
+    async def on_subagent_event(event: dict[str, Any]) -> None:
+        await _persist_and_broadcast_subagent_event(agent_loop, event)
+
+    agent_loop.subagents.set_event_callback(on_subagent_event)
+
+
 def _configure_web_agent_loop_message_routing(agent_loop: AgentLoop, bus: MessageBus) -> None:
     message_tool = agent_loop.tools.get("message")
     if not isinstance(message_tool, MessageTool):
@@ -1308,6 +1448,7 @@ class AgentLoopPool:
                     if session_manager and loop.sessions != session_manager:
                         loop.sessions = session_manager
                     if self._bus is not None:
+                        _configure_web_subagent_observability(loop)
                         _configure_web_agent_loop_message_routing(loop, self._bus)
                     logger.debug(f"[AgentLoopPool.get_or_create] Returning cached loop for cache_key={cache_key}")
                     return loop
@@ -1415,6 +1556,7 @@ class AgentLoopPool:
             agent_name=agent_name,
             team_ids=agent_instance.teams,
         )
+        _configure_web_subagent_observability(agent_loop)
         _configure_web_agent_loop_message_routing(agent_loop, self._bus)
 
         asyncio.create_task(agent_loop.run())
@@ -2838,6 +2980,7 @@ async def _stream_generator(
             "web_search": request.web_search,
             "turn_id": turn_id,
             "user_message_id": user_message_id,
+            "message_id": assistant_message_id,
             "assistant_message_id": assistant_message_id,
             "request_id": request_id,
         },

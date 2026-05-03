@@ -16,6 +16,8 @@ interface MessageGroupProps {
   isUser: boolean;
   formatTime: (timestamp?: string) => string;
   onRetryMessage?: (message: Message) => void;
+  onConfirmAction?: (message: Message, action: 'confirm' | 'cancel') => void;
+  confirmingMessageId?: string | null;
   showRetryPending?: boolean;
   children?: React.ReactNode;
 }
@@ -478,6 +480,8 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
   isUser,
   formatTime,
   onRetryMessage,
+  onConfirmAction,
+  confirmingMessageId,
   showRetryPending = false,
   children,
 }) => {
@@ -1128,6 +1132,42 @@ const MessageGroup: React.FC<MessageGroupProps> = ({
 
           {children && index === messages.length - 1 && (
             <div className="mt-0.5 w-full max-w-full sm:max-w-[42rem]">{children}</div>
+          )}
+
+          {!isUser && message.confirmationId && !message.confirmationHandled && (
+            <div className="mt-1.5 w-fit max-w-full rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-950 shadow-sm sm:max-w-[42rem]">
+              <div className="flex flex-wrap items-center gap-2 text-[12px] font-semibold">
+                <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-[11px] text-amber-700 shadow-sm">
+                  {t('messageGroup.confirmation.title')}
+                </span>
+                <span>{t('messageGroup.confirmation.tool', { name: message.toolName || 'unknown' })}</span>
+              </div>
+              {message.toolArguments && Object.keys(message.toolArguments).length > 0 && (
+                <pre className="mt-2 max-h-40 overflow-auto rounded-xl border border-amber-100 bg-white/80 px-3 py-2 font-mono text-[11px] leading-5 text-amber-900 whitespace-pre-wrap break-words">
+                  {JSON.stringify(message.toolArguments, null, 2)}
+                </pre>
+              )}
+              <div className="mt-2 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={confirmingMessageId === message.confirmationId}
+                  onClick={() => onConfirmAction?.(message, 'cancel')}
+                  className="rounded-full border border-amber-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-amber-700 shadow-sm transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {t('messageGroup.confirmation.cancel')}
+                </button>
+                <button
+                  type="button"
+                  disabled={confirmingMessageId === message.confirmationId}
+                  onClick={() => onConfirmAction?.(message, 'confirm')}
+                  className="rounded-full bg-amber-600 px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {confirmingMessageId === message.confirmationId
+                    ? t('messageGroup.confirmation.processing')
+                    : t('messageGroup.confirmation.confirm')}
+                </button>
+              </div>
+            </div>
           )}
 
           {!isUser && (memorySources.length > 0 || memoryRecall) && index === messages.length - 1 && (

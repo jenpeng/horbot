@@ -26,7 +26,8 @@ def create_chat_control_router(
     get_config: Callable[[], Any],
     get_stream_manager_fn: Callable[[], Any],
     get_session_manager_fn: Callable[[], Any],
-    get_agent_loop_fn: Callable[[], Awaitable[Any]],
+    get_agent_loop_fn: Callable[..., Awaitable[Any]],
+    resolve_chat_session_manager_fn: Callable[[str], Awaitable[tuple[Any, str]]] | None = None,
 ) -> APIRouter:
     """Create chat control routes."""
 
@@ -65,8 +66,13 @@ def create_chat_control_router(
     @router.post("/chat/confirm")
     async def confirm_tool_execution(request: ConfirmRequest):
         """Confirm or cancel a pending tool execution."""
-        session_manager = get_session_manager_fn()
-        session = session_manager.get_or_create(request.session_key)
+        raw_session_key = request.session_key if request.session_key.startswith("web:") else f"web:{request.session_key}"
+        if resolve_chat_session_manager_fn:
+            session_manager, session_key = await resolve_chat_session_manager_fn(raw_session_key)
+        else:
+            session_manager = get_session_manager_fn()
+            session_key = raw_session_key
+        session = session_manager.get_or_create(session_key)
 
         pending_confirmations = getattr(session, "_pending_confirmations", {})
 
@@ -84,14 +90,18 @@ def create_chat_control_router(
             }
 
         if request.action == "confirm":
-            agent_loop = await get_agent_loop_fn()
+            agent_id = ""
+            raw_chat_id = session_key[4:] if session_key.startswith("web:") else session_key
+            if raw_chat_id.startswith("dm_"):
+                agent_id = raw_chat_id[3:]
+            agent_loop = await get_agent_loop_fn(agent_id or None)
 
             try:
                 with agent_loop.tools.audit_context(
-                    session_key=request.session_key,
+                    session_key=session_key,
                     origin="web_confirm",
                     source_channel="web",
-                    source_chat_id=request.session_key,
+                    source_chat_id=session_key,
                 ):
                     result = await agent_loop.tools.execute_confirmed(conf["tool_name"], conf["arguments"])
 
@@ -109,7 +119,7 @@ def create_chat_control_router(
                 final_content, _, all_msgs, new_confirmations = await agent_loop._run_agent_loop(
                     messages,
                     pending_confirmations=pending_confirmations,
-                    session_key=request.session_key,
+                    session_key=session_key,
                 )
 
                 if new_confirmations:

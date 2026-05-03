@@ -11,6 +11,7 @@ from horbot.web.api import (
     _configure_web_agent_loop_message_routing,
     _dispatch_team_group_followups,
     _dispatch_internal_web_outbound,
+    _persist_and_broadcast_subagent_event,
     _resolve_internal_web_session_manager,
     _resolve_team_dispatch_targets,
     parse_agent_mentions,
@@ -139,6 +140,34 @@ class WebTeamDispatchTests(unittest.IsolatedAsyncioTestCase):
         internal_dispatch.assert_not_awaited()
         local_bus.publish_outbound.assert_not_awaited()
         external_dispatch.assert_not_awaited()
+
+    async def test_subagent_lifecycle_event_is_persisted_and_broadcast(self):
+        fake_manager = FakeSessionManager()
+        fake_loop = SimpleNamespace(_agent_id="main", _agent_name="小项")
+        event = {
+            "task_id": "46af4371",
+            "label": "生成PPT",
+            "task": "做一个漂亮的 PPT",
+            "status": "running",
+            "session_key": "web:dm_main",
+            "origin": {"channel": "web", "chat_id": "dm_main"},
+            "metadata": {"request_id": "req-1", "turn_id": "turn-1"},
+        }
+
+        with patch(
+            "horbot.web.api._resolve_chat_session_manager",
+            new=AsyncMock(return_value=(fake_manager, "web:dm_main")),
+        ), patch("horbot.web.websocket.broadcast_to_session", new=AsyncMock()) as broadcast:
+            await _persist_and_broadcast_subagent_event(fake_loop, event)
+
+        self.assertEqual(len(fake_manager.session.messages), 1)
+        saved = fake_manager.session.messages[0]
+        self.assertEqual(saved["message_id"], "subagent-46af4371")
+        self.assertIn("后台任务", saved["content"])
+        self.assertEqual(saved["execution_steps"][0]["status"], "running")
+        self.assertEqual(saved["metadata"]["subagent_task_id"], "46af4371")
+        fake_manager.async_save.assert_awaited_once()
+        broadcast.assert_awaited_once()
 
     def test_resolve_team_dispatch_targets_prefers_mentions_then_default_non_source_member(self):
         fake_team = SimpleNamespace(get_ordered_member_ids=lambda: ["horbot-02", "main"])
@@ -274,8 +303,8 @@ class WebTeamDispatchTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         with patch("horbot.web.api._get_team_session_manager", new=AsyncMock(return_value=fake_manager)), patch(
-            "horbot.web.api._import_local_media_files",
-            return_value=imported_files,
+            "horbot.web.api._normalize_outbound_content_and_files",
+            return_value=("图已发出", imported_files),
         ), patch(
             "horbot.web.api._dispatch_team_group_followups",
             new=AsyncMock(),

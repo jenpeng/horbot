@@ -76,9 +76,15 @@ class ToolExecutor:
             tools_used.append(tool_call.name)
             logger.debug("tools_used after append: {}", tools_used)
             
-            permission = self.tools.check_permission(tool_call.name)
+            requires_confirmation: bool | None = None
+            if hasattr(self.tools, "requires_confirmation"):
+                confirmation_check = self.tools.requires_confirmation(tool_call.name, tool_call.arguments)
+                if isinstance(confirmation_check, bool):
+                    requires_confirmation = confirmation_check
+            if requires_confirmation is None:
+                requires_confirmation = self.tools.check_permission(tool_call.name) == PermissionLevel.CONFIRM
             
-            if permission == PermissionLevel.CONFIRM:
+            if requires_confirmation:
                 confirmation_id = str(uuid.uuid4())[:8]
                 confirmations[confirmation_id] = {
                     "tool_name": tool_call.name,

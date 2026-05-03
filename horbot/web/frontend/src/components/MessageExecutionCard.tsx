@@ -106,6 +106,9 @@ const getStepLabel = (step: ExecutionStep): string => {
   if (normalizedType.includes('compression')) {
     return '压缩';
   }
+  if (normalizedType.includes('background')) {
+    return '后台';
+  }
   return step.type || '步骤';
 };
 
@@ -282,6 +285,8 @@ const MessageExecutionCard: React.FC<MessageExecutionCardProps> = ({
               ?? step.details?.thinking,
             );
             const detailContent = normalizeDetailText(step.details?.content);
+            const detailTask = normalizeDetailText(step.details?.task);
+            const detailError = normalizeDetailText(step.details?.error);
             const terminalCommand = extractTerminalCommand(step);
             const terminalOutput = extractTerminalOutput(step);
             const showTerminal = isTerminalTool(step) && (terminalCommand || terminalOutput);
@@ -290,6 +295,8 @@ const MessageExecutionCard: React.FC<MessageExecutionCardProps> = ({
             const showContent = !!detailContent && detailContent !== detailReasoning;
             const showArguments = !!detailArguments;
             const showResult = !!detailResult;
+            const showTask = !!detailTask;
+            const showError = !!detailError;
 
             return (
               <div
@@ -345,8 +352,18 @@ const MessageExecutionCard: React.FC<MessageExecutionCardProps> = ({
                           </pre>
                         )}
                       </div>
-                    ) : (showReasoning || showContent || showArguments || showResult) && (
+                    ) : (showReasoning || showContent || showArguments || showResult || showTask || showError) && (
                       <div className="mt-1.5 space-y-2 text-[11px] text-slate-600">
+                        {showTask && (
+                          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-700">
+                            <div className="mb-1 text-[10px] font-semibold tracking-wide text-slate-500">
+                              任务内容
+                            </div>
+                            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans leading-5">
+                              {detailTask}
+                            </pre>
+                          </div>
+                        )}
                         {showReasoning && (
                           <div className={`overflow-hidden rounded-xl border px-3 py-2 ${
                             isThinking
@@ -388,6 +405,16 @@ const MessageExecutionCard: React.FC<MessageExecutionCardProps> = ({
                             </div>
                             <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono leading-5">
                               {detailResult}
+                            </pre>
+                          </div>
+                        )}
+                        {showError && (
+                          <div className="overflow-hidden rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-red-800">
+                            <div className="mb-1 text-[10px] font-semibold tracking-wide text-red-500">
+                              错误信息
+                            </div>
+                            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono leading-5">
+                              {detailError}
                             </pre>
                           </div>
                         )}

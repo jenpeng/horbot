@@ -56,6 +56,10 @@ export interface UIMessage {
   isError?: boolean;
   errorKind?: 'provider' | 'network' | 'timeout' | 'stream';
   retryable?: boolean;
+  confirmationId?: string;
+  confirmationHandled?: boolean;
+  toolName?: string;
+  toolArguments?: Record<string, unknown>;
   retryPayload?: {
     content: string;
     mentionedAgents: string[];

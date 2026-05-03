@@ -948,6 +948,7 @@ class AgentLoop:
         channel: str,
         chat_id: str,
         message_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
         channel_instance_id: str | None = None,
         target_agent_id: str | None = None,
     ) -> None:
@@ -964,7 +965,14 @@ class AgentLoop:
 
         if spawn_tool := self.tools.get("spawn"):
             if isinstance(spawn_tool, SpawnTool):
-                spawn_tool.set_context(channel, chat_id)
+                spawn_metadata = dict(metadata or {})
+                if message_id:
+                    spawn_metadata.setdefault("message_id", message_id)
+                if self._agent_id:
+                    spawn_metadata.setdefault("agent_id", self._agent_id)
+                if self._agent_name:
+                    spawn_metadata.setdefault("agent_name", self._agent_name)
+                spawn_tool.set_context(channel, chat_id, metadata=spawn_metadata)
 
         if cron_tool := self.tools.get("cron"):
             if isinstance(cron_tool, CronTool):
@@ -2169,7 +2177,12 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id") if msg.metadata else None)
+            self._set_tool_context(
+                channel,
+                chat_id,
+                msg.metadata.get("message_id") if msg.metadata else None,
+                metadata=msg.metadata,
+            )
             history = session.get_history(max_messages=self.memory_window)
             messages = self.context.build_messages(
                 history=history,
@@ -2382,6 +2395,7 @@ class AgentLoop:
             msg.channel,
             msg.chat_id,
             msg.metadata.get("message_id") if msg.metadata else None,
+            metadata=msg.metadata,
             channel_instance_id=msg.channel_instance_id,
             target_agent_id=msg.target_agent_id,
         )

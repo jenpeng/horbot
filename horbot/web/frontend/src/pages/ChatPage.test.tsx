@@ -1253,6 +1253,60 @@ describe('ChatPage', () => {
     });
   });
 
+  it('renders confirmation-required stream events as actionable message state', async () => {
+    const conversationId = 'dm_agent-a';
+    vi.spyOn(chatService, 'streamChat').mockImplementationOnce(async ({ onStateChange, onRequestStart, onChunk }) => {
+      onStateChange?.('connecting');
+      onRequestStart?.('req-confirm');
+      onChunk({
+        event: 'request_start',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: 'turn-confirm',
+        message_id: 'assistant-confirm',
+      });
+      onChunk({
+        event: 'confirmation_required',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: 'turn-confirm',
+        message_id: 'assistant-confirm',
+        content: '需要确认后执行命令。',
+        confirmation_id: 'conf-1234',
+        tool_name: 'exec',
+        tool_arguments: { command: 'python3 script.py' },
+      });
+      onChunk({ event: 'done' });
+    });
+
+    seedConversationStore({
+      id: conversationId,
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-send-button')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-send-button'));
+
+    await waitFor(() => {
+      const conversationMessages = useConversationStore.getState().messages[conversationId] || [];
+      const confirmationMessage = conversationMessages.find((message) => message.confirmationId === 'conf-1234');
+      expect(confirmationMessage?.confirmationId).toBe('conf-1234');
+      expect(confirmationMessage?.toolName).toBe('exec');
+      expect(confirmationMessage?.toolArguments).toEqual({ command: 'python3 script.py' });
+      expect(confirmationMessage?.isStreaming).toBe(false);
+    });
+  });
+
   it('surfaces the failed request id in the retry banner and turn badge', async () => {
     const failedRequestId = '150e65af-1406-4945-bd11-69c3b6f327ea';
 
