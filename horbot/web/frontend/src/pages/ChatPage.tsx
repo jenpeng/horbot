@@ -6,6 +6,7 @@ import {
   ChevronsDown,
   ChevronsUp,
   CirclePlay,
+  Copy,
   Globe,
   FolderOpen,
   ListChecks,
@@ -3672,6 +3673,41 @@ const ChatPage: React.FC = () => {
     currentConversationHealth,
     t,
   ]);
+  const workbenchClipboardSummary = useMemo(() => {
+    const lines = [
+      `# ${t('chat.workbenchTitle')}`,
+      `${t('chat.workbenchStageLabel')}: ${conversationWorkbench.stage}`,
+      t('chat.workbenchLatestRequest', { preview: conversationWorkbench.latestRequest }),
+      `${t('chat.workbenchTurns', { count: messageTurns.length })} · ${t('chat.workbenchFiles', { count: conversationWorkbench.fileCount })} · ${t('chat.workbenchSteps', { count: conversationWorkbench.executionSteps })}`,
+    ];
+    if (conversationWorkbench.activeAgents.length > 0) {
+      lines.push(`${t('chat.workbenchAgentsLabel')}: ${conversationWorkbench.activeAgents.join(', ')}`);
+    }
+    if (conversationWorkbench.toolNames.length > 0) {
+      lines.push(`${t('chat.workbenchToolsLabel')}: ${conversationWorkbench.toolNames.join(', ')}`);
+    }
+    if (conversationWorkbench.fileCategories.length > 0) {
+      lines.push(`${t('chat.workbenchFilesLabel')}: ${conversationWorkbench.fileCategories.join(', ')}`);
+    }
+    lines.push(`${t('chat.workbenchExecutionLabel')}: ${t('chat.workbenchStepsDone')} ${conversationWorkbench.completedSteps} · ${t('chat.workbenchStepsRunning')} ${conversationWorkbench.runningSteps} · ${t('chat.workbenchStepsFailed')} ${conversationWorkbench.failedSteps}`);
+    if (conversationWorkbench.relayCount > 1) {
+      lines.push(t('chat.workbenchRelays', { count: conversationWorkbench.relayCount }));
+    }
+    if (conversationWorkbench.lastUpdatedAt) {
+      lines.push(t('chat.workbenchUpdated', { time: formatTime(conversationWorkbench.lastUpdatedAt) }));
+    }
+    return lines.join('\n');
+  }, [conversationWorkbench, formatTime, messageTurns.length, t]);
+
+  const handleCopyWorkbenchSummary = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(workbenchClipboardSummary);
+      toast.success(t('chat.workbenchCopySuccess'));
+    } catch (error) {
+      console.error('Failed to copy task workbench summary:', error);
+      toast.error(t('chat.workbenchCopyFailed'));
+    }
+  }, [toast, t, workbenchClipboardSummary]);
 
   const shouldVirtualizeTurns = useMemo(() => (
     messageTurns.length >= TURN_VIRTUALIZATION_THRESHOLD
@@ -4788,6 +4824,15 @@ const ChatPage: React.FC = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyWorkbenchSummary()}
+                          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
+                          title={t('chat.workbenchCopySummary')}
+                        >
+                          <Copy className="h-3.5 w-3.5" strokeWidth={2} />
+                          {t('chat.workbenchCopySummary')}
+                        </button>
                         <button
                           type="button"
                           onClick={() => setIsWorkbenchExpanded((prev) => !prev)}

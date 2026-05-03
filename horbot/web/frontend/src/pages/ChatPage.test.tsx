@@ -136,6 +136,11 @@ describe('ChatPage', () => {
       configurable: true,
       value: vi.fn(),
     });
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
 
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
@@ -418,6 +423,10 @@ describe('ChatPage', () => {
     expect(screen.getByText(/Latest request: Create a clean PPT summary|最近请求：Create a clean PPT summary/)).toBeInTheDocument();
     expect(screen.getByText(/1 files|1 个文件/)).toBeInTheDocument();
     expect(screen.getByText(/1 execution steps|1 个执行步骤/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Copy summary|复制摘要/ }));
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining('officecli'));
+    });
     expect(screen.queryByTestId('chat-workbench-details')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Details|详情/ }));
     expect(screen.getByTestId('chat-workbench-details')).toBeInTheDocument();
