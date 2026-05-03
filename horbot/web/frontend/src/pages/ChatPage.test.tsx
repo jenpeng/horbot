@@ -332,6 +332,92 @@ describe('ChatPage', () => {
     ))).toBe(true);
   });
 
+  it('summarizes the current task workbench from loaded messages without extra model output', async () => {
+    const conversationId = 'dm_agent-a';
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [] }));
+      }
+      if (url.startsWith(`/api/conversations/${conversationId}/messages`)) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          conversation: {
+            id: conversationId,
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: [
+            {
+              id: 'user-task',
+              role: 'user',
+              content: 'Create a clean PPT summary',
+              timestamp: new Date(Date.now() - 60_000).toISOString(),
+              files: [
+                {
+                  fileId: 'file-1',
+                  filename: 'brief.pptx',
+                  originalName: 'brief.pptx',
+                  mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                  size: 128,
+                  category: 'office',
+                  url: '/api/files/file-1',
+                },
+              ],
+            },
+            {
+              id: 'assistant-task',
+              role: 'assistant',
+              content: 'Created the summary.',
+              timestamp: new Date().toISOString(),
+              execution_steps: [
+                {
+                  id: 'step-1',
+                  type: 'tool_call',
+                  title: 'Run officecli',
+                  status: 'success',
+                  timestamp: new Date().toISOString(),
+                  details: { toolName: 'officecli' },
+                },
+              ],
+              metadata: {
+                agent_id: 'agent-a',
+                agent_name: 'Agent A',
+              },
+            },
+          ],
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
+    seedConversationStore({
+      id: conversationId,
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    expect(await screen.findByText(/Task Workbench|任务工作台/)).toBeInTheDocument();
+    expect(screen.getByText(/Latest request: Create a clean PPT summary|最近请求：Create a clean PPT summary/)).toBeInTheDocument();
+    expect(screen.getByText(/1 files|1 个文件/)).toBeInTheDocument();
+    expect(screen.getByText(/1 execution steps|1 个执行步骤/)).toBeInTheDocument();
+    expect(screen.getByText('officecli')).toBeInTheDocument();
+  });
+
   it('keeps assistant history messages that only contain image files', async () => {
     const remoteUrl = 'https://image.pollinations.ai/prompt/pony?seed=7';
     const fetchMock = vi.mocked(fetch);

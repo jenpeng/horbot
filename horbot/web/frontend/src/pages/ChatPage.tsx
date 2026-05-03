@@ -8,6 +8,7 @@ import {
   CirclePlay,
   Globe,
   FolderOpen,
+  ListChecks,
   Network,
   PencilLine,
   Search,
@@ -3516,6 +3517,61 @@ const ChatPage: React.FC = () => {
     : currentDirectAgentProfilePreset
       ? t('chat.currentConversationSummaryDirectProfile', { label: currentDirectAgentProfilePreset.label })
       : t('chat.currentConversationSummaryDirect');
+  const conversationWorkbench = useMemo(() => {
+    const latestTurn = [...messageTurns].reverse().find((turn) => turn.userMessage || turn.assistantMessages.length > 0);
+    const latestUserMessage = latestTurn?.userMessage || [...messages].reverse().find((message) => message.role === 'user');
+    const executionSteps = latestTurn?.assistantMessages.flatMap((message) => message.executionSteps || []) || [];
+    const runningSteps = executionSteps.filter((step) => step.status === 'running' || step.status === 'pending').length;
+    const failedSteps = executionSteps.filter((step) => step.status === 'failed' || step.status === 'error').length;
+    const completedSteps = executionSteps.filter((step) => (
+      step.status === 'completed' || step.status === 'success' || step.status === 'skipped' || step.status === 'stopped'
+    )).length;
+    const toolNames = Array.from(new Set(
+      executionSteps
+        .map((step) => String(step.details?.toolName || step.details?.tool_name || '').trim())
+        .filter(Boolean),
+    ));
+    const fileCount = messages.reduce((total, message) => total + (message.files?.length || 0), 0);
+    const activeStreamingCount = messages.filter((message) => message.role === 'assistant' && message.isStreaming).length;
+    const activeAgents = currentConversation?.type === ConversationType.TEAM
+      ? currentTeamMembers.map((agent) => agent.name)
+      : currentDirectAgent
+        ? [currentDirectAgent.name]
+        : [];
+    const lastUpdatedAt = [...messages].reverse().find((message) => message.timestamp)?.timestamp;
+    const stage = isLoading || activeStreamingCount > 0
+      ? t('chat.workbenchStageRunning')
+      : failedSteps > 0 || latestTurn?.hasError
+        ? t('chat.workbenchStageNeedsReview')
+        : latestTurn?.assistantMessages.length
+          ? t('chat.workbenchStageDone')
+          : t('chat.workbenchStageReady');
+
+    return {
+      latestRequest: latestUserMessage?.content
+        ? buildRequestPreviewLocalized(latestUserMessage.content, 64)
+        : t('chat.workbenchNoRequest'),
+      stage,
+      activeAgents,
+      fileCount,
+      executionSteps: executionSteps.length,
+      runningSteps,
+      failedSteps,
+      completedSteps,
+      toolNames,
+      relayCount: latestTurn?.relayCount || 0,
+      lastUpdatedAt,
+    };
+  }, [
+    buildRequestPreviewLocalized,
+    currentConversation?.type,
+    currentDirectAgent,
+    currentTeamMembers,
+    isLoading,
+    messageTurns,
+    messages,
+    t,
+  ]);
   const currentConversationHealth = useMemo<ConversationHealth | null>(() => {
     const turnCount = messageTurns.length;
     const approxTokens = estimateConversationTokens(messages);
@@ -4620,12 +4676,68 @@ const ChatPage: React.FC = () => {
               ) : (
                 <>
                   <div className="rounded-[28px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                        {t('chat.sessionOverview')}
-                      </span>
-                      <span className="text-sm text-slate-600">{currentConversationSummary}</span>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                            <ListChecks className="h-3.5 w-3.5" strokeWidth={2} />
+                            {t('chat.workbenchTitle')}
+                          </span>
+                          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            conversationWorkbench.failedSteps > 0
+                              ? 'bg-red-100 text-red-700'
+                              : conversationWorkbench.runningSteps > 0 || isLoading
+                                ? 'bg-sky-100 text-sky-700'
+                                : 'bg-emerald-100 text-emerald-700'
+                          }`}>
+                            {conversationWorkbench.stage}
+                          </span>
+                          <span className="text-sm text-slate-600">{currentConversationSummary}</span>
+                        </div>
+                        <p className="mt-2 truncate text-sm font-medium text-slate-800">
+                          {t('chat.workbenchLatestRequest', { preview: conversationWorkbench.latestRequest })}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                          <span>{t('chat.workbenchTurns', { count: messageTurns.length })}</span>
+                          <span>{t('chat.workbenchFiles', { count: conversationWorkbench.fileCount })}</span>
+                          <span>{t('chat.workbenchSteps', { count: conversationWorkbench.executionSteps })}</span>
+                          {conversationWorkbench.relayCount > 1 && (
+                            <span>{t('chat.workbenchRelays', { count: conversationWorkbench.relayCount })}</span>
+                          )}
+                          {conversationWorkbench.lastUpdatedAt && (
+                            <span>{t('chat.workbenchUpdated', { time: formatTime(conversationWorkbench.lastUpdatedAt) })}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex max-w-full flex-wrap justify-end gap-2 lg:max-w-[45%]">
+                        {conversationWorkbench.activeAgents.slice(0, 4).map((name) => (
+                          <span key={name} className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+                            {name}
+                          </span>
+                        ))}
+                        {conversationWorkbench.toolNames.slice(0, 4).map((name) => (
+                          <span key={name} className="rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">
+                            {name}
+                          </span>
+                        ))}
+                      </div>
                     </div>
+                    {conversationWorkbench.executionSteps > 0 && (
+                      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+                          <div className="text-lg font-semibold text-slate-900">{conversationWorkbench.completedSteps}</div>
+                          <div className="text-xs text-slate-500">{t('chat.workbenchStepsDone')}</div>
+                        </div>
+                        <div className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2">
+                          <div className="text-lg font-semibold text-sky-800">{conversationWorkbench.runningSteps}</div>
+                          <div className="text-xs text-sky-600">{t('chat.workbenchStepsRunning')}</div>
+                        </div>
+                        <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2">
+                          <div className="text-lg font-semibold text-red-700">{conversationWorkbench.failedSteps}</div>
+                          <div className="text-xs text-red-600">{t('chat.workbenchStepsFailed')}</div>
+                        </div>
+                      </div>
+                    )}
                     {currentConversation.type === ConversationType.TEAM && (
                       <p className="mt-2 text-xs text-slate-500">
                         {t('chat.teamRelayHint')}

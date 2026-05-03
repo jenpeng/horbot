@@ -74,6 +74,7 @@ The screenshots below were captured from the current Horbot Web UI with the loca
 
 - Markdown rendering for assistant messages
 - Live Artifact cards for structured agent output such as dashboards, chart stories, map stories, process views, and interactive reports
+- Zero-extra-token task workbench in the chat overview, derived from loaded messages, attachments, execution steps, tools, and relay state instead of asking the model to repeat UI metadata
 - Denser chat bubbles and tighter Markdown spacing to reduce blank space in long conversations
 - Conversation history loads use no-store responses and incremental fallback recovery so refreshes or module switches do not reuse stale latest-message windows
 - Inline preview for image, audio, PDF, Office, and text attachments

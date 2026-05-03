@@ -60,11 +60,14 @@ Chat supports:
 - refresh and module-switch recovery that reloads the latest history window without browser cache reuse
 - remote image links in assistant history are normalized into the same image-card attachment UI when possible
 - compact assistant bubbles with tighter Markdown spacing for long replies
+- a task workbench in the conversation overview that summarizes the latest request, files, execution steps, tools, relay count, and current stage from already loaded message metadata
 - baton-aware team relay status so the UI shows who handed off to whom and whether the next turn is continuing discussion or returning to a final summary
 
 Uploads are stored under `.horbot/data/uploads`.
 
 When you refresh the Chat page or leave and return to it, Horbot reloads the latest conversation window with no-store requests and then scrolls back to the newest turn. If you are browsing older history, use the jump-to-latest control before sending a new message.
+
+The task workbench is UI-derived and does not ask the model to generate extra status text. It reads existing messages, files, execution steps, tool names, and relay metadata, so it improves scanability without increasing prompt tokens.
 
 If a remote image link can be cached successfully, later history loads use a local attachment preview URL and preserve filename plus file size in the card. If caching fails, the chat still falls back to a remote image attachment instead of showing only a bare link.
 
