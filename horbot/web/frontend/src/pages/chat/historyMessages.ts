@@ -44,25 +44,53 @@ export const mergeConversationHistoryMessages = (
   const mergedMessages = [...historyMessages];
   const indexById = new Map<string, number>();
   const indexBySignature = new Map<string, number>();
+  const indexByUserContentRequest = new Map<string, number>();
+
+  const buildUserContentRequestKey = (message: UIMessage): string | null => {
+    if (message.role !== 'user') {
+      return null;
+    }
+    const requestOrTurnId = message.requestId || message.turnId;
+    if (!requestOrTurnId) {
+      return null;
+    }
+    const compactContent = cleanHistoryMessageContent(message.content || '').replace(/\s+/g, ' ').trim();
+    if (!compactContent) {
+      return null;
+    }
+    return JSON.stringify({
+      role: 'user',
+      content: compactContent,
+      requestOrTurnId,
+    });
+  };
 
   mergedMessages.forEach((message, index) => {
     indexById.set(message.id, index);
     indexBySignature.set(buildMessageMergeKey(message), index);
+    const userContentRequestKey = buildUserContentRequestKey(message);
+    if (userContentRequestKey) {
+      indexByUserContentRequest.set(userContentRequestKey, index);
+    }
   });
 
   existingMessages.forEach((message) => {
     const signature = buildMessageMergeKey(message);
-    const existingIndex = indexById.get(message.id) ?? indexBySignature.get(signature);
+    const userContentRequestKey = buildUserContentRequestKey(message);
+    const existingIndex = indexById.get(message.id)
+      ?? indexBySignature.get(signature)
+      ?? (userContentRequestKey ? indexByUserContentRequest.get(userContentRequestKey) : undefined);
 
     if (existingIndex !== undefined) {
       const nextMessage = {
         ...mergedMessages[existingIndex],
         ...message,
+        id: mergedMessages[existingIndex].id,
         turnId: message.turnId ?? mergedMessages[existingIndex].turnId,
         requestId: message.requestId ?? mergedMessages[existingIndex].requestId,
         agentId: message.agentId ?? mergedMessages[existingIndex].agentId,
         agentName: message.agentName ?? mergedMessages[existingIndex].agentName,
-        timestamp: message.timestamp ?? mergedMessages[existingIndex].timestamp,
+        timestamp: mergedMessages[existingIndex].timestamp ?? message.timestamp,
         metadata: message.metadata ?? mergedMessages[existingIndex].metadata,
         files: message.files ?? mergedMessages[existingIndex].files,
         executionSteps: mergeExecutionSteps(
@@ -74,6 +102,10 @@ export const mergeConversationHistoryMessages = (
       mergedMessages[existingIndex] = nextMessage;
       indexById.set(nextMessage.id, existingIndex);
       indexBySignature.set(buildMessageMergeKey(nextMessage), existingIndex);
+      const nextUserContentRequestKey = buildUserContentRequestKey(nextMessage);
+      if (nextUserContentRequestKey) {
+        indexByUserContentRequest.set(nextUserContentRequestKey, existingIndex);
+      }
       return;
     }
 
@@ -81,6 +113,9 @@ export const mergeConversationHistoryMessages = (
     mergedMessages.push(message);
     indexById.set(message.id, nextIndex);
     indexBySignature.set(signature, nextIndex);
+    if (userContentRequestKey) {
+      indexByUserContentRequest.set(userContentRequestKey, nextIndex);
+    }
   });
 
   return mergedMessages

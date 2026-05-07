@@ -2470,6 +2470,9 @@ const ChatPage: React.FC = () => {
           onRequestStart: (requestId) => {
             requestRef.id = requestId;
             currentRequestIdRef.current = requestId;
+            updateMessage(currentConversation.id, userMessage.id, {
+              requestId,
+            });
           },
           onChunk: (event) => {
           const eventData = event as unknown as Record<string, unknown>;
@@ -2485,6 +2488,17 @@ const ChatPage: React.FC = () => {
           const agentId = eventData.agent_id as string | undefined;
           const turnId = eventData.turn_id as string | undefined;
           const messageIdFromEvent = eventData.message_id as string | undefined;
+          if (turnId) {
+            updateMessage(currentConversation.id, userMessage.id, {
+              turnId,
+              requestId: requestRef.id || undefined,
+              metadata: {
+                ...(getMessages(currentConversation.id).find((message) => message.id === userMessage.id)?.metadata || {}),
+                turn_id: turnId,
+                request_id: requestRef.id || undefined,
+              },
+            });
+          }
           const streamKey = messageIdFromEvent || turnId || (agentId ? `${agentId}:${String(eventData.agent_index ?? '0')}` : 'main');
           const streamEntry = agentMessages.get(streamKey);
           const matchedStreamEntry = streamEntry
