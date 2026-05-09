@@ -6,11 +6,13 @@ import {
   ChevronsDown,
   ChevronsUp,
   CirclePlay,
+  ClipboardList,
   Globe,
   FolderOpen,
   Network,
   PencilLine,
   Search,
+  SquareKanban,
   TerminalSquare,
   UnfoldVertical,
   X,
@@ -364,6 +366,8 @@ const ChatPage: React.FC = () => {
   const [historySearchIndex, setHistorySearchIndex] = useState(0);
   const [isHistorySearchOpen, setIsHistorySearchOpen] = useState(false);
   const [isWorkbenchPanelOpen, setIsWorkbenchPanelOpen] = useState(false);
+  const [isTaskInspectorOpen, setIsTaskInspectorOpen] = useState(false);
+  const [taskInspectorTab, setTaskInspectorTab] = useState<'overview' | 'files' | 'logs'>('overview');
   const [historySearchTimeRange, setHistorySearchTimeRange] = useState<HistorySearchTimeRange>('all');
   const [remoteHistorySearchMatches, setRemoteHistorySearchMatches] = useState<RemoteHistorySearchMatch[]>([]);
   const [remoteHistorySearchTotal, setRemoteHistorySearchTotal] = useState(0);
@@ -3895,6 +3899,31 @@ const ChatPage: React.FC = () => {
     return lines.join('\n');
   }, [conversationWorkbench, formatTime, messageTurns.length, t]);
 
+  const taskWorkspacePreview = useMemo(() => {
+    const activeFiles = Array.from(new Map(
+      messages
+        .flatMap((message) => message.files || [])
+        .map((file) => [file.fileId || file.url || file.originalName || file.filename, file]),
+    ).values()).slice(0, 6);
+    const latestTurn = [...messageTurns].reverse().find((turn) => turn.userMessage || turn.assistantMessages.length > 0);
+    const latestSteps = latestTurn?.assistantMessages
+      .flatMap((message) => message.executionSteps || [])
+      .slice(-6)
+      .reverse() || [];
+    const title = conversationWorkbench.latestRequest && conversationWorkbench.latestRequest !== t('chat.workbenchNoRequest')
+      ? conversationWorkbench.latestRequest
+      : currentConversation?.name || t('chat.taskContextUntitled');
+
+    return {
+      title,
+      mode: isLoading ? t('chat.taskContextModeRunning') : t('chat.taskContextModeChat'),
+      cwd: t('chat.taskContextCwdCurrentConversation'),
+      isolation: t('chat.taskContextIsolationConversation'),
+      files: activeFiles,
+      steps: latestSteps,
+    };
+  }, [conversationWorkbench.latestRequest, currentConversation?.name, isLoading, messageTurns, messages, t]);
+
   const handleCopyWorkbenchSummary = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(workbenchClipboardSummary);
@@ -4761,6 +4790,20 @@ const ChatPage: React.FC = () => {
                     onApplyQuickAction={applyInputDraftPreset}
                   />
                 )}
+                <button
+                  type="button"
+                  onClick={() => setIsTaskInspectorOpen((prev) => !prev)}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-sm transition-colors ${
+                    isTaskInspectorOpen
+                      ? 'border-sky-200 bg-sky-50 text-sky-700'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                  data-testid="chat-task-inspector-toggle"
+                  aria-pressed={isTaskInspectorOpen}
+                >
+                  <SquareKanban className="h-3.5 w-3.5" strokeWidth={2} />
+                  {t('chat.taskInspectorToggle')}
+                </button>
                 {messages.length > 0 && (
                   <div className="relative">
                       <button
@@ -4879,13 +4922,43 @@ const ChatPage: React.FC = () => {
                 </div>
               </div>
             )}
+
+            <div className="shrink-0 border-b border-slate-200 bg-white/95 px-4 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
+                    <ClipboardList className="h-3.5 w-3.5" strokeWidth={2} />
+                    {t('chat.taskContextDirect')}
+                  </span>
+                  <span className="inline-flex max-w-[32rem] items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
+                    <span className="shrink-0 text-slate-400">{t('chat.taskContextCurrent')}</span>
+                    <span className="truncate">{taskWorkspacePreview.title}</span>
+                  </span>
+                  <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-500">
+                    {taskWorkspacePreview.cwd}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsTaskInspectorOpen(true);
+                    setTaskInspectorTab('overview');
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+                >
+                  <SquareKanban className="h-3.5 w-3.5" strokeWidth={2} />
+                  {t('chat.taskContextOpenInspector')}
+                </button>
+              </div>
+            </div>
             
-            <div className="relative min-h-0 flex-1">
-              <div
-                ref={chatContainerRef}
-                data-testid="chat-scroll-container"
-                className="min-h-0 h-full overflow-y-auto bg-slate-50 px-3 py-3 space-y-3"
-              >
+            <div className="relative flex min-h-0 flex-1 overflow-hidden">
+              <div className="relative min-h-0 flex-1">
+                <div
+                  ref={chatContainerRef}
+                  data-testid="chat-scroll-container"
+                  className="min-h-0 h-full overflow-y-auto bg-slate-50 px-3 py-3 space-y-3"
+                >
               {messages.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-slate-400">
                   {isHistoryLoading ? (
@@ -5143,16 +5216,125 @@ const ChatPage: React.FC = () => {
                   <div ref={messagesEndRef} />
                 </>
               )}
+                </div>
+                {!isNearBottom && (
+                  <button
+                    type="button"
+                    onClick={() => scrollToBottom()}
+                    className="absolute bottom-4 right-4 inline-flex items-center gap-1 rounded-full border border-sky-200 bg-white/95 px-3 py-2 text-xs font-medium text-sky-700 shadow-lg backdrop-blur transition hover:-translate-y-0.5 hover:bg-sky-50"
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" strokeWidth={2} />
+                    {t('chat.scrollToBottom')}
+                  </button>
+                )}
               </div>
-              {!isNearBottom && (
-                <button
-                  type="button"
-                  onClick={() => scrollToBottom()}
-                  className="absolute bottom-4 right-4 inline-flex items-center gap-1 rounded-full border border-sky-200 bg-white/95 px-3 py-2 text-xs font-medium text-sky-700 shadow-lg backdrop-blur transition hover:-translate-y-0.5 hover:bg-sky-50"
+
+              {isTaskInspectorOpen && (
+                <aside
+                  className="hidden w-[22rem] shrink-0 border-l border-slate-200 bg-white lg:flex lg:flex-col"
+                  data-testid="chat-task-inspector"
                 >
-                  <ArrowDown className="h-3.5 w-3.5" strokeWidth={2} />
-                  {t('chat.scrollToBottom')}
-                </button>
+                  <div className="border-b border-slate-200 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                          {t('chat.taskInspectorTitle')}
+                        </p>
+                        <h3 className="mt-1 truncate text-sm font-semibold text-slate-900">
+                          {taskWorkspacePreview.title}
+                        </h3>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {taskWorkspacePreview.mode} · {taskWorkspacePreview.isolation}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsTaskInspectorOpen(false)}
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                        aria-label={t('chat.workbenchCollapse')}
+                      >
+                        <X className="h-4 w-4" strokeWidth={2} />
+                      </button>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      {(['overview', 'files', 'logs'] as const).map((tab) => (
+                        <button
+                          key={tab}
+                          type="button"
+                          onClick={() => setTaskInspectorTab(tab)}
+                          className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
+                            taskInspectorTab === tab
+                              ? 'bg-sky-100 text-sky-700'
+                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          }`}
+                        >
+                          {t(`chat.taskInspectorTab${tab[0].toUpperCase()}${tab.slice(1)}`)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                    {taskInspectorTab === 'overview' && (
+                      <div className="space-y-4">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-xs font-semibold text-slate-500">{t('chat.workbenchStageLabel')}</p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">{conversationWorkbench.stage}</p>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="rounded-2xl border border-slate-200 p-3 text-center">
+                            <p className="text-lg font-semibold text-slate-900">{messageTurns.length}</p>
+                            <p className="text-[11px] text-slate-500">{t('chat.taskInspectorTurns')}</p>
+                          </div>
+                          <div className="rounded-2xl border border-slate-200 p-3 text-center">
+                            <p className="text-lg font-semibold text-slate-900">{conversationWorkbench.fileCount}</p>
+                            <p className="text-[11px] text-slate-500">{t('chat.workbenchFilesLabel')}</p>
+                          </div>
+                          <div className="rounded-2xl border border-slate-200 p-3 text-center">
+                            <p className="text-lg font-semibold text-slate-900">{conversationWorkbench.executionSteps}</p>
+                            <p className="text-[11px] text-slate-500">{t('chat.workbenchExecutionLabel')}</p>
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 p-3">
+                          <p className="text-xs font-semibold text-slate-500">{t('chat.taskInspectorCwd')}</p>
+                          <p className="mt-1 break-words text-xs text-slate-700">{taskWorkspacePreview.cwd}</p>
+                        </div>
+                      </div>
+                    )}
+                    {taskInspectorTab === 'files' && (
+                      <div className="space-y-2">
+                        {taskWorkspacePreview.files.length === 0 ? (
+                          <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                            {t('chat.taskInspectorNoFiles')}
+                          </p>
+                        ) : taskWorkspacePreview.files.map((file) => (
+                          <div key={file.fileId || file.url || file.originalName} className="rounded-2xl border border-slate-200 p-3">
+                            <p className="truncate text-sm font-semibold text-slate-800">{file.originalName || file.filename}</p>
+                            <p className="mt-1 text-xs text-slate-500">{file.category || file.mimeType}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {taskInspectorTab === 'logs' && (
+                      <div className="space-y-2">
+                        {taskWorkspacePreview.steps.length === 0 ? (
+                          <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                            {t('chat.taskInspectorNoLogs')}
+                          </p>
+                        ) : taskWorkspacePreview.steps.map((step) => (
+                          <div key={step.id} className="rounded-2xl border border-slate-200 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="truncate text-sm font-semibold text-slate-800">{step.title}</p>
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                                {step.status}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-500">{step.type}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </aside>
               )}
             </div>
             
