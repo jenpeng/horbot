@@ -198,6 +198,20 @@ class TestMemoryStore(unittest.TestCase):
 
         self.assertFalse(builder.should_use_fast_reply("称呼我彭老师，时区 UTC+8", history_size=2))
 
+    def test_fast_reply_prompt_keeps_user_profile_available(self):
+        (self.workspace / "SOUL.md").write_text("# 小项\n", encoding="utf-8")
+        (self.workspace / "USER.md").write_text(
+            "# 用户档案\n\n## 基本信息\n- **姓名**：彭老师\n- **语言**：中文\n\n## 特别说明\n- 称呼用户为\"彭老师\"\n",
+            encoding="utf-8",
+        )
+
+        builder = ContextBuilder(workspace=self.workspace, agent_name="小项")
+        messages = builder.build_fast_messages([], "你不知道我叫什么吗？")
+
+        self.assertIn("USER.md profile", messages[0]["content"])
+        self.assertIn("彭老师", messages[0]["content"])
+        self.assertIn("称呼用户", messages[0]["content"])
+
     def test_materialize_bootstrap_from_messages_persists_guided_setup(self):
         (self.workspace / "SOUL.md").write_text(
             "# 灵魂\n<!-- HORBOT_SETUP_PENDING -->\n\n我是 小布，运行在 horbot 中的独立 Agent。\n\n## 工作约束\n- 首轮对话时，优先帮助用户明确职责、输出风格、边界和协作方式。\n- 完成首次引导后，请主动重写本文件，并移除 `HORBOT_SETUP_PENDING` 标记。\n\n---\n\n*这是系统根据当前画像与权限档位生成的初始化版本，可在首次私聊后继续细化。*\n",

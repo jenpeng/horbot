@@ -61,6 +61,7 @@ class ContextBuilder:
 
     FAST_REPLY_MAX_CHARS = 72
     FAST_REPLY_HISTORY_LIMIT = 6
+    FAST_REPLY_USER_PROFILE_CHAR_LIMIT = 1600
     ATTACHMENT_TEXT_CHAR_LIMIT_PER_FILE = 4000
     ATTACHMENT_TEXT_CHAR_LIMIT_TOTAL = 12000
     
@@ -347,6 +348,20 @@ Skills with available="false" need dependencies installed first - you can try in
             )
         else:
             parts.append("You are chatting directly with the user.")
+
+        user_profile = self._read_bootstrap_file("USER.md").strip()
+        if user_profile:
+            if len(user_profile) > self.FAST_REPLY_USER_PROFILE_CHAR_LIMIT:
+                user_profile = f"{user_profile[:self.FAST_REPLY_USER_PROFILE_CHAR_LIMIT].rstrip()}\n..."
+            parts.append(
+                f"""# User Profile
+
+The following USER.md profile is stable context for this direct conversation. Use it for the user's name, preferred form of address, language, and collaboration preferences.
+
+```markdown
+{user_profile}
+```"""
+            )
 
         parts.append(
             """Fast reply mode:
