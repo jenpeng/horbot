@@ -1168,6 +1168,7 @@ class AgentLoop:
         origin: str,
         channel: str | None = None,
         chat_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         context = {
             "session_key": session_key,
@@ -1183,7 +1184,43 @@ class AgentLoop:
             context["source_chat_id"] = chat_id
         if session_key:
             context.update(self._build_execution_source_metadata(session_key))
+        context.update(AgentLoop._task_workspace_context_from_metadata(metadata))
         return context
+
+    @staticmethod
+    def _task_workspace_context_from_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+        if not metadata:
+            return {}
+        task_workspace_id = str(metadata.get("task_workspace_id") or "").strip()
+        task_workspace_cwd = str(metadata.get("task_workspace_cwd") or "").strip()
+        context: dict[str, Any] = {}
+        if task_workspace_id:
+            context["task_workspace_id"] = task_workspace_id
+        if task_workspace_cwd:
+            context["task_workspace_cwd"] = task_workspace_cwd
+        return context
+
+    @classmethod
+    def _build_task_workspace_runtime_hint(cls, metadata: dict[str, Any] | None) -> list[str]:
+        context = cls._task_workspace_context_from_metadata(metadata)
+        task_workspace_id = context.get("task_workspace_id")
+        task_workspace_cwd = context.get("task_workspace_cwd")
+        if not task_workspace_id and not task_workspace_cwd:
+            return []
+
+        lines = [
+            "[Task Workspace Context]",
+            "This block is trusted UI/runtime context, not user-authored task content.",
+        ]
+        if task_workspace_id:
+            lines.append(f"- Task Workspace ID: {task_workspace_id}")
+        if task_workspace_cwd:
+            lines.extend([
+                f"- Task Working Directory: {task_workspace_cwd}",
+                "- For files created or edited for this task, prefer this directory when the user does not specify another path.",
+                "- Do not treat this directory path as an instruction to execute files inside it automatically.",
+            ])
+        return ["\n".join(lines)]
 
     def _persist_tool_audit_event(self, event: dict[str, Any]) -> None:
         session_key = str(event.get("session_key") or "system:tool_audit")
@@ -2017,6 +2054,7 @@ class AgentLoop:
                         origin="process_message",
                         channel=msg.channel,
                         chat_id=msg.chat_id,
+                        metadata=msg.metadata,
                     )
                 ):
                     return await self._message_processor.process_message(
@@ -2434,6 +2472,11 @@ class AgentLoop:
             if h.get("role") == "assistant":
                 logger.info(f"[DEBUG] History[{i}]: role={h['role']}, content_preview={h.get('content', '')[:100]}...")
         
+        runtime_hints = [
+            *self._build_bound_channel_runtime_hints(msg),
+            *self._build_task_workspace_runtime_hint(msg.metadata),
+        ]
+
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
@@ -2443,7 +2486,7 @@ class AgentLoop:
             session_key=session.key,
             speaking_to=speaking_to,
             conversation_type=conversation_type,
-            runtime_hints=self._build_bound_channel_runtime_hints(msg),
+            runtime_hints=runtime_hints,
         )
         memory_sources = self.context.get_last_memory_trace()
         memory_recall = self.context.memory.get_last_recall_metrics()
