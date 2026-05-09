@@ -74,6 +74,7 @@ from horbot.web.soul_routes import create_soul_router
 from horbot.web.system_routes import build_system_status_payload, create_system_router
 from horbot.web.subagent_routes import create_subagent_router
 from horbot.web.task_delegation_routes import router as task_delegation_router
+from horbot.web.task_workspace_routes import create_task_workspace_router
 from horbot.web.team_routes import create_team_router
 from horbot.web.token_usage_routes import router as token_usage_router
 from horbot.web import upload_preview as upload_preview_module
@@ -124,6 +125,9 @@ router.include_router(create_plan_router(lambda agent_id=None: get_agent_loop(ag
 router.include_router(create_planner_test_router(lambda agent_id=None: get_agent_loop(agent_id)))
 router.include_router(create_cron_router(lambda: get_cron_service()))
 router.include_router(create_subagent_router(lambda agent_id=None: get_agent_loop(agent_id)))
+router.include_router(create_task_workspace_router(
+    resolve_agent_workspace_for_request=lambda agent_id=None: _resolve_agent_workspace_for_request(agent_id),
+))
 router.include_router(create_config_router(
     get_config=lambda: get_cached_config(),
     save_config_fn=lambda config: save_config(config),

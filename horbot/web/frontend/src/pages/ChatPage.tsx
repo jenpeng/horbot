@@ -32,6 +32,8 @@ import { ConversationType, conversationIdToSessionKey, sessionKeyToConversationI
 import type { ExecutionStep, MessageFile } from '../types/conversation';
 import { chatService, ChatStreamError } from '../services/chat';
 import type { StreamState } from '../services/chat';
+import taskWorkspacesService from '../services/taskWorkspaces';
+import type { TaskWorkspace, TaskWorkspaceFile } from '../services/taskWorkspaces';
 import type { ConversationState } from '../stores/conversationStore';
 import { createAsyncResourceCache } from '../utils/asyncResourceCache';
 import { lazyWithReload } from '../utils/lazyWithReload';
@@ -368,6 +370,10 @@ const ChatPage: React.FC = () => {
   const [isWorkbenchPanelOpen, setIsWorkbenchPanelOpen] = useState(false);
   const [isTaskInspectorOpen, setIsTaskInspectorOpen] = useState(false);
   const [taskInspectorTab, setTaskInspectorTab] = useState<'overview' | 'files' | 'logs'>('overview');
+  const [taskWorkspaces, setTaskWorkspaces] = useState<TaskWorkspace[]>([]);
+  const [selectedTaskWorkspaceId, setSelectedTaskWorkspaceId] = useState<string | null>(null);
+  const [taskWorkspaceFiles, setTaskWorkspaceFiles] = useState<TaskWorkspaceFile[]>([]);
+  const [isCreatingTaskWorkspace, setIsCreatingTaskWorkspace] = useState(false);
   const [historySearchTimeRange, setHistorySearchTimeRange] = useState<HistorySearchTimeRange>('all');
   const [remoteHistorySearchMatches, setRemoteHistorySearchMatches] = useState<RemoteHistorySearchMatch[]>([]);
   const [remoteHistorySearchTotal, setRemoteHistorySearchTotal] = useState(0);
@@ -659,6 +665,12 @@ const ChatPage: React.FC = () => {
     }
     return conversations.find((conversation) => conversation.id === currentConversationId) || null;
   }, [conversations, currentConversationId]);
+  const currentTaskAgentId = currentConversation?.type === ConversationType.DM
+    ? currentConversation.targetId
+    : undefined;
+  const currentTaskSessionKey = currentConversation?.id
+    ? conversationIdToSessionKey(currentConversation.id)
+    : undefined;
   const messages = useMemo(
     () => (
       currentConversationId
@@ -2229,6 +2241,63 @@ const ChatPage: React.FC = () => {
       void loadConversationHistory(currentConversationId, { forceRefreshLatest: true });
     }
   }, [currentConversationId, loadConversationHistory]);
+
+  const reloadTaskWorkspaces = useCallback(async () => {
+    if (!currentConversation?.id) {
+      setTaskWorkspaces([]);
+      setSelectedTaskWorkspaceId(null);
+      return;
+    }
+    try {
+      const tasks = await taskWorkspacesService.list({
+        conversation_id: currentConversation.id,
+        agent_id: currentTaskAgentId,
+      });
+      setTaskWorkspaces(tasks);
+      setSelectedTaskWorkspaceId((previousId) => {
+        if (previousId && tasks.some((task) => task.id === previousId)) {
+          return previousId;
+        }
+        return tasks[0]?.id || null;
+      });
+    } catch (error) {
+      console.error('Failed to load task workspaces:', error);
+      setTaskWorkspaces([]);
+      setSelectedTaskWorkspaceId(null);
+    }
+  }, [currentConversation?.id, currentTaskAgentId]);
+
+  useEffect(() => {
+    void reloadTaskWorkspaces();
+  }, [reloadTaskWorkspaces]);
+
+  const selectedTaskWorkspace = useMemo(
+    () => taskWorkspaces.find((task) => task.id === selectedTaskWorkspaceId) || taskWorkspaces[0] || null,
+    [selectedTaskWorkspaceId, taskWorkspaces],
+  );
+
+  useEffect(() => {
+    if (!selectedTaskWorkspace?.id) {
+      setTaskWorkspaceFiles([]);
+      return;
+    }
+    let cancelled = false;
+    taskWorkspacesService.listFiles(selectedTaskWorkspace.id)
+      .then((payload) => {
+        if (!cancelled) {
+          setTaskWorkspaceFiles(payload.files || []);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load task workspace files:', error);
+        if (!cancelled) {
+          setTaskWorkspaceFiles([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTaskWorkspace?.id]);
 
   useEffect(() => {
     if (!currentConversation) {
@@ -3900,29 +3969,57 @@ const ChatPage: React.FC = () => {
   }, [conversationWorkbench, formatTime, messageTurns.length, t]);
 
   const taskWorkspacePreview = useMemo(() => {
-    const activeFiles = Array.from(new Map(
+    const activeMessageFiles = Array.from(new Map(
       messages
         .flatMap((message) => message.files || [])
         .map((file) => [file.fileId || file.url || file.originalName || file.filename, file]),
-    ).values()).slice(0, 6);
+    ).values()).slice(0, 6).map((file) => ({
+      key: file.fileId || file.url || file.originalName || file.filename,
+      name: file.originalName || file.filename,
+      detail: file.category || file.mimeType,
+    }));
+    const workspaceFiles = taskWorkspaceFiles.slice(0, 12).map((file) => ({
+      key: file.path,
+      name: file.path,
+      detail: file.kind === 'directory' ? 'directory' : `${file.size ?? 0} bytes`,
+    }));
     const latestTurn = [...messageTurns].reverse().find((turn) => turn.userMessage || turn.assistantMessages.length > 0);
     const latestSteps = latestTurn?.assistantMessages
       .flatMap((message) => message.executionSteps || [])
       .slice(-6)
       .reverse() || [];
-    const title = conversationWorkbench.latestRequest && conversationWorkbench.latestRequest !== t('chat.workbenchNoRequest')
+    const fallbackTitle = conversationWorkbench.latestRequest && conversationWorkbench.latestRequest !== t('chat.workbenchNoRequest')
       ? conversationWorkbench.latestRequest
       : currentConversation?.name || t('chat.taskContextUntitled');
+    const title = selectedTaskWorkspace?.title || fallbackTitle;
+    const statusModeMap: Record<string, string> = {
+      ready: t('chat.taskContextModeChat'),
+      running: t('chat.taskContextModeRunning'),
+      blocked: t('messageGroup.confirmation.title'),
+      done: t('chat.workbenchStepsDone'),
+      failed: t('chat.workbenchStepsFailed'),
+    };
 
     return {
       title,
-      mode: isLoading ? t('chat.taskContextModeRunning') : t('chat.taskContextModeChat'),
-      cwd: t('chat.taskContextCwdCurrentConversation'),
-      isolation: t('chat.taskContextIsolationConversation'),
-      files: activeFiles,
+      mode: selectedTaskWorkspace
+        ? statusModeMap[selectedTaskWorkspace.status] || selectedTaskWorkspace.status
+        : isLoading ? t('chat.taskContextModeRunning') : t('chat.taskContextModeChat'),
+      cwd: selectedTaskWorkspace?.cwd || t('chat.taskContextCwdCurrentConversation'),
+      isolation: selectedTaskWorkspace?.workspace_mode || t('chat.taskContextIsolationConversation'),
+      files: workspaceFiles.length > 0 ? workspaceFiles : activeMessageFiles,
       steps: latestSteps,
     };
-  }, [conversationWorkbench.latestRequest, currentConversation?.name, isLoading, messageTurns, messages, t]);
+  }, [
+    conversationWorkbench.latestRequest,
+    currentConversation?.name,
+    isLoading,
+    messageTurns,
+    messages,
+    selectedTaskWorkspace,
+    taskWorkspaceFiles,
+    t,
+  ]);
 
   const handleCopyWorkbenchSummary = useCallback(async () => {
     try {
@@ -3950,6 +4047,47 @@ const ChatPage: React.FC = () => {
     setIsHistorySearchOpen(true);
     setIsWorkbenchPanelOpen(false);
   }, [conversationWorkbench.latestRequest, t]);
+
+  const handleCreateTaskWorkspace = useCallback(async () => {
+    if (!currentConversation?.id || isCreatingTaskWorkspace) {
+      return;
+    }
+    const fallbackTitle = conversationWorkbench.latestRequest && conversationWorkbench.latestRequest !== t('chat.workbenchNoRequest')
+      ? conversationWorkbench.latestRequest
+      : currentConversation.name || t('chat.taskContextUntitled');
+    setIsCreatingTaskWorkspace(true);
+    try {
+      const task = await taskWorkspacesService.create({
+        title: fallbackTitle,
+        agent_id: currentTaskAgentId,
+        conversation_id: currentConversation.id,
+        session_key: currentTaskSessionKey,
+        workspace_mode: 'conversation',
+        metadata: {
+          source: 'chat-page',
+          conversation_type: currentConversation.type,
+        },
+      });
+      setTaskWorkspaces((previousTasks) => [task, ...previousTasks.filter((item) => item.id !== task.id)]);
+      setSelectedTaskWorkspaceId(task.id);
+      setIsTaskInspectorOpen(true);
+      setTaskInspectorTab('overview');
+      toast.success(t('chat.taskContextTaskCreated'));
+    } catch (error) {
+      console.error('Failed to create task workspace:', error);
+      toast.error(error instanceof Error ? error.message : t('chat.taskContextTaskCreateFailed'));
+    } finally {
+      setIsCreatingTaskWorkspace(false);
+    }
+  }, [
+    conversationWorkbench.latestRequest,
+    currentConversation,
+    currentTaskAgentId,
+    currentTaskSessionKey,
+    isCreatingTaskWorkspace,
+    t,
+    toast,
+  ]);
 
   const shouldVirtualizeTurns = useMemo(() => (
     messageTurns.length >= TURN_VIRTUALIZATION_THRESHOLD
@@ -4949,6 +5087,17 @@ const ChatPage: React.FC = () => {
                   <SquareKanban className="h-3.5 w-3.5" strokeWidth={2} />
                   {t('chat.taskContextOpenInspector')}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleCreateTaskWorkspace();
+                  }}
+                  disabled={isCreatingTaskWorkspace || !currentConversation}
+                  className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700 shadow-sm transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <FolderOpen className="h-3.5 w-3.5" strokeWidth={2} />
+                  {t('chat.taskContextNewTask')}
+                </button>
               </div>
             </div>
             
@@ -5307,9 +5456,9 @@ const ChatPage: React.FC = () => {
                             {t('chat.taskInspectorNoFiles')}
                           </p>
                         ) : taskWorkspacePreview.files.map((file) => (
-                          <div key={file.fileId || file.url || file.originalName} className="rounded-2xl border border-slate-200 p-3">
-                            <p className="truncate text-sm font-semibold text-slate-800">{file.originalName || file.filename}</p>
-                            <p className="mt-1 text-xs text-slate-500">{file.category || file.mimeType}</p>
+                          <div key={file.key} className="rounded-2xl border border-slate-200 p-3">
+                            <p className="truncate text-sm font-semibold text-slate-800">{file.name}</p>
+                            <p className="mt-1 text-xs text-slate-500">{file.detail}</p>
                           </div>
                         ))}
                       </div>
