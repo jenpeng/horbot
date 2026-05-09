@@ -293,6 +293,22 @@ class ConfigNormalizerTests(unittest.TestCase):
             self.assertFalse((root / ".horbot" / "agents" / "writer" / "sessions").exists())
             self.assertFalse((root / ".horbot" / "agents" / "writer" / "skills").exists())
 
+    def test_delete_agent_override_artifacts_removes_agents_bootstrap_file(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            workspace = Path(tempdir) / "custom-workspace"
+            metadata_root = workspace / ".horbot-agent"
+            metadata_root.mkdir(parents=True, exist_ok=True)
+            for filename in ("AGENTS.md", "SOUL.md", "USER.md"):
+                (workspace / filename).write_text(f"# {filename}\n", encoding="utf-8")
+
+            manager = WorkspaceManager.get_instance()
+
+            self.assertTrue(manager.delete_agent_override_artifacts(str(workspace)))
+            self.assertFalse(metadata_root.exists())
+            self.assertFalse((workspace / "AGENTS.md").exists())
+            self.assertFalse((workspace / "SOUL.md").exists())
+            self.assertFalse((workspace / "USER.md").exists())
+
     def test_workspace_manager_merges_default_agent_legacy_storage_into_metadata_root(self):
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)

@@ -212,6 +212,20 @@ class TestMemoryStore(unittest.TestCase):
         self.assertIn("彭老师", messages[0]["content"])
         self.assertIn("称呼用户", messages[0]["content"])
 
+    def test_fast_reply_prompt_keeps_agent_governance_available(self):
+        (self.workspace / "SOUL.md").write_text("# 小项\n", encoding="utf-8")
+        (self.workspace / "AGENTS.md").write_text(
+            "# AGENTS.md\n\n## 协作规则\n\n- 短消息也必须遵守运行治理。\n- 涉及文件改写前先确认。\n",
+            encoding="utf-8",
+        )
+
+        builder = ContextBuilder(workspace=self.workspace, agent_name="小项")
+        messages = builder.build_fast_messages([], "你好")
+
+        self.assertIn("AGENTS.md governance rules", messages[0]["content"])
+        self.assertIn("短消息也必须遵守运行治理", messages[0]["content"])
+        self.assertIn("涉及文件改写前先确认", messages[0]["content"])
+
     def test_materialize_bootstrap_from_messages_persists_guided_setup(self):
         (self.workspace / "SOUL.md").write_text(
             "# 灵魂\n<!-- HORBOT_SETUP_PENDING -->\n\n我是 小布，运行在 horbot 中的独立 Agent。\n\n## 工作约束\n- 首轮对话时，优先帮助用户明确职责、输出风格、边界和协作方式。\n- 完成首次引导后，请主动重写本文件，并移除 `HORBOT_SETUP_PENDING` 标记。\n\n---\n\n*这是系统根据当前画像与权限档位生成的初始化版本，可在首次私聊后继续细化。*\n",

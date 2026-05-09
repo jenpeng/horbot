@@ -258,6 +258,7 @@ class WorkspaceManager:
         removed = False
         cleanup_targets = [
             workspace_path / AGENT_METADATA_DIRNAME,
+            workspace_path / "AGENTS.md",
             workspace_path / "SOUL.md",
             workspace_path / "USER.md",
         ]

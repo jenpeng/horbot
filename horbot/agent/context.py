@@ -61,6 +61,7 @@ class ContextBuilder:
 
     FAST_REPLY_MAX_CHARS = 72
     FAST_REPLY_HISTORY_LIMIT = 6
+    FAST_REPLY_GOVERNANCE_CHAR_LIMIT = 1600
     FAST_REPLY_USER_PROFILE_CHAR_LIMIT = 1600
     ATTACHMENT_TEXT_CHAR_LIMIT_PER_FILE = 4000
     ATTACHMENT_TEXT_CHAR_LIMIT_TOTAL = 12000
@@ -348,6 +349,20 @@ Skills with available="false" need dependencies installed first - you can try in
             )
         else:
             parts.append("You are chatting directly with the user.")
+
+        governance = self._read_bootstrap_file("AGENTS.md").strip()
+        if governance:
+            if len(governance) > self.FAST_REPLY_GOVERNANCE_CHAR_LIMIT:
+                governance = f"{governance[:self.FAST_REPLY_GOVERNANCE_CHAR_LIMIT].rstrip()}\n..."
+            parts.append(
+                f"""# Agent Governance
+
+The following AGENTS.md governance rules are stable runtime constraints. Follow them even in fast reply mode.
+
+```markdown
+{governance}
+```"""
+            )
 
         user_profile = self._read_bootstrap_file("USER.md").strip()
         if user_profile:
