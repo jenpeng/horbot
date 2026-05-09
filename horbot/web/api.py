@@ -75,6 +75,7 @@ from horbot.web.system_routes import build_system_status_payload, create_system_
 from horbot.web.subagent_routes import create_subagent_router
 from horbot.web.task_delegation_routes import router as task_delegation_router
 from horbot.web.task_workspace_routes import create_task_workspace_router
+from horbot.web.task_workspace_store import TaskWorkspaceStore, normalize_task_workspace_cwd
 from horbot.web.team_routes import create_team_router
 from horbot.web.token_usage_routes import router as token_usage_router
 from horbot.web import upload_preview as upload_preview_module
@@ -2771,14 +2772,44 @@ def _build_chat_stream_event(
     return data
 
 
-def _build_task_workspace_context(request: StreamRequest) -> dict[str, str]:
+def _normalize_task_workspace_cwd(raw_cwd: str, *, agent_workspace: Path) -> str:
+    try:
+        resolved = normalize_task_workspace_cwd(
+            raw_cwd,
+            agent_workspace=agent_workspace,
+            default_cwd=agent_workspace,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Task workspace cwd is outside the target agent workspace",
+        ) from exc
+    return str(resolved)
+
+
+def _build_task_workspace_context(request: StreamRequest, *, agent_id: str | None = None) -> dict[str, str]:
     context: dict[str, str] = {}
     task_workspace_id = (request.task_workspace_id or "").strip()
     task_workspace_cwd = (request.task_workspace_cwd or "").strip()
     if task_workspace_id:
-        context["task_workspace_id"] = task_workspace_id
+        task = TaskWorkspaceStore().get(task_workspace_id)
+        if task is not None:
+            if task.agent_id and agent_id and task.agent_id != agent_id:
+                raise HTTPException(status_code=400, detail="Task workspace does not belong to the target agent")
+            if task.conversation_id and request.conversation_id and task.conversation_id != request.conversation_id:
+                raise HTTPException(status_code=400, detail="Task workspace does not belong to this conversation")
+            context["task_workspace_id"] = task.id
+            context["task_workspace_cwd"] = task.cwd
+            return context
+
     if task_workspace_cwd:
-        context["task_workspace_cwd"] = task_workspace_cwd
+        _, agent_workspace = _resolve_agent_workspace_for_request(agent_id or request.agent_id)
+        context["task_workspace_cwd"] = _normalize_task_workspace_cwd(
+            task_workspace_cwd,
+            agent_workspace=agent_workspace,
+        )
+    if task_workspace_id:
+        context["task_workspace_id"] = task_workspace_id
     return context
 
 
@@ -2965,7 +2996,7 @@ async def _stream_generator(
     heartbeat_interval = 10.0
     turn_id = str(uuid.uuid4())[:8]
     assistant_message_id = str(uuid.uuid4())[:8]
-    task_workspace_context = _build_task_workspace_context(request)
+    task_workspace_context = _build_task_workspace_context(request, agent_id=agent_id)
 
     logger.info(f"[ChatAPI][{request_id}] Starting single chat: session_key={session_key}, agent_id={agent_id}")
 
@@ -3439,7 +3470,7 @@ async def _group_chat_stream_generator(
     manager = team_session_manager or get_session_manager()
     session = manager.get_or_create(session_key)
     logger.info(f"[ChatAPI][{request_id}] Created session: key={session.key}, manager_type={type(manager).__name__}")
-    task_workspace_context = _build_task_workspace_context(request)
+    task_workspace_context = _build_task_workspace_context(request, agent_id=request.agent_id)
 
     stream_task = asyncio.current_task()
     if stream_task is not None:

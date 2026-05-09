@@ -262,6 +262,30 @@ class TaskWorkspaceStore:
         return default_cwd.expanduser().resolve()
 
 
+def normalize_task_workspace_cwd(
+    raw_cwd: str,
+    *,
+    agent_workspace: Path,
+    default_cwd: Path,
+) -> Path:
+    """Resolve a task cwd and ensure it stays inside the agent workspace."""
+
+    raw = (raw_cwd or "").strip()
+    if not raw:
+        return default_cwd.expanduser().resolve()
+
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = default_cwd / path
+    resolved = path.resolve()
+    workspace_root = agent_workspace.expanduser().resolve()
+    try:
+        resolved.relative_to(workspace_root)
+    except ValueError as exc:
+        raise ValueError("Task workspace cwd is outside the target agent workspace") from exc
+    return resolved
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 

@@ -1,8 +1,11 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from horbot.agent.tools.base import Tool, ToolCategory, ToolMetadata
 from horbot.agent.tools.permission import PermissionManager
 from horbot.agent.tools.registry import ToolRegistry
+from horbot.agent.tools.shell import ExecTool
 from horbot.providers.base import ToolCallRequest
 
 
@@ -261,6 +264,45 @@ class GuardedToolRegistryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("instruction override content", event["guard_reasons"])
         self.assertEqual(event["params"]["token"], "***REDACTED***")
         self.assertIn("Security notice", event["result"])
+
+    async def test_exec_uses_task_workspace_cwd_when_working_dir_is_omitted(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            base = Path(tempdir)
+            default_dir = base / "default"
+            task_dir = base / "task"
+            default_dir.mkdir()
+            task_dir.mkdir()
+
+            registry = ToolRegistry(PermissionManager(profile="full", allow=["exec"]))
+            registry.register(ExecTool(working_dir=str(default_dir), timeout=5))
+
+            with registry.audit_context(task_workspace_cwd=str(task_dir)):
+                result = await registry.execute_with_result("exec", {"command": "pwd"})
+
+            self.assertTrue(result.success)
+            self.assertEqual(Path(result.output.strip()).resolve(), task_dir.resolve())
+            self.assertEqual(result.params["working_dir"], str(task_dir))
+
+    async def test_exec_keeps_explicit_working_dir_over_task_workspace_default(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            base = Path(tempdir)
+            explicit_dir = base / "explicit"
+            task_dir = base / "task"
+            explicit_dir.mkdir()
+            task_dir.mkdir()
+
+            registry = ToolRegistry(PermissionManager(profile="full", allow=["exec"]))
+            registry.register(ExecTool(timeout=5))
+
+            with registry.audit_context(task_workspace_cwd=str(task_dir)):
+                result = await registry.execute_with_result(
+                    "exec",
+                    {"command": "pwd", "working_dir": str(explicit_dir)},
+                )
+
+            self.assertTrue(result.success)
+            self.assertEqual(Path(result.output.strip()).resolve(), explicit_dir.resolve())
+            self.assertEqual(result.params["working_dir"], str(explicit_dir))
 
 
 if __name__ == "__main__":

@@ -105,6 +105,7 @@ class ToolRegistry:
     """
     
     WEB_TOOLS = {"web_search", "web_fetch"}
+    TASK_WORKSPACE_DEFAULT_CWD_TOOLS = {"exec"}
     
     def __init__(self, permission_manager: PermissionManager | None = None):
         self._tools: dict[str, Tool] = {}
@@ -202,6 +203,19 @@ class ToolRegistry:
         """Get all tool definitions in OpenAI format (only allowed tools)."""
         allowed_tools = self._permission_manager.get_allowed_tools(self.tool_names)
         return [self._tools[name].to_schema() for name in allowed_tools if name in self._tools]
+
+    def _apply_task_workspace_defaults(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Apply task-scoped defaults without overriding explicit tool arguments."""
+        if name not in self.TASK_WORKSPACE_DEFAULT_CWD_TOOLS:
+            return params
+        if str(params.get("working_dir") or "").strip():
+            return params
+
+        context = self._audit_context.get() or {}
+        task_workspace_cwd = str(context.get("task_workspace_cwd") or "").strip()
+        if not task_workspace_cwd:
+            return params
+        return {**params, "working_dir": task_workspace_cwd}
 
     @staticmethod
     def _normalize_user_message_for_matching(user_message: Any) -> str:
@@ -689,6 +703,7 @@ class ToolRegistry:
     ) -> ExecutionResult:
         """Internal execution logic with unified error handling."""
         params = normalize_tool_arguments(params)
+        params = self._apply_task_workspace_defaults(name, params)
         started_at = time.perf_counter()
         permission_level = self._permission_manager.check_permission(name).value
         

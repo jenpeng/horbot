@@ -12,6 +12,7 @@ from horbot.web.task_workspace_store import (
     TaskWorkspaceStore,
     TaskWorkspaceUpdate,
     build_conversation_task_cwd,
+    normalize_task_workspace_cwd,
 )
 
 
@@ -48,6 +49,14 @@ def create_task_workspace_router(
                 conversation_id=request.conversation_id,
                 session_key=request.session_key,
             )
+            if request.cwd:
+                request = request.model_copy(update={
+                    "cwd": str(normalize_task_workspace_cwd(
+                        request.cwd,
+                        agent_workspace=base_workspace,
+                        default_cwd=default_cwd,
+                    )),
+                })
             task = get_store().create(request, default_cwd=default_cwd)
             return task.model_dump()
         except HTTPException:
@@ -64,7 +73,26 @@ def create_task_workspace_router(
 
     @router.patch("/task-workspaces/{task_id}")
     async def update_task_workspace(task_id: str, request: TaskWorkspaceUpdate):
-        task = get_store().update(task_id, request)
+        store = get_store()
+        existing = store.get(task_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Task workspace not found")
+        try:
+            _, base_workspace = resolve_agent_workspace_for_request(existing.agent_id)
+            if request.cwd is not None:
+                request = request.model_copy(update={
+                    "cwd": str(normalize_task_workspace_cwd(
+                        request.cwd,
+                        agent_workspace=base_workspace,
+                        default_cwd=Path(existing.cwd),
+                    )),
+                })
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        task = store.update(task_id, request)
         if task is None:
             raise HTTPException(status_code=404, detail="Task workspace not found")
         return task.model_dump()

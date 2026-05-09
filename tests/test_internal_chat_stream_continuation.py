@@ -11,6 +11,7 @@ from horbot.config.schema import Config
 from horbot.providers.base import LLMProvider, LLMResponse
 from horbot.session.manager import SessionManager
 from horbot.web.api import StreamRequest, _stream_generator
+from horbot.web.task_workspace_store import TaskWorkspaceCreate, TaskWorkspaceStore
 
 
 def _decode_sse_events(chunks: list[str]) -> list[dict]:
@@ -69,6 +70,16 @@ class InternalChatStreamContinuationTests(unittest.IsolatedAsyncioTestCase):
             workspace = Path(tempdir) / "workspace"
             workspace.mkdir(parents=True, exist_ok=True)
             sessions = SessionManager(workspace=Path(tempdir) / "sessions")
+            task_store = TaskWorkspaceStore(root=Path(tempdir) / ".horbot")
+            registered_task = task_store.create(
+                TaskWorkspaceCreate(
+                    title="Registered task",
+                    agent_id="main",
+                    conversation_id="dm_main",
+                    session_key="web:dm_main",
+                ),
+                default_cwd=workspace / ".horbot-agent" / "task-workspaces" / "dm_main",
+            )
             fake_agent = SimpleNamespace(
                 id="main",
                 name="小项 🐎",
@@ -110,11 +121,13 @@ class InternalChatStreamContinuationTests(unittest.IsolatedAsyncioTestCase):
                 content="请给出完整结论",
                 session_key="web:dm_main",
                 agent_id="main",
-                task_workspace_id="tw_context",
-                task_workspace_cwd=str(workspace / ".horbot-agent" / "task-workspaces" / "dm_main"),
+                conversation_id="dm_main",
+                task_workspace_id=registered_task.id,
+                task_workspace_cwd="/tmp/forged-task-workspace",
             )
 
             with (
+                patch.dict("os.environ", {"HORBOT_ROOT": str(Path(tempdir) / ".horbot")}),
                 patch("horbot.agent.manager.get_agent_manager", return_value=fake_agent_manager),
                 patch("horbot.external_agents.manager.get_external_agent_manager", return_value=fake_external_agent_manager),
                 patch("horbot.web.api.get_agent_loop", new=AsyncMock(return_value=loop)),
@@ -138,8 +151,9 @@ class InternalChatStreamContinuationTests(unittest.IsolatedAsyncioTestCase):
 
             session = sessions.get_or_create("web:dm_main")
             user_messages = [message for message in session.messages if message.get("role") == "user"]
-            self.assertEqual(user_messages[-1]["metadata"]["task_workspace_id"], "tw_context")
+            self.assertEqual(user_messages[-1]["metadata"]["task_workspace_id"], registered_task.id)
             self.assertTrue(user_messages[-1]["metadata"]["task_workspace_cwd"].endswith("task-workspaces/dm_main"))
+            self.assertNotEqual(user_messages[-1]["metadata"]["task_workspace_cwd"], "/tmp/forged-task-workspace")
             assistant_messages = [message for message in session.messages if message.get("role") == "assistant"]
             self.assertEqual(assistant_messages[-1]["content"], "第一段第二段")
 

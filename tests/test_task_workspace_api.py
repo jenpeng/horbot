@@ -86,6 +86,23 @@ class TaskWorkspaceApiTests(unittest.IsolatedAsyncioTestCase):
                     missing_response = await client.get("/api/task-workspaces/not-found")
                     self.assertEqual(missing_response.status_code, 404)
 
+                    invalid_create_response = await client.post(
+                        "/api/task-workspaces",
+                        json={
+                            "title": "Invalid cwd",
+                            "agent_id": "main",
+                            "conversation_id": "dm_main",
+                            "cwd": str(root / "outside-task-workspace"),
+                        },
+                    )
+                    self.assertEqual(invalid_create_response.status_code, 400)
+
+                    invalid_update_response = await client.patch(
+                        f"/api/task-workspaces/{task['id']}",
+                        json={"cwd": str(root / "outside-task-workspace")},
+                    )
+                    self.assertEqual(invalid_update_response.status_code, 400)
+
     async def test_filters_by_agent_id(self):
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
