@@ -14,6 +14,7 @@ import {
 } from './streamErrors';
 import { attachRetryPayloadsToHistoryMessages, buildMessageMergeKey } from './turns';
 import type { AgentInfo, TranslateFn, UIMessage } from './types';
+import { normalizeConversationMessages } from '../../utils/messageDedupe';
 
 export interface RawConversationHistoryMessage {
   id?: string;
@@ -118,7 +119,7 @@ export const mergeConversationHistoryMessages = (
     }
   });
 
-  return mergedMessages
+  return normalizeConversationMessages(mergedMessages)
     .map((message, index) => ({ message, index }))
     .sort((left, right) => {
       const leftTimestamp = parseMessageTimestamp(left.message.timestamp);

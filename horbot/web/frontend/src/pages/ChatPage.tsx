@@ -33,6 +33,7 @@ import type { StreamState } from '../services/chat';
 import type { ConversationState } from '../stores/conversationStore';
 import { createAsyncResourceCache } from '../utils/asyncResourceCache';
 import { lazyWithReload } from '../utils/lazyWithReload';
+import { normalizeConversationMessages } from '../utils/messageDedupe';
 import {
   hasRenderableMessageFiles,
   normalizeMessageFiles,
@@ -654,7 +655,14 @@ const ChatPage: React.FC = () => {
     }
     return conversations.find((conversation) => conversation.id === currentConversationId) || null;
   }, [conversations, currentConversationId]);
-  const messages = currentConversationId ? (messageMap[currentConversationId] || EMPTY_MESSAGES) : EMPTY_MESSAGES;
+  const messages = useMemo(
+    () => (
+      currentConversationId
+        ? normalizeConversationMessages((messageMap[currentConversationId] || EMPTY_MESSAGES) as UIMessage[])
+        : EMPTY_MESSAGES
+    ),
+    [currentConversationId, messageMap],
+  );
   const typingAgents = currentConversationId ? (typingAgentMap[currentConversationId] || EMPTY_TYPING_AGENTS) : EMPTY_TYPING_AGENTS;
 
   useEffect(() => {

@@ -1279,10 +1279,11 @@ start_backend() {
 
     local new_pid
     new_pid="$(spawn_detached "$PROJECT_ROOT" "$LOG_DIR/backend.log" \
+        env PYDANTIC_DISABLE_PLUGINS="${PYDANTIC_DISABLE_PLUGINS:-1}" \
         "$python_cmd" -m uvicorn horbot.web.main:app --host 127.0.0.1 --port 8000)"
     echo "$new_pid" > "$pid_file"
 
-    if wait_for_port "$port" backend "$pid_file" 15; then
+    if wait_for_port "$port" backend "$pid_file" 45; then
         local actual_pid
         actual_pid="$(read_pid "$pid_file")"
         persist_backend_runtime_fingerprint

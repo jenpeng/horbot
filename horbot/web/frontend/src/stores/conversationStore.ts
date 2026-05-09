@@ -6,6 +6,7 @@ import {
   createDMConversationId,
   createTeamConversationId,
 } from '../types/conversation';
+import { normalizeConversationMessages } from '../utils/messageDedupe';
 
 const CONVERSATION_STORAGE_KEY = 'horbot-conversations';
 
@@ -135,7 +136,7 @@ export const useConversationStore = create<ConversationState>()(
           return {
             messages: {
               ...state.messages,
-              [convId]: [...existingMessages, message],
+              [convId]: normalizeConversationMessages([...existingMessages, message]),
             },
           };
         });
@@ -159,7 +160,7 @@ export const useConversationStore = create<ConversationState>()(
         set(state => ({
           messages: {
             ...state.messages,
-            [convId]: messages,
+            [convId]: normalizeConversationMessages(messages),
           },
         }));
       },
@@ -200,7 +201,7 @@ export const useConversationStore = create<ConversationState>()(
       },
       
       getMessages: (convId) => {
-        return get().messages[convId] || [];
+        return normalizeConversationMessages(get().messages[convId] || []);
       },
     }),
     {
