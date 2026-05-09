@@ -2743,6 +2743,8 @@ class StreamRequest(BaseModel):
     mentioned_agents: List[str] = []  # List of agent IDs mentioned with @
     conversation_id: Optional[str] = None  # Conversation ID (dm_xxx or team_xxx)
     conversation_type: Optional[str] = None  # Conversation type (dm or team)
+    task_workspace_id: Optional[str] = None  # Current user-facing task workspace ID
+    task_workspace_cwd: Optional[str] = None  # Current user-facing task workspace directory
 
 
 def _sse_event(payload: Dict[str, Any]) -> str:
@@ -2767,6 +2769,17 @@ def _build_chat_stream_event(
             "message_id": message_id,
         })
     return data
+
+
+def _build_task_workspace_context(request: StreamRequest) -> dict[str, str]:
+    context: dict[str, str] = {}
+    task_workspace_id = (request.task_workspace_id or "").strip()
+    task_workspace_cwd = (request.task_workspace_cwd or "").strip()
+    if task_workspace_id:
+        context["task_workspace_id"] = task_workspace_id
+    if task_workspace_cwd:
+        context["task_workspace_cwd"] = task_workspace_cwd
+    return context
 
 
 async def _queue_chat_stream_event(
@@ -2952,6 +2965,7 @@ async def _stream_generator(
     heartbeat_interval = 10.0
     turn_id = str(uuid.uuid4())[:8]
     assistant_message_id = str(uuid.uuid4())[:8]
+    task_workspace_context = _build_task_workspace_context(request)
 
     logger.info(f"[ChatAPI][{request_id}] Starting single chat: session_key={session_key}, agent_id={agent_id}")
 
@@ -3002,6 +3016,7 @@ async def _stream_generator(
             "turn_id": turn_id,
             "request_id": request_id,
             "conversation_type": "user_to_agent",
+            **task_workspace_context,
         },
     )
 
@@ -3019,6 +3034,7 @@ async def _stream_generator(
             "message_id": assistant_message_id,
             "assistant_message_id": assistant_message_id,
             "request_id": request_id,
+            **task_workspace_context,
         },
     )
 
@@ -3423,6 +3439,7 @@ async def _group_chat_stream_generator(
     manager = team_session_manager or get_session_manager()
     session = manager.get_or_create(session_key)
     logger.info(f"[ChatAPI][{request_id}] Created session: key={session.key}, manager_type={type(manager).__name__}")
+    task_workspace_context = _build_task_workspace_context(request)
 
     stream_task = asyncio.current_task()
     if stream_task is not None:
@@ -3442,6 +3459,7 @@ async def _group_chat_stream_generator(
             "conversation_type": "user_to_team",
             "team_id": request.team_id,
             "mentioned_agents": request.mentioned_agents,
+            **task_workspace_context,
         },
     )
 

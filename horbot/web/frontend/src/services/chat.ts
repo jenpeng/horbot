@@ -76,6 +76,8 @@ export interface StreamChatOptions {
   mentionedAgents?: string[];
   conversationId?: string;
   conversationType?: string;
+  taskWorkspaceId?: string;
+  taskWorkspaceCwd?: string;
   onChunk: (event: StreamEvent) => void;
   onRequestStart?: (requestId: string) => void;
   onStateChange?: (state: StreamState) => void;
@@ -209,6 +211,8 @@ export const chatService = {
       mentionedAgents, 
       conversationId,
       conversationType,
+      taskWorkspaceId,
+      taskWorkspaceCwd,
       onChunk, 
       onRequestStart, 
       onStateChange,
@@ -271,6 +275,8 @@ export const chatService = {
           mentioned_agents: mentionedAgents || [],
           conversation_id: conversationId || null,
           conversation_type: conversationType || null,
+          task_workspace_id: taskWorkspaceId || null,
+          task_workspace_cwd: taskWorkspaceCwd || null,
         }),
         signal: controller.signal,
       });

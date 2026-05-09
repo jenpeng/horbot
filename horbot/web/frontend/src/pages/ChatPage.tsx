@@ -2458,6 +2458,12 @@ const ChatPage: React.FC = () => {
     const trimmedContent = content.trim();
     const normalizedFiles = normalizeMessageFiles(files) || [];
     const uploadedFiles = serializeMessageFiles(normalizedFiles);
+    const activeTaskWorkspaceContext = selectedTaskWorkspace
+      ? {
+          task_workspace_id: selectedTaskWorkspace.id,
+          task_workspace_cwd: selectedTaskWorkspace.cwd,
+        }
+      : {};
     const retryRequest: RetryRequest = {
       conversationId: currentConversation.id,
       content: trimmedContent,
@@ -2475,6 +2481,7 @@ const ChatPage: React.FC = () => {
       content: trimmedContent,
       timestamp: new Date().toISOString(),
       files: normalizedFiles,
+      metadata: activeTaskWorkspaceContext,
     };
     
     addMessage(currentConversation.id, userMessage);
@@ -2526,6 +2533,7 @@ const ChatPage: React.FC = () => {
         executionSteps: [],
         metadata: {
           _relay_phase: 'pending',
+          ...activeTaskWorkspaceContext,
         },
       });
     }
@@ -2555,6 +2563,8 @@ const ChatPage: React.FC = () => {
           files: uploadedFiles,
           conversationId: currentConversation.id,
           conversationType: currentConversation.type,
+          taskWorkspaceId: selectedTaskWorkspace?.id,
+          taskWorkspaceCwd: selectedTaskWorkspace?.cwd,
           agentId: currentConversation.type === ConversationType.DM ? currentConversation.targetId : undefined,
           teamId: currentConversation.type === ConversationType.TEAM ? currentConversation.targetId : undefined,
           groupChat: currentConversation.type === ConversationType.TEAM,
@@ -2627,6 +2637,7 @@ const ChatPage: React.FC = () => {
                   metadata: {
                     ...(getMessages(currentConversation.id).find((message) => message.id === streamEntry.messageId)?.metadata || {}),
                     _relay_phase: 'active',
+                    ...activeTaskWorkspaceContext,
                   },
                 });
               } else if (pendingEntryMatch) {
@@ -2647,6 +2658,7 @@ const ChatPage: React.FC = () => {
                   metadata: {
                     ...(getMessages(currentConversation.id).find((message) => message.id === pendingEntry.messageId)?.metadata || {}),
                     _relay_phase: 'active',
+                    ...activeTaskWorkspaceContext,
                   },
                 });
               } else {
@@ -2662,7 +2674,10 @@ const ChatPage: React.FC = () => {
                   isStreaming: true,
                   statusMessage: t('chat.streamingInput'),
                   executionSteps: [],
-                  metadata: { _relay_phase: 'active' },
+                  metadata: {
+                    _relay_phase: 'active',
+                    ...activeTaskWorkspaceContext,
+                  },
                 };
                 agentMessages.set(streamKey, {
                   messageId,
@@ -2758,6 +2773,7 @@ const ChatPage: React.FC = () => {
                   ...(handoffMode ? { handoff_mode: handoffMode } : {}),
                   ...(handoffPreview ? { handoff_preview: handoffPreview } : {}),
                   _relay_phase: 'pending',
+                  ...activeTaskWorkspaceContext,
                 },
               };
               agentMessages.set(pendingKey, {

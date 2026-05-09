@@ -2218,4 +2218,93 @@ describe('ChatPage', () => {
       workspace_mode: 'conversation',
     }));
   });
+
+  it('passes the selected task workspace context when sending chat', async () => {
+    const conversationId = 'dm_agent-a';
+    const selectedTask = {
+      id: 'tw_selected',
+      title: 'Selected task',
+      agent_id: 'agent-a',
+      conversation_id: conversationId,
+      session_key: 'web:dm_agent-a',
+      status: 'ready',
+      cwd: '/tmp/horbot/task-workspaces/selected',
+      workspace_mode: 'conversation',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      metadata: {},
+    };
+    const streamChatMock = vi.spyOn(chatService, 'streamChat').mockImplementation(async ({ onStateChange, onRequestStart, onChunk }) => {
+      onStateChange?.('connecting');
+      onRequestStart?.('req-task-context');
+      onChunk({
+        event: 'request_start',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: 'turn-task-context',
+        message_id: 'assistant-task-context',
+      });
+      onChunk({
+        event: 'request_end',
+        agent_id: 'agent-a',
+        agent_name: 'Agent A',
+        turn_id: 'turn-task-context',
+        message_id: 'assistant-task-context',
+        content: 'done',
+      });
+      onChunk({ event: 'done' });
+    });
+
+    vi.mocked(taskWorkspacesService.list).mockResolvedValue([selectedTask]);
+    vi.mocked(taskWorkspacesService.listFiles).mockResolvedValue({
+      task_id: selectedTask.id,
+      cwd: selectedTask.cwd,
+      exists: true,
+      files: [],
+      truncated: false,
+    });
+    vi.mocked(taskWorkspacesService.listChanges).mockResolvedValue({
+      task_id: selectedTask.id,
+      cwd: selectedTask.cwd,
+      available: true,
+      reason: null,
+      changes: [],
+      truncated: false,
+    });
+
+    seedConversationStore({
+      id: conversationId,
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-send-button')).toBeInTheDocument();
+      expect(taskWorkspacesService.list).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-send-button'));
+
+    await waitFor(() => {
+      expect(streamChatMock).toHaveBeenCalled();
+    });
+
+    expect(streamChatMock.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({
+      taskWorkspaceId: 'tw_selected',
+      taskWorkspaceCwd: '/tmp/horbot/task-workspaces/selected',
+    }));
+
+    const conversationMessages = useConversationStore.getState().messages[conversationId] || [];
+    const userMessage = conversationMessages.find((message) => message.role === 'user' && message.content === 'hello');
+    expect(userMessage?.metadata).toEqual(expect.objectContaining({
+      task_workspace_id: 'tw_selected',
+      task_workspace_cwd: '/tmp/horbot/task-workspaces/selected',
+    }));
+  });
 });

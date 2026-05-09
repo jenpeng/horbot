@@ -110,6 +110,8 @@ class InternalChatStreamContinuationTests(unittest.IsolatedAsyncioTestCase):
                 content="请给出完整结论",
                 session_key="web:dm_main",
                 agent_id="main",
+                task_workspace_id="tw_context",
+                task_workspace_cwd=str(workspace / ".horbot-agent" / "task-workspaces" / "dm_main"),
             )
 
             with (
@@ -135,6 +137,9 @@ class InternalChatStreamContinuationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(fake_stream_manager.cleaned_request_ids, ["req-auto-continue"])
 
             session = sessions.get_or_create("web:dm_main")
+            user_messages = [message for message in session.messages if message.get("role") == "user"]
+            self.assertEqual(user_messages[-1]["metadata"]["task_workspace_id"], "tw_context")
+            self.assertTrue(user_messages[-1]["metadata"]["task_workspace_cwd"].endswith("task-workspaces/dm_main"))
             assistant_messages = [message for message in session.messages if message.get("role") == "assistant"]
             self.assertEqual(assistant_messages[-1]["content"], "第一段第二段")
 
