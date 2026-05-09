@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import subprocess
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -159,6 +160,72 @@ class TaskWorkspaceStore:
             "truncated": len(files) >= limit,
         }
 
+    def list_changes(self, task_id: str, *, limit: int = 120) -> dict[str, Any] | None:
+        task = self.get(task_id)
+        if task is None:
+            return None
+
+        cwd = Path(task.cwd).expanduser()
+        if not cwd.exists() or not cwd.is_dir():
+            return {
+                "task_id": task.id,
+                "cwd": task.cwd,
+                "available": False,
+                "reason": "cwd_not_found",
+                "changes": [],
+                "truncated": False,
+            }
+
+        git_root = _find_git_root(cwd)
+        if git_root is None:
+            return {
+                "task_id": task.id,
+                "cwd": task.cwd,
+                "available": False,
+                "reason": "not_git_repo",
+                "changes": [],
+                "truncated": False,
+            }
+
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(git_root), "status", "--short", "--", str(cwd)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {
+                "task_id": task.id,
+                "cwd": task.cwd,
+                "available": False,
+                "reason": str(exc),
+                "changes": [],
+                "truncated": False,
+            }
+
+        if result.returncode != 0:
+            return {
+                "task_id": task.id,
+                "cwd": task.cwd,
+                "available": False,
+                "reason": (result.stderr or "git_status_failed").strip(),
+                "changes": [],
+                "truncated": False,
+            }
+
+        lines = [line for line in result.stdout.splitlines() if line.strip()]
+        changes = [_parse_git_status_line(line) for line in lines[:limit]]
+        return {
+            "task_id": task.id,
+            "cwd": task.cwd,
+            "available": True,
+            "reason": None,
+            "changes": changes,
+            "truncated": len(lines) > limit,
+        }
+
     def _load(self) -> list[TaskWorkspace]:
         if not self.store_path.exists():
             return []
@@ -217,6 +284,23 @@ def _iter_workspace_files(cwd: Path, *, limit: int):
             continue
         yielded += 1
         yield path
+
+
+def _find_git_root(path: Path) -> Path | None:
+    for candidate in [path, *path.parents]:
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _parse_git_status_line(line: str) -> dict[str, str]:
+    status = line[:2].strip() or "changed"
+    path = line[3:].strip() if len(line) > 3 else line.strip()
+    return {
+        "status": status,
+        "path": path,
+        "summary": line.strip(),
+    }
 
 
 def build_conversation_task_cwd(

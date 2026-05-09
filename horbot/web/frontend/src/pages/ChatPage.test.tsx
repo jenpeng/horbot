@@ -36,6 +36,14 @@ vi.mock('../services/taskWorkspaces', () => ({
       files: [],
       truncated: false,
     }),
+    listChanges: vi.fn().mockResolvedValue({
+      task_id: '',
+      cwd: '',
+      available: true,
+      reason: null,
+      changes: [],
+      truncated: false,
+    }),
   },
 }));
 
@@ -165,6 +173,14 @@ describe('ChatPage', () => {
       cwd: '',
       exists: false,
       files: [],
+      truncated: false,
+    });
+    vi.mocked(taskWorkspacesService.listChanges).mockResolvedValue({
+      task_id: '',
+      cwd: '',
+      available: true,
+      reason: null,
+      changes: [],
       truncated: false,
     });
 
@@ -2087,6 +2103,11 @@ describe('ChatPage', () => {
     };
 
     vi.mocked(taskWorkspacesService.create).mockResolvedValue(createdTask);
+    vi.mocked(taskWorkspacesService.update).mockResolvedValue({
+      ...createdTask,
+      status: 'done',
+      updated_at: new Date().toISOString(),
+    });
     vi.mocked(taskWorkspacesService.listFiles).mockResolvedValue({
       task_id: 'tw_test',
       cwd: createdTask.cwd,
@@ -2098,6 +2119,20 @@ describe('ChatPage', () => {
           kind: 'file',
           size: 128,
           modified_at: new Date().toISOString(),
+        },
+      ],
+      truncated: false,
+    });
+    vi.mocked(taskWorkspacesService.listChanges).mockResolvedValue({
+      task_id: 'tw_test',
+      cwd: createdTask.cwd,
+      available: true,
+      reason: null,
+      changes: [
+        {
+          status: 'M',
+          path: 'outline.md',
+          summary: 'M outline.md',
         },
       ],
       truncated: false,
@@ -2160,6 +2195,19 @@ describe('ChatPage', () => {
       expect(screen.getByText(/任务列表|Task list/)).toBeInTheDocument();
       expect(screen.getAllByText('Create launch deck').length).toBeGreaterThan(0);
       expect(screen.getAllByText('/tmp/horbot/task-workspaces/dm_agent-a').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByText(/变更|Changes/));
+
+    await waitFor(() => {
+      expect(screen.getByText('outline.md')).toBeInTheDocument();
+      expect(screen.getByText('M outline.md')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/标记完成|Mark done/));
+
+    await waitFor(() => {
+      expect(taskWorkspacesService.update).toHaveBeenCalledWith('tw_test', { status: 'done' });
     });
 
     expect(taskWorkspacesService.create).toHaveBeenCalledWith(expect.objectContaining({

@@ -76,6 +76,13 @@ class TaskWorkspaceApiTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(files_payload["exists"])
                     self.assertTrue(any(item["path"] == "outline.md" for item in files_payload["files"]))
 
+                    changes_response = await client.get(f"/api/task-workspaces/{task['id']}/changes")
+                    self.assertEqual(changes_response.status_code, 200)
+                    changes_payload = changes_response.json()
+                    self.assertEqual(changes_payload["task_id"], task["id"])
+                    self.assertFalse(changes_payload["available"])
+                    self.assertEqual(changes_payload["reason"], "not_git_repo")
+
                     missing_response = await client.get("/api/task-workspaces/not-found")
                     self.assertEqual(missing_response.status_code, 404)
 

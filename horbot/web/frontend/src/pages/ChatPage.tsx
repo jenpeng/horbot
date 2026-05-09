@@ -7,10 +7,13 @@ import {
   ChevronsUp,
   CirclePlay,
   ClipboardList,
+  CheckCircle2,
   Globe,
   FolderOpen,
+  GitCompare,
   Network,
   PencilLine,
+  RefreshCcw,
   Search,
   SquareKanban,
   TerminalSquare,
@@ -33,7 +36,7 @@ import type { ExecutionStep, MessageFile } from '../types/conversation';
 import { chatService, ChatStreamError } from '../services/chat';
 import type { StreamState } from '../services/chat';
 import taskWorkspacesService from '../services/taskWorkspaces';
-import type { TaskWorkspace, TaskWorkspaceFile } from '../services/taskWorkspaces';
+import type { TaskWorkspace, TaskWorkspaceChange, TaskWorkspaceFile, TaskWorkspaceStatus } from '../services/taskWorkspaces';
 import type { ConversationState } from '../stores/conversationStore';
 import { createAsyncResourceCache } from '../utils/asyncResourceCache';
 import { lazyWithReload } from '../utils/lazyWithReload';
@@ -369,11 +372,16 @@ const ChatPage: React.FC = () => {
   const [isHistorySearchOpen, setIsHistorySearchOpen] = useState(false);
   const [isWorkbenchPanelOpen, setIsWorkbenchPanelOpen] = useState(false);
   const [isTaskInspectorOpen, setIsTaskInspectorOpen] = useState(false);
-  const [taskInspectorTab, setTaskInspectorTab] = useState<'overview' | 'files' | 'logs'>('overview');
+  const [taskInspectorTab, setTaskInspectorTab] = useState<'overview' | 'files' | 'changes' | 'logs'>('overview');
   const [taskWorkspaces, setTaskWorkspaces] = useState<TaskWorkspace[]>([]);
   const [selectedTaskWorkspaceId, setSelectedTaskWorkspaceId] = useState<string | null>(null);
   const [taskWorkspaceFiles, setTaskWorkspaceFiles] = useState<TaskWorkspaceFile[]>([]);
+  const [taskWorkspaceChanges, setTaskWorkspaceChanges] = useState<TaskWorkspaceChange[]>([]);
+  const [taskWorkspaceChangesAvailable, setTaskWorkspaceChangesAvailable] = useState(true);
+  const [taskWorkspaceChangesReason, setTaskWorkspaceChangesReason] = useState<string | null>(null);
   const [isCreatingTaskWorkspace, setIsCreatingTaskWorkspace] = useState(false);
+  const [isRefreshingTaskWorkspace, setIsRefreshingTaskWorkspace] = useState(false);
+  const [isUpdatingTaskWorkspace, setIsUpdatingTaskWorkspace] = useState(false);
   const [historySearchTimeRange, setHistorySearchTimeRange] = useState<HistorySearchTimeRange>('all');
   const [remoteHistorySearchMatches, setRemoteHistorySearchMatches] = useState<RemoteHistorySearchMatch[]>([]);
   const [remoteHistorySearchTotal, setRemoteHistorySearchTotal] = useState(0);
@@ -2279,19 +2287,31 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     if (!selectedTaskWorkspace?.id) {
       setTaskWorkspaceFiles([]);
+      setTaskWorkspaceChanges([]);
+      setTaskWorkspaceChangesAvailable(true);
+      setTaskWorkspaceChangesReason(null);
       return;
     }
     let cancelled = false;
-    taskWorkspacesService.listFiles(selectedTaskWorkspace.id)
-      .then((payload) => {
+    Promise.all([
+      taskWorkspacesService.listFiles(selectedTaskWorkspace.id),
+      taskWorkspacesService.listChanges(selectedTaskWorkspace.id),
+    ])
+      .then(([filesPayload, changesPayload]) => {
         if (!cancelled) {
-          setTaskWorkspaceFiles(payload.files || []);
+          setTaskWorkspaceFiles(filesPayload.files || []);
+          setTaskWorkspaceChanges(changesPayload.changes || []);
+          setTaskWorkspaceChangesAvailable(changesPayload.available);
+          setTaskWorkspaceChangesReason(changesPayload.reason || null);
         }
       })
       .catch((error) => {
-        console.error('Failed to load task workspace files:', error);
+        console.error('Failed to load task workspace details:', error);
         if (!cancelled) {
           setTaskWorkspaceFiles([]);
+          setTaskWorkspaceChanges([]);
+          setTaskWorkspaceChangesAvailable(false);
+          setTaskWorkspaceChangesReason(error instanceof Error ? error.message : 'load_failed');
         }
       });
     return () => {
@@ -4032,6 +4052,47 @@ const ChatPage: React.FC = () => {
     return formatTime(timestamp.toISOString());
   }, [formatTime]);
 
+  const refreshSelectedTaskWorkspaceDetails = useCallback(async () => {
+    if (!selectedTaskWorkspace?.id) {
+      return;
+    }
+    setIsRefreshingTaskWorkspace(true);
+    try {
+      const [filesPayload, changesPayload] = await Promise.all([
+        taskWorkspacesService.listFiles(selectedTaskWorkspace.id),
+        taskWorkspacesService.listChanges(selectedTaskWorkspace.id),
+      ]);
+      setTaskWorkspaceFiles(filesPayload.files || []);
+      setTaskWorkspaceChanges(changesPayload.changes || []);
+      setTaskWorkspaceChangesAvailable(changesPayload.available);
+      setTaskWorkspaceChangesReason(changesPayload.reason || null);
+    } catch (error) {
+      console.error('Failed to refresh task workspace details:', error);
+      toast.error(error instanceof Error ? error.message : t('chat.taskInspectorRefreshFailed'));
+    } finally {
+      setIsRefreshingTaskWorkspace(false);
+    }
+  }, [selectedTaskWorkspace?.id, t, toast]);
+
+  const handleUpdateSelectedTaskStatus = useCallback(async (status: TaskWorkspaceStatus) => {
+    if (!selectedTaskWorkspace?.id || isUpdatingTaskWorkspace) {
+      return;
+    }
+    setIsUpdatingTaskWorkspace(true);
+    try {
+      const updated = await taskWorkspacesService.update(selectedTaskWorkspace.id, { status });
+      setTaskWorkspaces((previousTasks) => previousTasks.map((task) => (
+        task.id === updated.id ? updated : task
+      )));
+      toast.success(t('chat.taskInspectorStatusUpdated'));
+    } catch (error) {
+      console.error('Failed to update task workspace status:', error);
+      toast.error(error instanceof Error ? error.message : t('chat.taskInspectorStatusUpdateFailed'));
+    } finally {
+      setIsUpdatingTaskWorkspace(false);
+    }
+  }, [isUpdatingTaskWorkspace, selectedTaskWorkspace?.id, t, toast]);
+
   const handleCopyWorkbenchSummary = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(workbenchClipboardSummary);
@@ -5416,8 +5477,8 @@ const ChatPage: React.FC = () => {
                         <X className="h-4 w-4" strokeWidth={2} />
                       </button>
                     </div>
-                    <div className="mt-3 grid grid-cols-3 gap-2">
-                      {(['overview', 'files', 'logs'] as const).map((tab) => (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {(['overview', 'files', 'changes', 'logs'] as const).map((tab) => (
                         <button
                           key={tab}
                           type="button"
@@ -5431,6 +5492,41 @@ const ChatPage: React.FC = () => {
                           {t(`chat.taskInspectorTab${tab[0].toUpperCase()}${tab.slice(1)}`)}
                         </button>
                       ))}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void refreshSelectedTaskWorkspaceDetails();
+                        }}
+                        disabled={!selectedTaskWorkspace || isRefreshingTaskWorkspace}
+                        className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <RefreshCcw className={`h-3.5 w-3.5 ${isRefreshingTaskWorkspace ? 'animate-spin' : ''}`} strokeWidth={2} />
+                        {t('chat.taskInspectorRefresh')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleUpdateSelectedTaskStatus('running');
+                        }}
+                        disabled={!selectedTaskWorkspace || isUpdatingTaskWorkspace}
+                        className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <CirclePlay className="h-3.5 w-3.5" strokeWidth={2} />
+                        {t('chat.taskInspectorMarkRunning')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleUpdateSelectedTaskStatus('done');
+                        }}
+                        disabled={!selectedTaskWorkspace || isUpdatingTaskWorkspace}
+                        className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2} />
+                        {t('chat.taskInspectorMarkDone')}
+                      </button>
                     </div>
                   </div>
                   <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -5515,6 +5611,32 @@ const ChatPage: React.FC = () => {
                           <div key={file.key} className="rounded-2xl border border-slate-200 p-3">
                             <p className="truncate text-sm font-semibold text-slate-800">{file.name}</p>
                             <p className="mt-1 text-xs text-slate-500">{file.detail}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {taskInspectorTab === 'changes' && (
+                      <div className="space-y-2">
+                        {!taskWorkspaceChangesAvailable ? (
+                          <p className="rounded-2xl border border-dashed border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">
+                            {t('chat.taskInspectorChangesUnavailable', { reason: taskWorkspaceChangesReason || 'not_available' })}
+                          </p>
+                        ) : taskWorkspaceChanges.length === 0 ? (
+                          <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                            {t('chat.taskInspectorNoChanges')}
+                          </p>
+                        ) : taskWorkspaceChanges.map((change) => (
+                          <div key={`${change.status}:${change.path}`} className="rounded-2xl border border-slate-200 p-3">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-100 px-2 text-[10px] font-bold text-slate-600">
+                                {change.status}
+                              </span>
+                              <p className="truncate text-sm font-semibold text-slate-800">{change.path}</p>
+                            </div>
+                            <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                              <GitCompare className="h-3.5 w-3.5" strokeWidth={2} />
+                              {change.summary}
+                            </p>
                           </div>
                         ))}
                       </div>

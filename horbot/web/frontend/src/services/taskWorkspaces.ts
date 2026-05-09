@@ -33,6 +33,21 @@ export interface TaskWorkspaceFilesPayload {
   truncated: boolean;
 }
 
+export interface TaskWorkspaceChange {
+  status: string;
+  path: string;
+  summary: string;
+}
+
+export interface TaskWorkspaceChangesPayload {
+  task_id: string;
+  cwd: string;
+  available: boolean;
+  reason?: string | null;
+  changes: TaskWorkspaceChange[];
+  truncated: boolean;
+}
+
 export interface CreateTaskWorkspacePayload {
   title: string;
   agent_id?: string | null;
@@ -84,6 +99,11 @@ export const taskWorkspacesService = {
 
   listFiles: async (taskId: string, limit = 80): Promise<TaskWorkspaceFilesPayload> => {
     const response = await api.get<TaskWorkspaceFilesPayload>(`/api/task-workspaces/${taskId}/files?limit=${limit}`);
+    return response.data;
+  },
+
+  listChanges: async (taskId: string, limit = 120): Promise<TaskWorkspaceChangesPayload> => {
+    const response = await api.get<TaskWorkspaceChangesPayload>(`/api/task-workspaces/${taskId}/changes?limit=${limit}`);
     return response.data;
   },
 };

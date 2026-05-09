@@ -76,4 +76,11 @@ def create_task_workspace_router(
             raise HTTPException(status_code=404, detail="Task workspace not found")
         return payload
 
+    @router.get("/task-workspaces/{task_id}/changes")
+    async def list_task_workspace_changes(task_id: str, limit: int = Query(default=120, ge=1, le=300)):
+        payload = get_store().list_changes(task_id, limit=limit)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Task workspace not found")
+        return payload
+
     return router
