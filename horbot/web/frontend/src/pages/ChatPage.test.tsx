@@ -6,6 +6,7 @@ import { I18nProvider } from '../contexts/I18nContext';
 import { ToastProvider } from '../contexts/ToastContext';
 import zhCNMessages from '../i18n/locales/zh-CN';
 import { ChatStreamError, chatService } from '../services/chat';
+import taskWorkspacesService from '../services/taskWorkspaces';
 import { useConversationStore } from '../stores/conversationStore';
 import { ConversationType, type Conversation, type Message } from '../types/conversation';
 
@@ -21,6 +22,21 @@ vi.mock('../components/MessageExecutionCard', () => ({
 
 vi.mock('../components/TypingIndicator', () => ({
   default: () => <div data-testid="mock-typing-indicator" />,
+}));
+
+vi.mock('../services/taskWorkspaces', () => ({
+  default: {
+    list: vi.fn().mockResolvedValue([]),
+    create: vi.fn(),
+    update: vi.fn(),
+    listFiles: vi.fn().mockResolvedValue({
+      task_id: '',
+      cwd: '',
+      exists: false,
+      files: [],
+      truncated: false,
+    }),
+  },
 }));
 
 vi.mock('../components/MessageInput', () => ({
@@ -140,6 +156,16 @@ describe('ChatPage', () => {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
       },
+    });
+    vi.mocked(taskWorkspacesService.list).mockResolvedValue([]);
+    vi.mocked(taskWorkspacesService.create).mockReset();
+    vi.mocked(taskWorkspacesService.update).mockReset();
+    vi.mocked(taskWorkspacesService.listFiles).mockResolvedValue({
+      task_id: '',
+      cwd: '',
+      exists: false,
+      files: [],
+      truncated: false,
     });
 
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
@@ -2042,5 +2068,106 @@ describe('ChatPage', () => {
       const conversationMessages = useConversationStore.getState().messages[conversationId] || [];
       expect(conversationMessages.some((message) => message.id === 'latest-assistant')).toBe(true);
     });
+  });
+
+  it('creates and selects a task workspace from the task context strip', async () => {
+    const conversationId = 'dm_agent-a';
+    const createdTask = {
+      id: 'tw_test',
+      title: 'Create launch deck',
+      agent_id: 'agent-a',
+      conversation_id: conversationId,
+      session_key: 'web:dm_agent-a',
+      status: 'ready',
+      cwd: '/tmp/horbot/task-workspaces/dm_agent-a',
+      workspace_mode: 'conversation',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      metadata: { source: 'test' },
+    };
+
+    vi.mocked(taskWorkspacesService.create).mockResolvedValue(createdTask);
+    vi.mocked(taskWorkspacesService.listFiles).mockResolvedValue({
+      task_id: 'tw_test',
+      cwd: createdTask.cwd,
+      exists: true,
+      files: [
+        {
+          path: 'outline.md',
+          name: 'outline.md',
+          kind: 'file',
+          size: 128,
+          modified_at: new Date().toISOString(),
+        },
+      ],
+      truncated: false,
+    });
+
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/agents') {
+        return Promise.resolve(createJsonResponse({ agents: [internalAgent] }));
+      }
+      if (url === '/api/external-agents') {
+        return Promise.resolve(createJsonResponse({ external_agents: [] }));
+      }
+      if (url === '/api/teams') {
+        return Promise.resolve(createJsonResponse({ teams: [] }));
+      }
+      if (url.startsWith(`/api/conversations/${conversationId}/messages`)) {
+        return Promise.resolve(createJsonResponse({
+          conversation_id: conversationId,
+          conversation: {
+            id: conversationId,
+            type: ConversationType.DM,
+            target_id: 'agent-a',
+            name: 'Agent A',
+            agent_ids: ['agent-a'],
+          },
+          messages: [
+            {
+              id: 'user-1',
+              role: 'user',
+              content: 'Create launch deck',
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        }));
+      }
+      return Promise.resolve(createJsonResponse({ messages: [] }));
+    });
+
+    seedConversationStore({
+      id: conversationId,
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/新建任务|New task/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/新建任务|New task/));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-task-inspector')).toBeInTheDocument();
+      expect(screen.getByText(/任务列表|Task list/)).toBeInTheDocument();
+      expect(screen.getAllByText('Create launch deck').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('/tmp/horbot/task-workspaces/dm_agent-a').length).toBeGreaterThan(0);
+    });
+
+    expect(taskWorkspacesService.create).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Create launch deck',
+      agent_id: 'agent-a',
+      conversation_id: conversationId,
+      session_key: 'web:dm_agent-a',
+      workspace_mode: 'conversation',
+    }));
   });
 });

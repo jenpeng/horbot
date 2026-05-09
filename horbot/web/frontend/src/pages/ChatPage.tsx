@@ -4021,6 +4021,17 @@ const ChatPage: React.FC = () => {
     t,
   ]);
 
+  const formatTaskWorkspaceTime = useCallback((value?: string | null) => {
+    if (!value) {
+      return '';
+    }
+    const timestamp = new Date(value);
+    if (Number.isNaN(timestamp.getTime())) {
+      return '';
+    }
+    return formatTime(timestamp.toISOString());
+  }, [formatTime]);
+
   const handleCopyWorkbenchSummary = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(workbenchClipboardSummary);
@@ -5425,6 +5436,51 @@ const ChatPage: React.FC = () => {
                   <div className="min-h-0 flex-1 overflow-y-auto p-4">
                     {taskInspectorTab === 'overview' && (
                       <div className="space-y-4">
+                        <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-slate-500">{t('chat.taskInspectorTaskList')}</p>
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                              {t('chat.taskInspectorTaskCount', { count: taskWorkspaces.length })}
+                            </span>
+                          </div>
+                          {taskWorkspaces.length === 0 ? (
+                            <p className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-500">
+                              {t('chat.taskInspectorNoTasks')}
+                            </p>
+                          ) : (
+                            <div className="mt-3 space-y-2">
+                              {taskWorkspaces.map((task) => {
+                                const isSelected = task.id === selectedTaskWorkspace?.id;
+                                return (
+                                  <button
+                                    key={task.id}
+                                    type="button"
+                                    onClick={() => setSelectedTaskWorkspaceId(task.id)}
+                                    className={`w-full rounded-2xl border p-3 text-left transition ${
+                                      isSelected
+                                        ? 'border-sky-200 bg-sky-50 shadow-sm'
+                                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <p className={`truncate text-sm font-semibold ${isSelected ? 'text-sky-900' : 'text-slate-800'}`}>
+                                        {task.title}
+                                      </p>
+                                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                        isSelected ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500'
+                                      }`}>
+                                        {isSelected ? t('chat.taskInspectorSelectedTask') : task.status}
+                                      </span>
+                                    </div>
+                                    <p className="mt-1 truncate text-xs text-slate-500">
+                                      {task.workspace_mode} · {formatTaskWorkspaceTime(task.updated_at)}
+                                    </p>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                           <p className="text-xs font-semibold text-slate-500">{t('chat.workbenchStageLabel')}</p>
                           <p className="mt-1 text-sm font-semibold text-slate-900">{conversationWorkbench.stage}</p>
