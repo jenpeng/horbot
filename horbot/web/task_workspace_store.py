@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -83,12 +83,24 @@ class TaskWorkspaceStore:
     def get(self, task_id: str) -> TaskWorkspace | None:
         return next((task for task in self._load() if task.id == task_id), None)
 
-    def create(self, request: TaskWorkspaceCreate, *, default_cwd: Path) -> TaskWorkspace:
+    def create(
+        self,
+        request: TaskWorkspaceCreate,
+        *,
+        default_cwd: Path | None = None,
+        default_cwd_factory: Callable[[str], Path] | None = None,
+    ) -> TaskWorkspace:
         now = _utc_now()
         title = _normalize_title(request.title)
-        cwd = self._resolve_cwd(request.cwd, default_cwd=default_cwd)
+        task_id = f"tw_{uuid4().hex[:12]}"
+        cwd = self._resolve_create_cwd(
+            request.cwd,
+            default_cwd=default_cwd,
+            default_cwd_factory=default_cwd_factory,
+            task_id=task_id,
+        )
         task = TaskWorkspace(
-            id=f"tw_{uuid4().hex[:12]}",
+            id=task_id,
             title=title,
             agent_id=request.agent_id,
             conversation_id=request.conversation_id,
@@ -131,6 +143,14 @@ class TaskWorkspaceStore:
             self._save(next_tasks)
         return updated
 
+    def delete(self, task_id: str) -> bool:
+        tasks = self._load()
+        next_tasks = [task for task in tasks if task.id != task_id]
+        if len(next_tasks) == len(tasks):
+            return False
+        self._save(next_tasks)
+        return True
+
     def list_files(self, task_id: str, *, limit: int = 80) -> dict[str, Any] | None:
         task = self.get(task_id)
         if task is None:
@@ -158,6 +178,51 @@ class TaskWorkspaceStore:
             "exists": cwd.exists(),
             "files": files,
             "truncated": len(files) >= limit,
+        }
+
+    def read_file(self, task_id: str, relative_path: str, *, max_bytes: int = 128_000) -> dict[str, Any] | None:
+        task = self.get(task_id)
+        if task is None:
+            return None
+
+        cwd = Path(task.cwd).expanduser().resolve()
+        requested = (relative_path or "").strip()
+        if not requested:
+            raise ValueError("File path is required")
+        target = (cwd / requested).resolve()
+        try:
+            target.relative_to(cwd)
+        except ValueError as exc:
+            raise ValueError("File path is outside the task workspace") from exc
+        if not target.exists():
+            raise FileNotFoundError("File not found")
+        if not target.is_file():
+            raise IsADirectoryError("Path is not a file")
+
+        stat = target.stat()
+        with target.open("rb") as handle:
+            raw = handle.read(max_bytes)
+        truncated = stat.st_size > max_bytes
+        try:
+            content = raw.decode("utf-8")
+            encoding = "utf-8"
+            binary = False
+        except UnicodeDecodeError:
+            content = raw.decode("utf-8", errors="replace")
+            encoding = "utf-8-replacement"
+            binary = True
+
+        return {
+            "task_id": task.id,
+            "cwd": task.cwd,
+            "path": str(target.relative_to(cwd)),
+            "name": target.name,
+            "size": stat.st_size,
+            "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            "content": content,
+            "encoding": encoding,
+            "binary": binary,
+            "truncated": truncated,
         }
 
     def list_changes(self, task_id: str, *, limit: int = 120) -> dict[str, Any] | None:
@@ -261,14 +326,34 @@ class TaskWorkspaceStore:
             return path.resolve()
         return default_cwd.expanduser().resolve()
 
+    def _resolve_create_cwd(
+        self,
+        cwd: str | None,
+        *,
+        default_cwd: Path | None,
+        default_cwd_factory: Callable[[str], Path] | None,
+        task_id: str,
+    ) -> Path:
+        raw = (cwd or "").strip()
+        if raw:
+            path = Path(raw).expanduser()
+            if path.is_absolute():
+                return path.resolve()
+
+        resolved_default_cwd = default_cwd_factory(task_id) if default_cwd_factory else default_cwd
+        if resolved_default_cwd is None:
+            raise ValueError("A default task workspace cwd is required")
+        return self._resolve_cwd(cwd, default_cwd=resolved_default_cwd)
+
 
 def normalize_task_workspace_cwd(
     raw_cwd: str,
     *,
     agent_workspace: Path,
     default_cwd: Path,
+    allow_external: bool = False,
 ) -> Path:
-    """Resolve a task cwd and ensure it stays inside the agent workspace."""
+    """Resolve a task cwd and optionally ensure it stays inside the agent workspace."""
 
     raw = (raw_cwd or "").strip()
     if not raw:
@@ -278,6 +363,10 @@ def normalize_task_workspace_cwd(
     if not path.is_absolute():
         path = default_cwd / path
     resolved = path.resolve()
+    if allow_external:
+        resolved.mkdir(parents=True, exist_ok=True)
+        return resolved
+
     workspace_root = agent_workspace.expanduser().resolve()
     try:
         resolved.relative_to(workspace_root)
@@ -327,16 +416,19 @@ def _parse_git_status_line(line: str) -> dict[str, str]:
     }
 
 
-def build_conversation_task_cwd(
+def build_task_workspace_cwd(
     *,
-    base_workspace: Path,
+    data_root: Path,
+    agent_id: str | None,
     conversation_id: str | None,
     session_key: str | None,
+    task_id: str,
 ) -> Path:
-    """Build a stable per-conversation task directory."""
+    """Build an isolated default cwd for a single chat task workspace."""
 
-    raw_name = conversation_id or session_key or "default"
-    name = safe_filename(raw_name) or "default"
-    path = base_workspace / ".horbot-agent" / "task-workspaces" / name
+    agent_name = safe_filename(agent_id or "default") or "default"
+    conversation_name = safe_filename(conversation_id or session_key or "default") or "default"
+    task_name = safe_filename(task_id) or task_id
+    path = data_root / "task-workspaces" / agent_name / conversation_name / task_name
     path.mkdir(parents=True, exist_ok=True)
     return path

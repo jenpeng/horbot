@@ -8,15 +8,23 @@ import {
   CirclePlay,
   ClipboardList,
   CheckCircle2,
+  ChevronRight,
+  FileText,
   Globe,
+  Loader2,
   FolderOpen,
   GitCompare,
   Network,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   PencilLine,
   RefreshCcw,
   Search,
   SquareKanban,
   TerminalSquare,
+  Trash2,
   UnfoldVertical,
   X,
 } from 'lucide-react';
@@ -36,8 +44,15 @@ import type { ExecutionStep, MessageFile } from '../types/conversation';
 import { chatService, ChatStreamError } from '../services/chat';
 import type { StreamState } from '../services/chat';
 import taskWorkspacesService from '../services/taskWorkspaces';
-import type { TaskWorkspace, TaskWorkspaceChange, TaskWorkspaceFile, TaskWorkspaceStatus } from '../services/taskWorkspaces';
+import type {
+  TaskWorkspace,
+  TaskWorkspaceChange,
+  TaskWorkspaceFile,
+  TaskWorkspaceFilePreview,
+  TaskWorkspaceStatus,
+} from '../services/taskWorkspaces';
 import type { ConversationState } from '../stores/conversationStore';
+import { formatBytes } from '../utils/format';
 import { createAsyncResourceCache } from '../utils/asyncResourceCache';
 import { lazyWithReload } from '../utils/lazyWithReload';
 import { normalizeConversationMessages } from '../utils/messageDedupe';
@@ -176,6 +191,97 @@ const getCapabilityIcon = (capabilityId: string) => {
     default:
       return Bot;
   }
+};
+
+type TaskWorkspaceFileTreeNode = {
+  key: string;
+  name: string;
+  path: string;
+  kind: 'file' | 'directory';
+  size?: number | null;
+  modified_at?: string;
+  children: TaskWorkspaceFileTreeNode[];
+};
+
+const buildTaskWorkspaceFileTree = (files: TaskWorkspaceFile[]): TaskWorkspaceFileTreeNode[] => {
+  const roots: TaskWorkspaceFileTreeNode[] = [];
+  const directoryMap = new Map<string, TaskWorkspaceFileTreeNode>();
+
+  const ensureDirectory = (path: string): TaskWorkspaceFileTreeNode => {
+    const normalizedPath = path.replace(/^\/+|\/+$/g, '');
+    const existing = directoryMap.get(normalizedPath);
+    if (existing) {
+      return existing;
+    }
+
+    const segments = normalizedPath.split('/').filter(Boolean);
+    const name = segments.at(-1) || normalizedPath;
+    const node: TaskWorkspaceFileTreeNode = {
+      key: `dir:${normalizedPath}`,
+      name,
+      path: normalizedPath,
+      kind: 'directory',
+      children: [],
+    };
+    directoryMap.set(normalizedPath, node);
+
+    const parentPath = segments.slice(0, -1).join('/');
+    if (parentPath) {
+      ensureDirectory(parentPath).children.push(node);
+    } else {
+      roots.push(node);
+    }
+    return node;
+  };
+
+  files.forEach((file) => {
+    const normalizedPath = file.path.replace(/^\/+|\/+$/g, '');
+    if (!normalizedPath) {
+      return;
+    }
+    const segments = normalizedPath.split('/').filter(Boolean);
+    const parentPath = segments.slice(0, -1).join('/');
+    const node: TaskWorkspaceFileTreeNode = {
+      key: `${file.kind}:${normalizedPath}`,
+      name: file.name || segments.at(-1) || normalizedPath,
+      path: normalizedPath,
+      kind: file.kind,
+      size: file.size,
+      modified_at: file.modified_at,
+      children: [],
+    };
+
+    if (file.kind === 'directory') {
+      directoryMap.set(normalizedPath, node);
+    }
+
+    const siblings = parentPath ? ensureDirectory(parentPath).children : roots;
+    const existingIndex = siblings.findIndex((item) => item.path === normalizedPath);
+    if (existingIndex >= 0) {
+      siblings[existingIndex] = {
+        ...siblings[existingIndex],
+        ...node,
+        children: siblings[existingIndex].children,
+      };
+      if (file.kind === 'directory') {
+        directoryMap.set(normalizedPath, siblings[existingIndex]);
+      }
+    } else {
+      siblings.push(node);
+    }
+  });
+
+  const sortNodes = (nodes: TaskWorkspaceFileTreeNode[]) => {
+    nodes.sort((a, b) => {
+      if (a.kind !== b.kind) {
+        return a.kind === 'directory' ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+    nodes.forEach((node) => sortNodes(node.children));
+  };
+  sortNodes(roots);
+  return roots;
 };
 
 const getCapabilityTone = (capabilityId: string): string => {
@@ -354,6 +460,9 @@ const ChatPage: React.FC = () => {
   const [expandedTimelineTurnIds, setExpandedTimelineTurnIds] = useState<Record<string, boolean>>({});
   const [streamState, setStreamState] = useState<StreamState | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isConversationSidebarCollapsed, setIsConversationSidebarCollapsed] = useState(() => (
+    window.localStorage.getItem('horbot.chat.conversationSidebarCollapsed') !== 'false'
+  ));
   const [showReconnect, setShowReconnect] = useState(false);
   const [confirmingMessageId, setConfirmingMessageId] = useState<string | null>(null);
   const [lastFailedRequest, setLastFailedRequest] = useState<RetryRequest | null>(null);
@@ -371,15 +480,29 @@ const ChatPage: React.FC = () => {
   const [historySearchIndex, setHistorySearchIndex] = useState(0);
   const [isHistorySearchOpen, setIsHistorySearchOpen] = useState(false);
   const [isWorkbenchPanelOpen, setIsWorkbenchPanelOpen] = useState(false);
-  const [isTaskInspectorOpen, setIsTaskInspectorOpen] = useState(false);
+  const [isTaskInspectorOpen, setIsTaskInspectorOpen] = useState(true);
+  const [isTaskWorkspaceSidebarCollapsed, setIsTaskWorkspaceSidebarCollapsed] = useState(() => (
+    window.localStorage.getItem('horbot.chat.taskWorkspaceSidebarCollapsed') === 'true'
+  ));
+  const [isTaskContextPanelCollapsed, setIsTaskContextPanelCollapsed] = useState(() => (
+    window.localStorage.getItem('horbot.chat.taskContextPanelCollapsed') === 'true'
+  ));
   const [taskInspectorTab, setTaskInspectorTab] = useState<'overview' | 'files' | 'changes' | 'logs'>('overview');
   const [taskWorkspaces, setTaskWorkspaces] = useState<TaskWorkspace[]>([]);
   const [selectedTaskWorkspaceId, setSelectedTaskWorkspaceId] = useState<string | null>(null);
   const [taskWorkspaceFiles, setTaskWorkspaceFiles] = useState<TaskWorkspaceFile[]>([]);
+  const [selectedTaskWorkspaceFilePath, setSelectedTaskWorkspaceFilePath] = useState<string | null>(null);
+  const [taskWorkspaceFilePreview, setTaskWorkspaceFilePreview] = useState<TaskWorkspaceFilePreview | null>(null);
+  const [isTaskWorkspaceFilePreviewLoading, setIsTaskWorkspaceFilePreviewLoading] = useState(false);
+  const [taskWorkspaceFilePreviewError, setTaskWorkspaceFilePreviewError] = useState<string | null>(null);
   const [taskWorkspaceChanges, setTaskWorkspaceChanges] = useState<TaskWorkspaceChange[]>([]);
   const [taskWorkspaceChangesAvailable, setTaskWorkspaceChangesAvailable] = useState(true);
   const [taskWorkspaceChangesReason, setTaskWorkspaceChangesReason] = useState<string | null>(null);
   const [isCreatingTaskWorkspace, setIsCreatingTaskWorkspace] = useState(false);
+  const [deletingTaskWorkspaceId, setDeletingTaskWorkspaceId] = useState<string | null>(null);
+  const [isTaskCreateDialogOpen, setIsTaskCreateDialogOpen] = useState(false);
+  const [taskCreateDraftTitle, setTaskCreateDraftTitle] = useState('');
+  const [taskCreateDraftCwd, setTaskCreateDraftCwd] = useState('');
   const [isRefreshingTaskWorkspace, setIsRefreshingTaskWorkspace] = useState(false);
   const [isUpdatingTaskWorkspace, setIsUpdatingTaskWorkspace] = useState(false);
   const [historySearchTimeRange, setHistorySearchTimeRange] = useState<HistorySearchTimeRange>('all');
@@ -398,6 +521,27 @@ const ChatPage: React.FC = () => {
       isConversationHeaderCollapsed ? 'true' : 'false',
     );
   }, [isConversationHeaderCollapsed]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      'horbot.chat.conversationSidebarCollapsed',
+      isConversationSidebarCollapsed ? 'true' : 'false',
+    );
+  }, [isConversationSidebarCollapsed]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      'horbot.chat.taskWorkspaceSidebarCollapsed',
+      isTaskWorkspaceSidebarCollapsed ? 'true' : 'false',
+    );
+  }, [isTaskWorkspaceSidebarCollapsed]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      'horbot.chat.taskContextPanelCollapsed',
+      isTaskContextPanelCollapsed ? 'true' : 'false',
+    );
+  }, [isTaskContextPanelCollapsed]);
 
   const directAgents = useMemo(
     () => [...agents, ...externalAgents],
@@ -2287,6 +2431,9 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     if (!selectedTaskWorkspace?.id) {
       setTaskWorkspaceFiles([]);
+      setSelectedTaskWorkspaceFilePath(null);
+      setTaskWorkspaceFilePreview(null);
+      setTaskWorkspaceFilePreviewError(null);
       setTaskWorkspaceChanges([]);
       setTaskWorkspaceChangesAvailable(true);
       setTaskWorkspaceChangesReason(null);
@@ -2300,6 +2447,9 @@ const ChatPage: React.FC = () => {
       .then(([filesPayload, changesPayload]) => {
         if (!cancelled) {
           setTaskWorkspaceFiles(filesPayload.files || []);
+          setSelectedTaskWorkspaceFilePath(null);
+          setTaskWorkspaceFilePreview(null);
+          setTaskWorkspaceFilePreviewError(null);
           setTaskWorkspaceChanges(changesPayload.changes || []);
           setTaskWorkspaceChangesAvailable(changesPayload.available);
           setTaskWorkspaceChangesReason(changesPayload.reason || null);
@@ -2309,6 +2459,9 @@ const ChatPage: React.FC = () => {
         console.error('Failed to load task workspace details:', error);
         if (!cancelled) {
           setTaskWorkspaceFiles([]);
+          setSelectedTaskWorkspaceFilePath(null);
+          setTaskWorkspaceFilePreview(null);
+          setTaskWorkspaceFilePreviewError(null);
           setTaskWorkspaceChanges([]);
           setTaskWorkspaceChangesAvailable(false);
           setTaskWorkspaceChangesReason(error instanceof Error ? error.message : 'load_failed');
@@ -4017,7 +4170,7 @@ const ChatPage: React.FC = () => {
     const workspaceFiles = taskWorkspaceFiles.slice(0, 12).map((file) => ({
       key: file.path,
       name: file.path,
-      detail: file.kind === 'directory' ? 'directory' : `${file.size ?? 0} bytes`,
+      detail: file.kind === 'directory' ? 'directory' : formatBytes(file.size ?? 0),
     }));
     const latestTurn = [...messageTurns].reverse().find((turn) => turn.userMessage || turn.assistantMessages.length > 0);
     const latestSteps = latestTurn?.assistantMessages
@@ -4057,6 +4210,11 @@ const ChatPage: React.FC = () => {
     t,
   ]);
 
+  const taskWorkspaceFileTree = useMemo(
+    () => buildTaskWorkspaceFileTree(taskWorkspaceFiles),
+    [taskWorkspaceFiles],
+  );
+
   const formatTaskWorkspaceTime = useCallback((value?: string | null) => {
     if (!value) {
       return '';
@@ -4079,6 +4237,9 @@ const ChatPage: React.FC = () => {
         taskWorkspacesService.listChanges(selectedTaskWorkspace.id),
       ]);
       setTaskWorkspaceFiles(filesPayload.files || []);
+      setSelectedTaskWorkspaceFilePath(null);
+      setTaskWorkspaceFilePreview(null);
+      setTaskWorkspaceFilePreviewError(null);
       setTaskWorkspaceChanges(changesPayload.changes || []);
       setTaskWorkspaceChangesAvailable(changesPayload.available);
       setTaskWorkspaceChangesReason(changesPayload.reason || null);
@@ -4089,6 +4250,25 @@ const ChatPage: React.FC = () => {
       setIsRefreshingTaskWorkspace(false);
     }
   }, [selectedTaskWorkspace?.id, t, toast]);
+
+  const handlePreviewTaskWorkspaceFile = useCallback(async (file: TaskWorkspaceFileTreeNode) => {
+    if (!selectedTaskWorkspace?.id || file.kind !== 'file') {
+      return;
+    }
+    setSelectedTaskWorkspaceFilePath(file.path);
+    setTaskWorkspaceFilePreview(null);
+    setTaskWorkspaceFilePreviewError(null);
+    setIsTaskWorkspaceFilePreviewLoading(true);
+    try {
+      const preview = await taskWorkspacesService.readFile(selectedTaskWorkspace.id, file.path);
+      setTaskWorkspaceFilePreview(preview);
+    } catch (error) {
+      console.error('Failed to preview task workspace file:', error);
+      setTaskWorkspaceFilePreviewError(error instanceof Error ? error.message : t('chat.taskInspectorFilePreviewFailed'));
+    } finally {
+      setIsTaskWorkspaceFilePreviewLoading(false);
+    }
+  }, [selectedTaskWorkspace?.id, t]);
 
   const handleUpdateSelectedTaskStatus = useCallback(async (status: TaskWorkspaceStatus) => {
     if (!selectedTaskWorkspace?.id || isUpdatingTaskWorkspace) {
@@ -4108,6 +4288,36 @@ const ChatPage: React.FC = () => {
       setIsUpdatingTaskWorkspace(false);
     }
   }, [isUpdatingTaskWorkspace, selectedTaskWorkspace?.id, t, toast]);
+
+  const handleDeleteTaskWorkspace = useCallback(async (taskId: string) => {
+    if (deletingTaskWorkspaceId) {
+      return;
+    }
+    setDeletingTaskWorkspaceId(taskId);
+    try {
+      await taskWorkspacesService.delete(taskId);
+      setTaskWorkspaces((previousTasks) => {
+        const nextTasks = previousTasks.filter((task) => task.id !== taskId);
+        if (selectedTaskWorkspaceId === taskId) {
+          setSelectedTaskWorkspaceId(nextTasks[0]?.id || null);
+          setTaskWorkspaceFiles([]);
+          setTaskWorkspaceChanges([]);
+          setTaskWorkspaceChangesAvailable(true);
+          setTaskWorkspaceChangesReason(null);
+          setSelectedTaskWorkspaceFilePath(null);
+          setTaskWorkspaceFilePreview(null);
+          setTaskWorkspaceFilePreviewError(null);
+        }
+        return nextTasks;
+      });
+      toast.success(t('chat.taskInspectorTaskDeleted'));
+    } catch (error) {
+      console.error('Failed to delete task workspace:', error);
+      toast.error(error instanceof Error ? error.message : t('chat.taskInspectorTaskDeleteFailed'));
+    } finally {
+      setDeletingTaskWorkspaceId(null);
+    }
+  }, [deletingTaskWorkspaceId, selectedTaskWorkspaceId, t, toast]);
 
   const handleCopyWorkbenchSummary = useCallback(async () => {
     try {
@@ -4136,6 +4346,19 @@ const ChatPage: React.FC = () => {
     setIsWorkbenchPanelOpen(false);
   }, [conversationWorkbench.latestRequest, t]);
 
+  const openTaskCreateDialog = useCallback(() => {
+    const fallbackTitle = conversationWorkbench.latestRequest && conversationWorkbench.latestRequest !== t('chat.workbenchNoRequest')
+      ? conversationWorkbench.latestRequest
+      : currentConversation?.name || t('chat.taskContextUntitled');
+    setTaskCreateDraftTitle(fallbackTitle);
+    setTaskCreateDraftCwd('');
+    setIsTaskCreateDialogOpen(true);
+  }, [
+    conversationWorkbench.latestRequest,
+    currentConversation?.name,
+    t,
+  ]);
+
   const handleCreateTaskWorkspace = useCallback(async () => {
     if (!currentConversation?.id || isCreatingTaskWorkspace) {
       return;
@@ -4143,23 +4366,28 @@ const ChatPage: React.FC = () => {
     const fallbackTitle = conversationWorkbench.latestRequest && conversationWorkbench.latestRequest !== t('chat.workbenchNoRequest')
       ? conversationWorkbench.latestRequest
       : currentConversation.name || t('chat.taskContextUntitled');
+    const title = taskCreateDraftTitle.trim() || fallbackTitle;
+    const cwd = taskCreateDraftCwd.trim();
     setIsCreatingTaskWorkspace(true);
     try {
       const task = await taskWorkspacesService.create({
-        title: fallbackTitle,
+        title,
         agent_id: currentTaskAgentId,
         conversation_id: currentConversation.id,
         session_key: currentTaskSessionKey,
+        cwd: cwd || undefined,
         workspace_mode: 'conversation',
         metadata: {
           source: 'chat-page',
           conversation_type: currentConversation.type,
+          cwd_source: cwd ? 'user' : 'default',
         },
       });
       setTaskWorkspaces((previousTasks) => [task, ...previousTasks.filter((item) => item.id !== task.id)]);
       setSelectedTaskWorkspaceId(task.id);
       setIsTaskInspectorOpen(true);
       setTaskInspectorTab('overview');
+      setIsTaskCreateDialogOpen(false);
       toast.success(t('chat.taskContextTaskCreated'));
     } catch (error) {
       console.error('Failed to create task workspace:', error);
@@ -4174,6 +4402,8 @@ const ChatPage: React.FC = () => {
     currentTaskSessionKey,
     isCreatingTaskWorkspace,
     t,
+    taskCreateDraftCwd,
+    taskCreateDraftTitle,
     toast,
   ]);
 
@@ -4819,14 +5049,35 @@ const ChatPage: React.FC = () => {
   
   return (
     <div className="flex h-full min-h-full overflow-hidden">
-      <div className="hidden w-64 min-h-0 flex-shrink-0 flex-col border-r border-slate-200 bg-white lg:flex">
+      <div className={`hidden min-h-0 flex-shrink-0 flex-col border-r border-slate-200 bg-white transition-[width] duration-200 ease-out lg:flex ${
+        isConversationSidebarCollapsed ? 'w-16' : 'w-64'
+      }`} data-testid="chat-conversation-sidebar">
         <div className="p-4 border-b border-slate-200">
-          <h2 className="font-semibold text-slate-800">{t('chat.sectionTitle')}</h2>
+          <div className="flex items-center justify-between gap-2">
+            {!isConversationSidebarCollapsed && (
+              <h2 className="font-semibold text-slate-800">{t('chat.sectionTitle')}</h2>
+            )}
+            <button
+              type="button"
+              onClick={() => setIsConversationSidebarCollapsed((value) => !value)}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+              aria-label={isConversationSidebarCollapsed ? t('chat.expandConversationSidebar') : t('chat.collapseConversationSidebar')}
+              title={isConversationSidebarCollapsed ? t('chat.expandConversationSidebar') : t('chat.collapseConversationSidebar')}
+            >
+              {isConversationSidebarCollapsed ? (
+                <PanelLeftOpen className="h-4 w-4" strokeWidth={2} />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" strokeWidth={2} />
+              )}
+            </button>
+          </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-2">
+        <div className={`flex-1 overflow-y-auto ${isConversationSidebarCollapsed ? 'p-2' : 'p-2'}`}>
           <div className="mb-4">
-            <h3 className="px-2 py-1 text-xs font-medium text-slate-500 uppercase tracking-wider">{t('chat.directSection')}</h3>
+            {!isConversationSidebarCollapsed && (
+              <h3 className="px-2 py-1 text-xs font-medium text-slate-500 uppercase tracking-wider">{t('chat.directSection')}</h3>
+            )}
             <div className="space-y-1 mt-1">
               {directAgents.map((agent) => {
                 const isSelected = selectedAgentId === agent.id;
@@ -4834,28 +5085,33 @@ const ChatPage: React.FC = () => {
                   <button
                     key={agent.id}
                     onClick={() => handleSelectAgent(agent.id)}
-                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors ${
+                    title={agent.name}
+                    className={`w-full flex items-center gap-2 rounded-lg text-left transition-colors ${
+                      isConversationSidebarCollapsed ? 'justify-center px-1 py-2' : 'px-2 py-1.5'
+                    } ${
                       isSelected 
                         ? 'bg-blue-50 text-blue-700' 
                         : 'text-slate-700 hover:bg-slate-100'
                     }`}
                   >
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-sm font-medium">
+                    <div className="w-8 h-8 shrink-0 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-sm font-medium">
                       {agent.name.charAt(0).toUpperCase()}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium truncate">{agent.name}</p>
-                        {agent.external && (
-                          <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
-                            {t('chat.externalBadge')}
-                          </span>
+                    {!isConversationSidebarCollapsed && (
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium truncate">{agent.name}</p>
+                          {agent.external && (
+                            <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-700">
+                              {t('chat.externalBadge')}
+                            </span>
+                          )}
+                        </div>
+                        {agent.description && (
+                          <p className="text-xs text-slate-500 truncate">{agent.description}</p>
                         )}
                       </div>
-                      {agent.description && (
-                        <p className="text-xs text-slate-500 truncate">{agent.description}</p>
-                      )}
-                    </div>
+                    )}
                   </button>
                 );
               })}
@@ -4864,7 +5120,9 @@ const ChatPage: React.FC = () => {
           
           {teams.length > 0 && (
             <div>
-              <h3 className="px-2 py-1 text-xs font-medium text-slate-500 uppercase tracking-wider">{t('chat.teamSection')}</h3>
+              {!isConversationSidebarCollapsed && (
+                <h3 className="px-2 py-1 text-xs font-medium text-slate-500 uppercase tracking-wider">{t('chat.teamSection')}</h3>
+              )}
               <div className="space-y-1 mt-1">
                 {teams.map((team) => {
                   const isSelected = selectedTeamId === team.id;
@@ -4872,21 +5130,26 @@ const ChatPage: React.FC = () => {
                     <button
                       key={team.id}
                       onClick={() => handleSelectTeam(team.id)}
-                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors ${
+                      title={team.name}
+                      className={`w-full flex items-center gap-2 rounded-lg text-left transition-colors ${
+                        isConversationSidebarCollapsed ? 'justify-center px-1 py-2' : 'px-2 py-1.5'
+                      } ${
                         isSelected 
                           ? 'bg-blue-50 text-blue-700' 
                           : 'text-slate-700 hover:bg-slate-100'
                       }`}
                     >
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-400 to-violet-600 flex items-center justify-center text-white">
+                      <div className="w-8 h-8 shrink-0 rounded-full bg-gradient-to-br from-violet-400 to-violet-600 flex items-center justify-center text-white">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                         </svg>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{team.name}</p>
-                        <p className="text-xs text-slate-500">{t('chat.teamMembers', { count: team.members.length })}</p>
-                      </div>
+                      {!isConversationSidebarCollapsed && (
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{team.name}</p>
+                          <p className="text-xs text-slate-500">{t('chat.teamMembers', { count: team.members.length })}</p>
+                        </div>
+                      )}
                     </button>
                   );
                 })}
@@ -5149,52 +5412,200 @@ const ChatPage: React.FC = () => {
               </div>
             )}
 
-            <div className="shrink-0 border-b border-slate-200 bg-white/95 px-4 py-2">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
-                    <ClipboardList className="h-3.5 w-3.5" strokeWidth={2} />
-                    {t('chat.taskContextDirect')}
-                  </span>
-                  <span className="inline-flex max-w-[32rem] items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 shadow-sm">
-                    <span className="shrink-0 text-slate-400">{t('chat.taskContextCurrent')}</span>
-                    <span className="truncate">{taskWorkspacePreview.title}</span>
-                  </span>
-                  <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-500">
-                    {taskWorkspacePreview.cwd}
-                  </span>
+            <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[#f6f7f9]">
+              {isTaskInspectorOpen && (
+                <aside
+                  className={`hidden shrink-0 border-r border-slate-200 bg-[#fbfbf8] transition-[width] duration-200 ease-out lg:flex lg:flex-col ${
+                    isTaskWorkspaceSidebarCollapsed ? 'w-14' : 'w-[15.5rem]'
+                  }`}
+                  data-testid="chat-task-workspace-sidebar"
+                >
+                  <div className={`border-b border-slate-200 ${isTaskWorkspaceSidebarCollapsed ? 'px-2 py-3' : 'px-3 py-3'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      {!isTaskWorkspaceSidebarCollapsed && (
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                            {t('chat.codexTasksTitle')}
+                          </p>
+                          <h3 className="mt-1 truncate text-sm font-semibold text-slate-900">
+                            {currentConversation.name}
+                          </h3>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setIsTaskWorkspaceSidebarCollapsed((prev) => !prev)}
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                        title={isTaskWorkspaceSidebarCollapsed ? t('chat.expandTaskWorkspaceSidebar') : t('chat.collapseTaskWorkspaceSidebar')}
+                        aria-label={isTaskWorkspaceSidebarCollapsed ? t('chat.expandTaskWorkspaceSidebar') : t('chat.collapseTaskWorkspaceSidebar')}
+                        data-testid="chat-task-workspace-sidebar-collapse"
+                      >
+                        {isTaskWorkspaceSidebarCollapsed ? (
+                          <PanelRightOpen className="h-4 w-4" strokeWidth={2} />
+                        ) : (
+                          <PanelLeftClose className="h-4 w-4" strokeWidth={2} />
+                        )}
+                      </button>
+                    </div>
+                    {isTaskWorkspaceSidebarCollapsed ? (
+                      <div className="mt-3 flex flex-col items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={openTaskCreateDialog}
+                          disabled={isCreatingTaskWorkspace || !currentConversation}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                          title={t('chat.taskContextNewTask')}
+                          aria-label={t('chat.taskContextNewTask')}
+                        >
+                          <FolderOpen className="h-4 w-4" strokeWidth={2} />
+                        </button>
+                        <span className="rounded-full bg-slate-200/80 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                          {taskWorkspaces.length}
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={openTaskCreateDialog}
+                          disabled={isCreatingTaskWorkspace || !currentConversation}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                          title={t('chat.taskContextNewTask')}
+                          aria-label={t('chat.taskContextNewTask')}
+                        >
+                          <FolderOpen className="h-4 w-4" strokeWidth={2} />
+                          {t('chat.taskContextNewTask')}
+                        </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTaskWorkspaceId(null)}
+                      className={`mt-3 w-full rounded-2xl border px-3 py-2 text-left transition ${
+                        !selectedTaskWorkspace
+                          ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <ClipboardList className="h-4 w-4 shrink-0" strokeWidth={2} />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">{t('chat.taskContextDirect')}</p>
+                          <p className={`mt-0.5 truncate text-[11px] ${!selectedTaskWorkspace ? 'text-white/65' : 'text-slate-500'}`}>
+                            {t('chat.codexDirectSubtitle')}
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                      </>
+                    )}
+                  </div>
+                  {!isTaskWorkspaceSidebarCollapsed && (
+                    <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+                    <div className="mb-2 flex items-center justify-between px-1">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                        {t('chat.taskInspectorTaskList')}
+                      </span>
+                      <span className="rounded-full bg-slate-200/70 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                        {taskWorkspaces.length}
+                      </span>
+                    </div>
+                    {taskWorkspaces.length === 0 ? (
+                      <p className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-3 text-xs leading-5 text-slate-500">
+                        {t('chat.taskInspectorNoTasks')}
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {taskWorkspaces.map((task) => {
+                          const isSelected = task.id === selectedTaskWorkspace?.id;
+                          return (
+                            <div
+                              key={task.id}
+                              data-testid={`chat-task-workspace-card-${task.id}`}
+                              className={`group flex w-full items-start gap-2 rounded-2xl border px-3 py-3 text-left transition ${
+                                isSelected
+                                  ? 'border-slate-900 bg-white shadow-sm ring-2 ring-slate-900/5'
+                                  : 'border-transparent bg-transparent hover:border-slate-200 hover:bg-white'
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setSelectedTaskWorkspaceId(task.id)}
+                                className="min-w-0 flex-1 text-left"
+                              >
+                                <div className="flex items-start gap-2">
+                                <span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${
+                                  task.status === 'running' ? 'bg-emerald-500' :
+                                  task.status === 'blocked' ? 'bg-amber-500' :
+                                  task.status === 'failed' ? 'bg-red-500' :
+                                  task.status === 'done' ? 'bg-slate-400' : 'bg-sky-500'
+                                }`} />
+                                <div className="min-w-0 flex-1">
+                                  <p className="line-clamp-2 text-sm font-semibold leading-5 text-slate-900">
+                                    {task.title}
+                                  </p>
+                                  <p className="mt-1 truncate text-[11px] text-slate-500">
+                                    {task.status} · {formatTaskWorkspaceTime(task.updated_at)}
+                                  </p>
+                                </div>
+                              </div>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleDeleteTaskWorkspace(task.id);
+                                }}
+                                disabled={deletingTaskWorkspaceId === task.id}
+                                className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-300 opacity-0 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 group-hover:opacity-100 focus:opacity-100"
+                                aria-label={t('chat.taskInspectorDeleteTask')}
+                                title={t('chat.taskInspectorDeleteTask')}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" strokeWidth={2} />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  )}
+                </aside>
+              )}
+
+              <div className={`relative min-h-0 min-w-0 border-r border-slate-200 bg-white ${
+                isTaskInspectorOpen && !isTaskContextPanelCollapsed
+                  ? 'basis-1/2 flex-1'
+                  : 'flex-1'
+              }`}>
+                <div className="flex h-12 items-center justify-between border-b border-slate-200 bg-white/95 px-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-xl bg-slate-900 text-white">
+                      <TerminalSquare className="h-3.5 w-3.5" strokeWidth={2} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-900">{taskWorkspacePreview.title}</p>
+                      <p className="truncate text-[11px] text-slate-500">{taskWorkspacePreview.cwd}</p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 sm:inline-flex">
+                      {taskWorkspacePreview.mode}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={openTaskCreateDialog}
+                      disabled={isCreatingTaskWorkspace || !currentConversation}
+                      data-testid="chat-create-task-workspace"
+                      className="inline-flex items-center gap-1 rounded-full border border-slate-900 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <FolderOpen className="h-3.5 w-3.5" strokeWidth={2} />
+                      {t('chat.taskContextNewTask')}
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsTaskInspectorOpen(true);
-                    setTaskInspectorTab('overview');
-                  }}
-                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
-                >
-                  <SquareKanban className="h-3.5 w-3.5" strokeWidth={2} />
-                  {t('chat.taskContextOpenInspector')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleCreateTaskWorkspace();
-                  }}
-                  disabled={isCreatingTaskWorkspace || !currentConversation}
-                  className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700 shadow-sm transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <FolderOpen className="h-3.5 w-3.5" strokeWidth={2} />
-                  {t('chat.taskContextNewTask')}
-                </button>
-              </div>
-            </div>
-            
-            <div className="relative flex min-h-0 flex-1 overflow-hidden">
-              <div className="relative min-h-0 flex-1">
                 <div
                   ref={chatContainerRef}
                   data-testid="chat-scroll-container"
-                  className="min-h-0 h-full overflow-y-auto bg-slate-50 px-3 py-3 space-y-3"
+                  className="min-h-0 h-[calc(100%-3rem)] overflow-y-auto bg-slate-50 px-3 py-3 space-y-3"
                 >
               {messages.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-slate-400">
@@ -5468,14 +5879,37 @@ const ChatPage: React.FC = () => {
 
               {isTaskInspectorOpen && (
                 <aside
-                  className="hidden w-[22rem] shrink-0 border-l border-slate-200 bg-white lg:flex lg:flex-col"
+                  className={`hidden min-w-0 border-l border-slate-200 bg-white transition-[width,flex-basis] duration-200 ease-out lg:flex lg:flex-col ${
+                    isTaskContextPanelCollapsed ? 'w-14 shrink-0' : 'basis-1/2 flex-1'
+                  }`}
                   data-testid="chat-task-inspector"
                 >
+                  {isTaskContextPanelCollapsed ? (
+                    <div className="flex h-full flex-col items-center gap-3 px-2 py-3">
+                      <button
+                        type="button"
+                        onClick={() => setIsTaskContextPanelCollapsed(false)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+                        aria-label={t('chat.expandTaskContextPanel')}
+                        title={t('chat.expandTaskContextPanel')}
+                        data-testid="chat-task-context-panel-collapse"
+                      >
+                        <PanelLeftOpen className="h-4 w-4" strokeWidth={2} />
+                      </button>
+                      <div className="flex min-h-0 flex-1 items-center justify-center">
+                        <div className="flex -rotate-90 items-center gap-2 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                          <SquareKanban className="h-3.5 w-3.5" strokeWidth={2} />
+                          {t('chat.codexContextTitle')}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
                   <div className="border-b border-slate-200 p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                          {t('chat.taskInspectorTitle')}
+                          {t('chat.codexContextTitle')}
                         </p>
                         <h3 className="mt-1 truncate text-sm font-semibold text-slate-900">
                           {taskWorkspacePreview.title}
@@ -5486,11 +5920,13 @@ const ChatPage: React.FC = () => {
                       </div>
                       <button
                         type="button"
-                        onClick={() => setIsTaskInspectorOpen(false)}
+                        onClick={() => setIsTaskContextPanelCollapsed(true)}
                         className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-                        aria-label={t('chat.workbenchCollapse')}
+                        aria-label={t('chat.collapseTaskContextPanel')}
+                        title={t('chat.collapseTaskContextPanel')}
+                        data-testid="chat-task-context-panel-collapse"
                       >
-                        <X className="h-4 w-4" strokeWidth={2} />
+                        <PanelRightClose className="h-4 w-4" strokeWidth={2} />
                       </button>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -5548,51 +5984,6 @@ const ChatPage: React.FC = () => {
                   <div className="min-h-0 flex-1 overflow-y-auto p-4">
                     {taskInspectorTab === 'overview' && (
                       <div className="space-y-4">
-                        <div className="rounded-2xl border border-slate-200 bg-white p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-xs font-semibold text-slate-500">{t('chat.taskInspectorTaskList')}</p>
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                              {t('chat.taskInspectorTaskCount', { count: taskWorkspaces.length })}
-                            </span>
-                          </div>
-                          {taskWorkspaces.length === 0 ? (
-                            <p className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-500">
-                              {t('chat.taskInspectorNoTasks')}
-                            </p>
-                          ) : (
-                            <div className="mt-3 space-y-2">
-                              {taskWorkspaces.map((task) => {
-                                const isSelected = task.id === selectedTaskWorkspace?.id;
-                                return (
-                                  <button
-                                    key={task.id}
-                                    type="button"
-                                    onClick={() => setSelectedTaskWorkspaceId(task.id)}
-                                    className={`w-full rounded-2xl border p-3 text-left transition ${
-                                      isSelected
-                                        ? 'border-sky-200 bg-sky-50 shadow-sm'
-                                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
-                                    }`}
-                                  >
-                                    <div className="flex items-center justify-between gap-2">
-                                      <p className={`truncate text-sm font-semibold ${isSelected ? 'text-sky-900' : 'text-slate-800'}`}>
-                                        {task.title}
-                                      </p>
-                                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                        isSelected ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500'
-                                      }`}>
-                                        {isSelected ? t('chat.taskInspectorSelectedTask') : task.status}
-                                      </span>
-                                    </div>
-                                    <p className="mt-1 truncate text-xs text-slate-500">
-                                      {task.workspace_mode} · {formatTaskWorkspaceTime(task.updated_at)}
-                                    </p>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                           <p className="text-xs font-semibold text-slate-500">{t('chat.workbenchStageLabel')}</p>
                           <p className="mt-1 text-sm font-semibold text-slate-900">{conversationWorkbench.stage}</p>
@@ -5618,17 +6009,118 @@ const ChatPage: React.FC = () => {
                       </div>
                     )}
                     {taskInspectorTab === 'files' && (
-                      <div className="space-y-2">
-                        {taskWorkspacePreview.files.length === 0 ? (
+                      <div className="grid min-h-[26rem] gap-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                        {taskWorkspaceFileTree.length === 0 ? (
                           <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
                             {t('chat.taskInspectorNoFiles')}
                           </p>
-                        ) : taskWorkspacePreview.files.map((file) => (
-                          <div key={file.key} className="rounded-2xl border border-slate-200 p-3">
-                            <p className="truncate text-sm font-semibold text-slate-800">{file.name}</p>
-                            <p className="mt-1 text-xs text-slate-500">{file.detail}</p>
+                        ) : (
+                          <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                            <div className="border-b border-slate-200 bg-white px-3 py-2">
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                {t('chat.taskInspectorFileTree')}
+                              </p>
+                            </div>
+                            <div className="max-h-[32rem] overflow-auto p-2">
+                              {taskWorkspaceFileTree.map((node) => {
+                                const renderNode = (
+                                  item: TaskWorkspaceFileTreeNode,
+                                  depth: number,
+                                ): React.ReactNode => (
+                                  <div key={item.key}>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (item.kind === 'file') {
+                                          void handlePreviewTaskWorkspaceFile(item);
+                                        }
+                                      }}
+                                      disabled={item.kind === 'directory'}
+                                      className={`flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-xs transition ${
+                                        selectedTaskWorkspaceFilePath === item.path
+                                          ? 'bg-slate-900 text-white'
+                                          : item.kind === 'file'
+                                            ? 'text-slate-700 hover:bg-white hover:shadow-sm'
+                                            : 'cursor-default text-slate-500'
+                                      }`}
+                                      style={{ paddingLeft: `${8 + depth * 14}px` }}
+                                      title={item.path}
+                                    >
+                                      {item.kind === 'directory' ? (
+                                        <>
+                                          <ChevronRight className="h-3 w-3 shrink-0 text-slate-400" strokeWidth={2} />
+                                          <FolderOpen className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                                        </>
+                                      ) : (
+                                        <>
+                                          <span className="h-3 w-3 shrink-0" />
+                                          <FileText className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+                                        </>
+                                      )}
+                                      <span className="min-w-0 flex-1 truncate font-medium">{item.name}</span>
+                                      {item.kind === 'file' && item.size != null && (
+                                        <span className={`shrink-0 text-[10px] ${
+                                          selectedTaskWorkspaceFilePath === item.path ? 'text-white/60' : 'text-slate-400'
+                                        }`}>
+                                          {formatBytes(item.size)}
+                                        </span>
+                                      )}
+                                    </button>
+                                    {item.children.map((child) => renderNode(child, depth + 1))}
+                                  </div>
+                                );
+                                return renderNode(node, 0);
+                              })}
+                            </div>
                           </div>
-                        ))}
+                        )}
+
+                        <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                          <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-2">
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                {t('chat.taskInspectorFilePreview')}
+                              </p>
+                              <p className="mt-0.5 truncate font-mono text-[11px] text-slate-400">
+                                {selectedTaskWorkspaceFilePath || taskWorkspacePreview.cwd}
+                              </p>
+                            </div>
+                            {isTaskWorkspaceFilePreviewLoading && (
+                              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-400" strokeWidth={2} />
+                            )}
+                          </div>
+                          <div className="max-h-[32rem] overflow-auto bg-slate-950">
+                            {taskWorkspaceFilePreviewError ? (
+                              <p className="m-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                {taskWorkspaceFilePreviewError}
+                              </p>
+                            ) : taskWorkspaceFilePreview ? (
+                              <div>
+                                {(taskWorkspaceFilePreview.binary || taskWorkspaceFilePreview.truncated) && (
+                                  <div className="border-b border-slate-800 bg-slate-900 px-3 py-2 text-xs text-amber-200">
+                                    {taskWorkspaceFilePreview.binary && (
+                                      <p>{t('chat.taskInspectorFilePreviewBinary')}</p>
+                                    )}
+                                    {taskWorkspaceFilePreview.truncated && (
+                                      <p>{t('chat.taskInspectorFilePreviewTruncated')}</p>
+                                    )}
+                                  </div>
+                                )}
+                                <pre className="min-h-[24rem] whitespace-pre-wrap break-words p-4 font-mono text-[11px] leading-5 text-slate-100">
+                                  {taskWorkspaceFilePreview.content}
+                                </pre>
+                              </div>
+                            ) : (
+                              <div className="flex min-h-[24rem] items-center justify-center p-6 text-center">
+                                <p className="max-w-xs text-sm leading-6 text-slate-400">
+                                  {isTaskWorkspaceFilePreviewLoading
+                                    ? t('chat.taskInspectorFilePreviewLoading')
+                                    : t('chat.taskInspectorFilePreviewPlaceholder')}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     )}
                     {taskInspectorTab === 'changes' && (
@@ -5677,9 +6169,95 @@ const ChatPage: React.FC = () => {
                       </div>
                     )}
                   </div>
+                    </>
+                  )}
                 </aside>
               )}
             </div>
+
+            {isTaskCreateDialogOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 backdrop-blur-sm">
+                <div className="w-full max-w-xl rounded-[28px] border border-slate-200 bg-white p-5 shadow-2xl">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                        {t('chat.taskCreateDialogEyebrow')}
+                      </p>
+                      <h3 className="mt-1 text-lg font-semibold text-slate-950">
+                        {t('chat.taskCreateDialogTitle')}
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {t('chat.taskCreateDialogDescription')}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsTaskCreateDialogOpen(false)}
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                      aria-label={t('chat.workbenchCollapse')}
+                    >
+                      <X className="h-4 w-4" strokeWidth={2} />
+                    </button>
+                  </div>
+
+                  <form
+                    className="mt-5 space-y-4"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void handleCreateTaskWorkspace();
+                    }}
+                  >
+                    <label className="block">
+                      <span className="text-xs font-semibold text-slate-600">
+                        {t('chat.taskCreateTitleLabel')}
+                      </span>
+                      <input
+                        type="text"
+                        value={taskCreateDraftTitle}
+                        onChange={(event) => setTaskCreateDraftTitle(event.target.value)}
+                        data-testid="chat-task-create-title"
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
+                        placeholder={t('chat.taskContextUntitled')}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-semibold text-slate-600">
+                        {t('chat.taskCreateCwdLabel')}
+                      </span>
+                      <input
+                        type="text"
+                        value={taskCreateDraftCwd}
+                        onChange={(event) => setTaskCreateDraftCwd(event.target.value)}
+                        data-testid="chat-task-create-cwd"
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-900 outline-none transition focus:border-slate-400 focus:bg-white"
+                        placeholder={t('chat.taskCreateCwdPlaceholder')}
+                      />
+                      <p className="mt-2 text-xs leading-5 text-slate-500">
+                        {t('chat.taskCreateCwdHint')}
+                      </p>
+                    </label>
+                    <div className="flex flex-wrap justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsTaskCreateDialogOpen(false)}
+                        className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                      >
+                        {t('common.cancel')}
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isCreatingTaskWorkspace}
+                        data-testid="chat-task-create-submit"
+                        className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <FolderOpen className="h-4 w-4" strokeWidth={2} />
+                        {isCreatingTaskWorkspace ? t('chat.taskCreateSubmitting') : t('chat.taskCreateSubmit')}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
             
             <div className="relative shrink-0">
               <MessageInput

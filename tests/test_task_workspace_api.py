@@ -50,16 +50,34 @@ class TaskWorkspaceApiTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(task["agent_id"], "main")
                     self.assertEqual(task["conversation_id"], "dm_main")
                     self.assertEqual(task["workspace_mode"], "conversation")
-                    self.assertTrue(task["cwd"].endswith(".horbot-agent/task-workspaces/dm_main"))
+                    self.assertTrue(task["cwd"].endswith(f".horbot/task-workspaces/main/dm_main/{task['id']}"))
                     self.assertTrue(Path(task["cwd"]).exists())
+
+                    second_create_response = await client.post(
+                        "/api/task-workspaces",
+                        json={
+                            "title": "Second task",
+                            "agent_id": "main",
+                            "conversation_id": "dm_main",
+                        },
+                    )
+                    self.assertEqual(second_create_response.status_code, 200)
+                    second_task = second_create_response.json()
+                    self.assertNotEqual(second_task["id"], task["id"])
+                    self.assertNotEqual(second_task["cwd"], task["cwd"])
+                    self.assertTrue(
+                        second_task["cwd"].endswith(
+                            f".horbot/task-workspaces/main/dm_main/{second_task['id']}"
+                        )
+                    )
 
                     (Path(task["cwd"]) / "outline.md").write_text("# Outline\n", encoding="utf-8")
 
                     list_response = await client.get("/api/task-workspaces?conversation_id=dm_main")
                     self.assertEqual(list_response.status_code, 200)
                     tasks = list_response.json()["task_workspaces"]
-                    self.assertEqual(len(tasks), 1)
-                    self.assertEqual(tasks[0]["id"], task["id"])
+                    self.assertEqual(len(tasks), 2)
+                    self.assertTrue(any(item["id"] == task["id"] for item in tasks))
 
                     update_response = await client.patch(
                         f"/api/task-workspaces/{task['id']}",
@@ -76,6 +94,21 @@ class TaskWorkspaceApiTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(files_payload["exists"])
                     self.assertTrue(any(item["path"] == "outline.md" for item in files_payload["files"]))
 
+                    file_response = await client.get(
+                        f"/api/task-workspaces/{task['id']}/file",
+                        params={"path": "outline.md"},
+                    )
+                    self.assertEqual(file_response.status_code, 200)
+                    file_payload = file_response.json()
+                    self.assertEqual(file_payload["path"], "outline.md")
+                    self.assertEqual(file_payload["content"], "# Outline\n")
+
+                    blocked_file_response = await client.get(
+                        f"/api/task-workspaces/{task['id']}/file",
+                        params={"path": "../outside.md"},
+                    )
+                    self.assertEqual(blocked_file_response.status_code, 400)
+
                     changes_response = await client.get(f"/api/task-workspaces/{task['id']}/changes")
                     self.assertEqual(changes_response.status_code, 200)
                     changes_payload = changes_response.json()
@@ -86,22 +119,48 @@ class TaskWorkspaceApiTests(unittest.IsolatedAsyncioTestCase):
                     missing_response = await client.get("/api/task-workspaces/not-found")
                     self.assertEqual(missing_response.status_code, 404)
 
-                    invalid_create_response = await client.post(
+                    external_cwd = root / "outside-task-workspace"
+                    external_create_response = await client.post(
                         "/api/task-workspaces",
                         json={
-                            "title": "Invalid cwd",
+                            "title": "External cwd",
                             "agent_id": "main",
                             "conversation_id": "dm_main",
-                            "cwd": str(root / "outside-task-workspace"),
+                            "cwd": str(external_cwd),
                         },
                     )
-                    self.assertEqual(invalid_create_response.status_code, 400)
-
-                    invalid_update_response = await client.patch(
-                        f"/api/task-workspaces/{task['id']}",
-                        json={"cwd": str(root / "outside-task-workspace")},
+                    self.assertEqual(external_create_response.status_code, 200)
+                    external_task = external_create_response.json()
+                    self.assertEqual(Path(external_task["cwd"]), external_cwd.resolve())
+                    self.assertTrue(external_cwd.exists())
+                    self.assertFalse(
+                        (
+                            horbot_root
+                            / "task-workspaces"
+                            / "main"
+                            / "dm_main"
+                            / external_task["id"]
+                        ).exists()
                     )
-                    self.assertEqual(invalid_update_response.status_code, 400)
+
+                    external_update_cwd = root / "outside-task-workspace-updated"
+                    external_update_response = await client.patch(
+                        f"/api/task-workspaces/{task['id']}",
+                        json={"cwd": str(external_update_cwd)},
+                    )
+                    self.assertEqual(external_update_response.status_code, 200)
+                    self.assertEqual(Path(external_update_response.json()["cwd"]), external_update_cwd.resolve())
+                    self.assertTrue(external_update_cwd.exists())
+
+                    delete_response = await client.delete(f"/api/task-workspaces/{second_task['id']}")
+                    self.assertEqual(delete_response.status_code, 200)
+                    self.assertEqual(delete_response.json()["task_id"], second_task["id"])
+
+                    deleted_get_response = await client.get(f"/api/task-workspaces/{second_task['id']}")
+                    self.assertEqual(deleted_get_response.status_code, 404)
+
+                    missing_delete_response = await client.delete("/api/task-workspaces/not-found")
+                    self.assertEqual(missing_delete_response.status_code, 404)
 
     async def test_filters_by_agent_id(self):
         with tempfile.TemporaryDirectory() as tempdir:

@@ -33,6 +33,19 @@ export interface TaskWorkspaceFilesPayload {
   truncated: boolean;
 }
 
+export interface TaskWorkspaceFilePreview {
+  task_id: string;
+  cwd: string;
+  path: string;
+  name: string;
+  size: number;
+  modified_at?: string;
+  content: string;
+  encoding: string;
+  binary: boolean;
+  truncated: boolean;
+}
+
 export interface TaskWorkspaceChange {
   status: string;
   path: string;
@@ -97,8 +110,23 @@ export const taskWorkspacesService = {
     return response.data;
   },
 
+  delete: async (taskId: string): Promise<void> => {
+    await api.delete(`/api/task-workspaces/${taskId}`);
+  },
+
   listFiles: async (taskId: string, limit = 80): Promise<TaskWorkspaceFilesPayload> => {
     const response = await api.get<TaskWorkspaceFilesPayload>(`/api/task-workspaces/${taskId}/files?limit=${limit}`);
+    return response.data;
+  },
+
+  readFile: async (taskId: string, path: string, maxBytes = 128000): Promise<TaskWorkspaceFilePreview> => {
+    const searchParams = new URLSearchParams({
+      path,
+      max_bytes: String(maxBytes),
+    });
+    const response = await api.get<TaskWorkspaceFilePreview>(
+      `/api/task-workspaces/${taskId}/file?${searchParams.toString()}`,
+    );
     return response.data;
   },
 

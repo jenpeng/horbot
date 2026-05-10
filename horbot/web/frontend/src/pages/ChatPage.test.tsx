@@ -7,6 +7,7 @@ import { ToastProvider } from '../contexts/ToastContext';
 import zhCNMessages from '../i18n/locales/zh-CN';
 import { ChatStreamError, chatService } from '../services/chat';
 import taskWorkspacesService from '../services/taskWorkspaces';
+import type { TaskWorkspace } from '../services/taskWorkspaces';
 import { useConversationStore } from '../stores/conversationStore';
 import { ConversationType, type Conversation, type Message } from '../types/conversation';
 
@@ -29,6 +30,7 @@ vi.mock('../services/taskWorkspaces', () => ({
     list: vi.fn().mockResolvedValue([]),
     create: vi.fn(),
     update: vi.fn(),
+    delete: vi.fn(),
     listFiles: vi.fn().mockResolvedValue({
       task_id: '',
       cwd: '',
@@ -36,6 +38,7 @@ vi.mock('../services/taskWorkspaces', () => ({
       files: [],
       truncated: false,
     }),
+    readFile: vi.fn(),
     listChanges: vi.fn().mockResolvedValue({
       task_id: '',
       cwd: '',
@@ -168,6 +171,8 @@ describe('ChatPage', () => {
     vi.mocked(taskWorkspacesService.list).mockResolvedValue([]);
     vi.mocked(taskWorkspacesService.create).mockReset();
     vi.mocked(taskWorkspacesService.update).mockReset();
+    vi.mocked(taskWorkspacesService.delete).mockReset();
+    vi.mocked(taskWorkspacesService.delete).mockResolvedValue(undefined);
     vi.mocked(taskWorkspacesService.listFiles).mockResolvedValue({
       task_id: '',
       cwd: '',
@@ -175,6 +180,7 @@ describe('ChatPage', () => {
       files: [],
       truncated: false,
     });
+    vi.mocked(taskWorkspacesService.readFile).mockReset();
     vi.mocked(taskWorkspacesService.listChanges).mockResolvedValue({
       task_id: '',
       cwd: '',
@@ -290,9 +296,9 @@ describe('ChatPage', () => {
 
     expect(window.localStorage.getItem('horbot.chat.conversationHeaderCollapsed')).toBe('true');
     expect(screen.getByTestId('chat-conversation-header-details')).toHaveAttribute('aria-hidden', 'true');
-    expect(screen.getByRole('button', { name: /展开|Expand/ })).toBeInTheDocument();
+    expect(screen.getByTestId('chat-header-collapse-toggle')).toHaveAccessibleName(/展开|Expand/);
 
-    fireEvent.click(screen.getByRole('button', { name: /展开|Expand/ }));
+    fireEvent.click(screen.getByTestId('chat-header-collapse-toggle'));
 
     expect(window.localStorage.getItem('horbot.chat.conversationHeaderCollapsed')).toBe('false');
     expect(screen.getByTestId('chat-conversation-header-details')).toHaveAttribute('aria-hidden', 'false');
@@ -2067,7 +2073,7 @@ describe('ChatPage', () => {
     });
 
     const agentButton = screen.getAllByRole('button').find((button) => (
-      button.textContent?.includes('Agent A')
+      button.getAttribute('title') === 'Agent A' || button.textContent?.includes('Agent A')
     ));
     expect(agentButton).toBeTruthy();
     fireEvent.click(agentButton as HTMLButtonElement);
@@ -2086,9 +2092,9 @@ describe('ChatPage', () => {
     });
   });
 
-  it('creates and selects a task workspace from the task context strip', async () => {
+  it('creates and selects a task workspace from the Codex-style task shell', async () => {
     const conversationId = 'dm_agent-a';
-    const createdTask = {
+    const createdTask: TaskWorkspace = {
       id: 'tw_test',
       title: 'Create launch deck',
       agent_id: 'agent-a',
@@ -2114,13 +2120,32 @@ describe('ChatPage', () => {
       exists: true,
       files: [
         {
-          path: 'outline.md',
+          path: 'slides',
+          name: 'slides',
+          kind: 'directory',
+          size: null,
+          modified_at: new Date().toISOString(),
+        },
+        {
+          path: 'slides/outline.md',
           name: 'outline.md',
           kind: 'file',
           size: 128,
           modified_at: new Date().toISOString(),
         },
       ],
+      truncated: false,
+    });
+    vi.mocked(taskWorkspacesService.readFile).mockResolvedValue({
+      task_id: 'tw_test',
+      cwd: createdTask.cwd,
+      path: 'slides/outline.md',
+      name: 'outline.md',
+      size: 128,
+      modified_at: new Date().toISOString(),
+      content: '# Launch deck\n\nPreview content',
+      encoding: 'utf-8',
+      binary: false,
       truncated: false,
     });
     vi.mocked(taskWorkspacesService.listChanges).mockResolvedValue({
@@ -2185,16 +2210,56 @@ describe('ChatPage', () => {
     renderWithProviders(<ChatPage />);
 
     await waitFor(() => {
-      expect(screen.getByText(/新建任务|New task/)).toBeInTheDocument();
+      expect(screen.getByTestId('chat-create-task-workspace')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText(/新建任务|New task/));
+    fireEvent.click(screen.getByTestId('chat-create-task-workspace'));
 
     await waitFor(() => {
+      expect(screen.getByTestId('chat-task-create-cwd')).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByTestId('chat-task-create-cwd'), {
+      target: { value: '/tmp/horbot/custom-task-workdir' },
+    });
+    fireEvent.click(screen.getByTestId('chat-task-create-submit'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-task-workspace-sidebar')).toBeInTheDocument();
       expect(screen.getByTestId('chat-task-inspector')).toBeInTheDocument();
-      expect(screen.getByText(/任务列表|Task list/)).toBeInTheDocument();
+      expect(screen.getByTestId('chat-task-workspace-sidebar')).toHaveClass('w-[15.5rem]');
+      expect(screen.getByTestId('chat-task-inspector')).toHaveClass('basis-1/2');
+      expect(screen.getByTestId('chat-task-inspector')).toHaveClass('flex-1');
+      expect(screen.getByText(/任务|Tasks/)).toBeInTheDocument();
+      expect(screen.getByText(/上下文|Context/)).toBeInTheDocument();
       expect(screen.getAllByText('Create launch deck').length).toBeGreaterThan(0);
       expect(screen.getAllByText('/tmp/horbot/task-workspaces/dm_agent-a').length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByTestId('chat-task-workspace-sidebar-collapse'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-task-workspace-sidebar')).toHaveClass('w-14');
+      expect(screen.getByRole('button', { name: /展开任务列表|Expand task list/ })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /展开任务列表|Expand task list/ }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-task-workspace-sidebar')).toHaveClass('w-[15.5rem]');
+    });
+
+    fireEvent.click(screen.getByTestId('chat-task-context-panel-collapse'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-task-inspector')).toHaveClass('w-14');
+      expect(screen.getByRole('button', { name: /展开上下文面板|Expand context panel/ })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /展开上下文面板|Expand context panel/ }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-task-inspector')).toHaveClass('basis-1/2');
+      expect(screen.getByTestId('chat-task-inspector')).toHaveClass('flex-1');
     });
 
     fireEvent.click(screen.getByText(/变更|Changes/));
@@ -2204,10 +2269,32 @@ describe('ChatPage', () => {
       expect(screen.getByText('M outline.md')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByText(/文件|Files/));
+
+    await waitFor(() => {
+      expect(screen.getByText(/文件结构|File tree/)).toBeInTheDocument();
+      expect(screen.getByText('slides')).toBeInTheDocument();
+      expect(screen.getByText('outline.md')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('outline.md'));
+
+    await waitFor(() => {
+      expect(taskWorkspacesService.readFile).toHaveBeenCalledWith('tw_test', 'slides/outline.md');
+      expect(screen.getByText(/Preview content/)).toBeInTheDocument();
+    });
+
     fireEvent.click(screen.getByText(/标记完成|Mark done/));
 
     await waitFor(() => {
       expect(taskWorkspacesService.update).toHaveBeenCalledWith('tw_test', { status: 'done' });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /删除任务|Delete task/ }));
+
+    await waitFor(() => {
+      expect(taskWorkspacesService.delete).toHaveBeenCalledWith('tw_test');
+      expect(screen.queryByTestId('chat-task-workspace-card-tw_test')).not.toBeInTheDocument();
     });
 
     expect(taskWorkspacesService.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -2215,13 +2302,14 @@ describe('ChatPage', () => {
       agent_id: 'agent-a',
       conversation_id: conversationId,
       session_key: 'web:dm_agent-a',
+      cwd: '/tmp/horbot/custom-task-workdir',
       workspace_mode: 'conversation',
     }));
   });
 
   it('passes the selected task workspace context when sending chat', async () => {
     const conversationId = 'dm_agent-a';
-    const selectedTask = {
+    const selectedTask: TaskWorkspace = {
       id: 'tw_selected',
       title: 'Selected task',
       agent_id: 'agent-a',
@@ -2306,5 +2394,39 @@ describe('ChatPage', () => {
       task_workspace_id: 'tw_selected',
       task_workspace_cwd: '/tmp/horbot/task-workspaces/selected',
     }));
+  });
+
+  it('opens the conversation sidebar collapsed by default and preserves explicit expansion', async () => {
+    seedConversationStore({
+      id: 'dm_agent-a',
+      type: ConversationType.DM,
+      targetId: 'agent-a',
+      name: 'Agent A',
+      agentIds: ['agent-a'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const { unmount } = renderWithProviders(<ChatPage />);
+
+    const expandSidebarButton = await screen.findByRole('button', { name: /展开会话侧栏|Expand conversation sidebar/ });
+    expect(screen.getByTestId('chat-conversation-sidebar')).toHaveClass('w-16');
+    expect(window.localStorage.getItem('horbot.chat.conversationSidebarCollapsed')).toBe('true');
+
+    fireEvent.click(expandSidebarButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /折叠会话侧栏|Collapse conversation sidebar/ })).toBeInTheDocument();
+      expect(screen.getByTestId('chat-conversation-sidebar')).toHaveClass('w-64');
+    });
+    expect(window.localStorage.getItem('horbot.chat.conversationSidebarCollapsed')).toBe('false');
+
+    unmount();
+    renderWithProviders(<ChatPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /折叠会话侧栏|Collapse conversation sidebar/ })).toBeInTheDocument();
+      expect(screen.getByTestId('chat-conversation-sidebar')).toHaveClass('w-64');
+    });
   });
 });

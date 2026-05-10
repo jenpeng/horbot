@@ -11,7 +11,7 @@ from horbot.web.task_workspace_store import (
     TaskWorkspaceCreate,
     TaskWorkspaceStore,
     TaskWorkspaceUpdate,
-    build_conversation_task_cwd,
+    build_task_workspace_cwd,
     normalize_task_workspace_cwd,
 )
 
@@ -44,20 +44,27 @@ def create_task_workspace_router(
     async def create_task_workspace(request: TaskWorkspaceCreate):
         try:
             _, base_workspace = resolve_agent_workspace_for_request(request.agent_id)
-            default_cwd = build_conversation_task_cwd(
-                base_workspace=base_workspace,
-                conversation_id=request.conversation_id,
-                session_key=request.session_key,
-            )
             if request.cwd:
+                transient_default_cwd = base_workspace
                 request = request.model_copy(update={
                     "cwd": str(normalize_task_workspace_cwd(
                         request.cwd,
                         agent_workspace=base_workspace,
-                        default_cwd=default_cwd,
+                        default_cwd=transient_default_cwd,
+                        allow_external=True,
                     )),
                 })
-            task = get_store().create(request, default_cwd=default_cwd)
+            store = get_store()
+            task = store.create(
+                request,
+                default_cwd_factory=lambda task_id: build_task_workspace_cwd(
+                    data_root=store.root,
+                    agent_id=request.agent_id,
+                    conversation_id=request.conversation_id,
+                    session_key=request.session_key,
+                    task_id=task_id,
+                ),
+            )
             return task.model_dump()
         except HTTPException:
             raise
@@ -85,6 +92,7 @@ def create_task_workspace_router(
                         request.cwd,
                         agent_workspace=base_workspace,
                         default_cwd=Path(existing.cwd),
+                        allow_external=True,
                     )),
                 })
         except HTTPException:
@@ -97,9 +105,34 @@ def create_task_workspace_router(
             raise HTTPException(status_code=404, detail="Task workspace not found")
         return task.model_dump()
 
+    @router.delete("/task-workspaces/{task_id}")
+    async def delete_task_workspace(task_id: str):
+        deleted = get_store().delete(task_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Task workspace not found")
+        return {"deleted": True, "task_id": task_id}
+
     @router.get("/task-workspaces/{task_id}/files")
     async def list_task_workspace_files(task_id: str, limit: int = Query(default=80, ge=1, le=300)):
         payload = get_store().list_files(task_id, limit=limit)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Task workspace not found")
+        return payload
+
+    @router.get("/task-workspaces/{task_id}/file")
+    async def read_task_workspace_file(
+        task_id: str,
+        path: str = Query(..., min_length=1),
+        max_bytes: int = Query(default=128_000, ge=1, le=512_000),
+    ):
+        try:
+            payload = get_store().read_file(task_id, path, max_bytes=max_bytes)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except IsADirectoryError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if payload is None:
             raise HTTPException(status_code=404, detail="Task workspace not found")
         return payload
